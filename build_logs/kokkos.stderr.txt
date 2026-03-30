@@ -1,0 +1,4 @@
+fatal: destination path 'kokkos' already exists and is not an empty directory.
+bash: check_exit_status: command not found
+bash: check_exit_status: command not found
+bash: check_exit_status: command not found

@@ -1,0 +1,3 @@
+# Agent and ad-hoc runs; keep directory with .gitkeep only
+generated/*
+!generated/.gitkeep

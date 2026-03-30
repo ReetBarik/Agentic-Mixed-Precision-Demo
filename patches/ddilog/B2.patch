@@ -1,0 +1,5 @@
+--- a/src/kokkosUtils.h
++++ b/src/kokkosUtils.h
+@@ -218 +218 @@
+-        TMass B2 = TMass(ql::Constants<TMass>::_zero());
++        float B2 = static_cast<float>(TMass(ql::Constants<TMass>::_zero()));

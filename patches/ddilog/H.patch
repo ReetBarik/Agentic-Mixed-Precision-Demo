@@ -1,0 +1,5 @@
+--- a/src/kokkosUtils.h
++++ b/src/kokkosUtils.h
+@@ -215 +215 @@
+-        const TMass H = Y + Y - TMass(ql::Constants<TMass>::_one());
++        const float H = static_cast<float>(Y + Y - TMass(ql::Constants<TMass>::_one()));

@@ -1,0 +1,5 @@
+--- a/src/kokkosUtils.h
++++ b/src/kokkosUtils.h
+@@ -216 +216 @@
+-        const TMass ALFA = H + H;
++        const float ALFA = static_cast<float>(H + H);

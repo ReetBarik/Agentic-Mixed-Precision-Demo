@@ -1,0 +1,5 @@
+--- a/src/kokkosUtils.h
++++ b/src/kokkosUtils.h
+@@ -171 +171 @@
+-        TMass Y;
++        float Y;
