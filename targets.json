@@ -32,7 +32,7 @@
   },
 
   "numerical_contract_defaults": {
-    "notes": "Override per driver when needed. Used by future compare / agent loops.",
+    "notes": "Override per driver when needed. Used by future compare tooling (e.g. LLM agent in docs/TODO.md).",
     "relative_tolerance": null,
     "absolute_tolerance": null
   },

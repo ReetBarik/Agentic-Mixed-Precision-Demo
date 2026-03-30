@@ -4,11 +4,11 @@ This document records **why** the repository is structured the way it is, so you
 
 ## Overall goal
 
-The project supports an **agentic mixed-precision workflow** (future: LangGraph or similar) that will:
+The project supports **mixed-precision experiments** on Kokkos-backed targets and is set up so an **LLM-based agent** (see **`docs/TODO.md`**) can later propose source changes and verify them against the same pipeline. Today the repo provides:
 
-1. Build and run **drivers** that exercise selected functions (e.g. `ddilog` in `kokkosUtils.h`) with reproducible random inputs.
-2. Compare **double-precision baselines** to runs where individual locals are downcast to `float`.
-3. Emit **accepted source changes** when error stays below a threshold.
+1. **Drivers** that exercise selected functions (e.g. `ddilog` in `kokkosUtils.h`) with reproducible random inputs.
+2. Comparison of **double-precision baselines** to runs where individual locals are downcast to `float` (via hand-authored patches).
+3. Scripts to **sweep** or **greedily combine** those patches under a precision threshold — not an LLM; the LLM agent is **not** implemented here yet.
 
 The repository is intentionally split so that **environment/build** concerns stay separate from **which function** is under test. That separation makes it easy to add drivers without rewriting orchestration.
 
@@ -50,9 +50,9 @@ The repository is intentionally split so that **environment/build** concerns sta
 
 (e.g. `source scripts/compile.sh /path/to/Agentic-Mixed-Precision-Demo`). This is the step to use after changing `src/kokkosUtils.h` or drivers; it does **not** re-clone or rebuild Kokkos. **`build_with_Kokkos.sh`** is for bootstrapping Kokkos + project the first time (and is not written to skip Kokkos if the clone already exists—use **`compile.sh`** for day-to-day rebuilds).
 
-**One-shot experiment:** `scripts/run_ddilog_experiment.sh` runs `compile.sh` (unless `--no-build`), then `build/ddilog_driver`, then `compare_results.py` against `baselines/ddilog/ddilog_baseline_<batch>_<seed>.csv` by default. CSV output defaults to `experiments/ddilog/generated/ddilog_run_<batch>_<seed>_<timestamp>.csv`; that directory’s contents are gitignored except `.gitkeep`.
+**One-shot experiment:** `scripts/run_experiment.sh [--driver <id>]` is the catalog-driven entry (default driver `ddilog`). **`scripts/run_ddilog_experiment.sh`** is a thin wrapper (`--driver ddilog`). The script runs `compile.sh` (unless `--no-build`), then the driver from `targets.json`, then `compare_results.py` against `baselines/<id>/<id>_baseline_<batch>_<seed>.csv` by default. CSV output defaults to `experiments/<id>/generated/<id>_run_<batch>_<seed>_<timestamp>.csv`; that directory’s contents are gitignored except `.gitkeep`.
 
-**Mutation patches (`patches/ddilog/`):** Each candidate id has a unified diff `<id>.patch` (paths `a/src/kokkosUtils.h`, apply with `patch -p1` from repo root). Patches use **minimal context** (`n=0`) so multiple ids can be **stacked** in a fixed order (**`T` → `Y` → `S` → `A` → `H` → `ALFA` → `B1` → `B2` → `B0`**; see **`PATCH_ORDER`** in `ddilog_mutation_combo_greedy.py`). Locals **`Y`, `S`, `A`** and **`B1`, `B2`, `B0`** are each on **their own line** in `kokkosUtils.h` so their patches do not fight over one declaration line. **`scripts/apply_ddilog_patch.sh apply|revert <id>`** applies or reverses one patch. **`scripts/ddilog_mutation_sweep.py`** exercises **one id per run** (`--id` or `--all`). **`scripts/ddilog_mutation_combo_greedy.py`** runs a **deterministic greedy** search (sorted try order; **`--tie-break margin|first`**); it is **not** random—multi-start shuffling is not implemented. It writes JSON under **`experiments/ddilog/generated/`**. Regenerate patches if `ddilog` changes materially. **`targets.json`** lists **`patches_available`**.
+**Mutation patches (`patches/<driver>/`):** Each candidate id has a unified diff `<id>.patch` (paths `a/src/kokkosUtils.h`, apply with `patch -p1` from repo root). Patches use **minimal context** (`n=0`) so multiple ids can be **stacked** in the order of **`mutation_candidates.locals`** in **`targets.json`** (for `ddilog`: **`T` → `Y` → `S` → `A` → `H` → `ALFA` → `B1` → `B2` → `B0`**). Locals **`Y`, `S`, `A`** and **`B1`, `B2`, `B0`** are each on **their own line** in `kokkosUtils.h` so their patches do not fight over one declaration line. **`scripts/apply_mutation_patch.py apply|revert <driver_id> <id>`** applies or reverses one patch; **`scripts/apply_ddilog_patch.sh`** remains a **`ddilog`** wrapper. **`scripts/mutation_sweep.py --driver <id>`** exercises **one id per run** (`--id` or `--all`). **`scripts/mutation_combo_greedy.py`** runs a **deterministic greedy** search (sorted try order; **`--tie-break margin|first`**); it is **not** random—multi-start shuffling is not implemented. It writes JSON under **`experiments/<driver>/generated/`**. Regenerate patches if the target function changes materially. **`targets.json`** lists **`patches_available`**.
 
 **Reasoning:** These existed before the JSON manifest; `workflow.json` **documents** the intended `source ...` commands rather than hiding them inside Python. That keeps debugging familiar for HPC users and allows running the pipeline by hand without an agent.
 
@@ -69,9 +69,11 @@ Driver output uses a **header row**, a **metadata row** (line 2, starts with `#`
 
 ## What is intentionally *not* in this repo yet
 
-- **LangGraph graph definition** — orchestration can call existing scripts (`workflow.json` → **`ddilog_mutation`**); no graph code in-tree yet.
+- **LangGraph graph definition** — orchestration can call existing scripts (`workflow.json` → **`mutation`** / **`ddilog_mutation`**); no graph code in-tree yet.
 
-Patch apply, single-id sweep, and greedy combo are **implemented** (`scripts/apply_ddilog_patch.sh`, `ddilog_mutation_sweep.py`, `ddilog_mutation_combo_greedy.py`).
+- **LLM-based agent** (propose or revise patches, then verify with compile → driver → `compare_results.py`) — not in-tree yet; see **`docs/TODO.md`**.
+
+Patch apply, single-id sweep, and greedy combo are **implemented**. The **`ddilog_*`** script names remain as thin wrappers for **`ddilog`**.
 
 ## Checklist: adding a new target function
 
@@ -91,10 +93,16 @@ Patch apply, single-id sweep, and greedy combo are **implemented** (`scripts/app
 | `experiments/<id>/` | Smoke tests and non-golden experiment CSVs |
 | `docs/DESIGN.md` | This rationale (human-oriented) |
 | `scripts/compare_results.py` | Baseline vs candidate CSV validation |
-| `scripts/run_ddilog_experiment.sh` | Optional incremental build, `ddilog_driver`, then `compare_results.py` |
-| `scripts/apply_ddilog_patch.sh` | Apply or revert `patches/ddilog/<id>.patch` |
-| `scripts/ddilog_mutation_sweep.py` | Apply → experiment → revert for ids with patch files |
-| `scripts/ddilog_mutation_combo_greedy.py` | Greedy multi-float set under `--min-digits` |
+| `scripts/run_experiment.sh` | Optional incremental build, driver from `targets.json`, then `compare_results.py` |
+| `scripts/run_ddilog_experiment.sh` | Wrapper: `run_experiment.sh --driver ddilog` |
+| `scripts/apply_mutation_patch.py` | Apply or revert `patches/<driver>/<id>.patch` |
+| `scripts/apply_ddilog_patch.sh` | Wrapper: `apply_mutation_patch.py` for `ddilog` |
+| `scripts/mutation_sweep.py` | Apply → experiment → revert (`--driver`) |
+| `scripts/ddilog_mutation_sweep.py` | Wrapper: `mutation_sweep.py --driver ddilog` |
+| `scripts/mutation_combo_greedy.py` | Greedy multi-float set under `--min-digits` (`--driver`) |
+| `scripts/ddilog_mutation_combo_greedy.py` | Wrapper: `mutation_combo_greedy.py --driver ddilog` |
+| `scripts/mutation_trial.py` | Single-local apply → experiment → revert (used by `mutation_sweep.py`) |
+| `scripts/targets_lib.py` | Shared `targets.json` helpers for Python tools |
 | `patches/ddilog/*.patch` | Per-local diffs vs `src/kokkosUtils.h` (stackable for combo) |
 | `experiments/ddilog/generated/` | Default output for ad-hoc runs (contents gitignored except `.gitkeep`) |
 

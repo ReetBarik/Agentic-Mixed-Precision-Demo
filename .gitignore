@@ -1,0 +1,13 @@
+# Local session notes (untracked)
+docs/Session context.md
+
+# Local Kokkos clone (use build_with_Kokkos.sh / prepare workflow)
+kokkos/
+
+# Python caches
+**/__pycache__/
+*.py[cod]
+
+# Local virtual environments
+.venv/
+venv/

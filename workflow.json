@@ -51,15 +51,28 @@
     "see_also": "targets.json default_cli, baseline_layout, and drivers[]"
   },
 
+  "experiment": {
+    "script": "scripts/run_experiment.sh",
+    "description": "Incremental build (optional), run a driver from targets.json (--driver ID, default ddilog), compare to baseline. Default output under experiments/<id>/generated/."
+  },
+
   "ddilog_experiment": {
     "script": "scripts/run_ddilog_experiment.sh",
-    "description": "Incremental build (optional), run ddilog_driver, compare to baseline. Default output under experiments/ddilog/generated/."
+    "description": "Wrapper: run_experiment.sh --driver ddilog. Same as experiment for the ddilog driver only."
+  },
+
+  "mutation": {
+    "apply_patch": "scripts/apply_mutation_patch.py apply|revert <driver_id> <patch_id>",
+    "sweep": "scripts/mutation_sweep.py --driver <id> --id <patch_id> | --all",
+    "combo_greedy": "scripts/mutation_combo_greedy.py [--driver <id>] [--min-digits 10] [--tie-break margin|first]",
+    "patches": "${PROJECT_ROOT}/patches/<driver>/<patch_id>.patch (paths from targets.json mutation_candidates.patches_directory)"
   },
 
   "ddilog_mutation": {
-    "apply_patch": "scripts/apply_ddilog_patch.sh apply|revert <id>",
+    "apply_patch": "scripts/apply_ddilog_patch.sh apply|revert <id> (wrapper for apply_mutation_patch.py ddilog)",
     "sweep": "scripts/ddilog_mutation_sweep.py --id <id> | --all",
     "combo_greedy": "scripts/ddilog_mutation_combo_greedy.py [--min-digits 10] [--tie-break margin|first]",
-    "patches": "patches/ddilog/<id>.patch"
+    "patches": "patches/ddilog/<id>.patch",
+    "same_as": "mutation with driver id ddilog"
   }
 }
