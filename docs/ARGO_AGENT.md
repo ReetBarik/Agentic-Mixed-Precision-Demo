@@ -106,6 +106,65 @@ This prints a final JSON verdict with:
 - pass/fail
 - patch file path
 - verify report path
+- per-attempt history and best-so-far summary
+
+Useful modes:
+
+- Retry loop: `--max-iterations 5`
+- Guided search over known locals: `--guided-search`
+- Guided search for specific vars: `--focus-vars H,ALFA`
+- Hybrid curated-first baseline before LLM retries: `--hybrid-curated-first`
+
+Guided mode now applies lightweight policy checks before verify (single target file,
+small patch size, focus-variable presence). Rejected proposals are marked with
+`"policy_reject"` in attempt records.
+
+Example:
+
+```bash
+python3.12 -m llm_agent.run_episode \
+  --driver ddilog \
+  --base-url http://127.0.0.1:8092 \
+  --min-digits 7 \
+  --batch 10 \
+  --seed 123 \
+  --guided-search \
+  --max-iterations 3 \
+  --hybrid-curated-first
+```
+
+## Greedy accumulation episode (LLM)
+
+This mode mimics greedy combo behavior with LLM proposals:
+
+1. pick one semantic variable
+2. propose one focused patch for that variable
+3. verify on top of already-accepted patch stack
+4. accept/reject variable, then move to next
+
+```bash
+python3.12 -m llm_agent.run_greedy_episode \
+  --driver ddilog \
+  --base-url http://127.0.0.1:8092 \
+  --min-digits 7 \
+  --batch 10 \
+  --seed 123 \
+  --max-iterations-per-candidate 2
+```
+
+Optional subset/order:
+
+```bash
+python3.12 -m llm_agent.run_greedy_episode \
+  --driver ddilog \
+  --base-url http://127.0.0.1:8092 \
+  --min-digits 7 \
+  --focus-vars S,Y,B0
+```
+
+Implementation note: in guided/greedy focus mode, proposer uses a two-stage
+format (`old_line`/`new_line` JSON from LLM) and then generates the unified
+diff deterministically in code.
 
 Defaults:
 

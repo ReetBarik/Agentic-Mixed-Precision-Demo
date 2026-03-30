@@ -4,6 +4,9 @@ docs/Session context.md
 # Local Kokkos clone (use build_with_Kokkos.sh / prepare workflow)
 kokkos/
 
+# Build / experiment logs (regenerated locally)
+build_logs/
+
 # Python caches
 **/__pycache__/
 *.py[cod]

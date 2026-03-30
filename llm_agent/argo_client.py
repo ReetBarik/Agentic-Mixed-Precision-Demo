@@ -40,7 +40,14 @@ class ArgoClient(object):
             )
         self._requests = _requests
 
-    def _payload(self, model, messages, temperature=None, max_tokens=None):
+    def _payload(
+        self,
+        model,
+        messages,
+        temperature=None,
+        max_tokens=None,
+        response_format=None,
+    ):
         payload = {
             "model": model,
             "user": self.user,
@@ -51,6 +58,8 @@ class ArgoClient(object):
         # Some Argo model adapters reject null or unsupported max_tokens.
         if max_tokens is not None:
             payload["max_tokens"] = max_tokens
+        if response_format is not None:
+            payload["response_format"] = response_format
         return payload
 
     def _post(self, payload):
@@ -63,9 +72,23 @@ class ArgoClient(object):
             )
         return response.json()
 
-    def chat(self, messages, model=None, temperature=None, max_tokens=None, allow_fallback=True):
+    def chat(
+        self,
+        messages,
+        model=None,
+        temperature=None,
+        max_tokens=None,
+        response_format=None,
+        allow_fallback=True,
+    ):
         chosen = model or self.model
-        payload = self._payload(chosen, messages, temperature=temperature, max_tokens=max_tokens)
+        payload = self._payload(
+            chosen,
+            messages,
+            temperature=temperature,
+            max_tokens=max_tokens,
+            response_format=response_format,
+        )
         try:
             return self._post(payload)
         except RuntimeError as exc:
@@ -81,6 +104,7 @@ class ArgoClient(object):
                 messages,
                 temperature=temperature,
                 max_tokens=max_tokens,
+                response_format=response_format,
             )
             return self._post(payload)
 

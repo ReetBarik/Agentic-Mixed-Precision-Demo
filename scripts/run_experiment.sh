@@ -118,16 +118,16 @@ mkdir -p "$(dirname "$OUTPUT")"
 DRIVER="${ROOT}/${EXEC_REL}"
 COMPARE="${ROOT}/scripts/compare_results.py"
 
-if [[ ! -f "$DRIVER" ]]; then
-  echo "error: driver not found: $DRIVER (build the project first)" >&2
-  exit 2
-fi
-
 cd "$ROOT"
 
 if [[ "$SKIP_BUILD" -eq 0 ]]; then
   # shellcheck source=/dev/null
   source "${ROOT}/scripts/compile.sh" "${ROOT}"
+fi
+
+if [[ ! -f "$DRIVER" ]]; then
+  echo "error: driver not found: $DRIVER (build the project first)" >&2
+  exit 2
 fi
 
 "$DRIVER" "${BATCH}" "${OUTPUT}" "${SEED}"
