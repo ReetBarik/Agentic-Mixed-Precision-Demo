@@ -149,7 +149,8 @@ python3.12 -m llm_agent.run_greedy_episode \
   --min-digits 7 \
   --batch 10 \
   --seed 123 \
-  --max-iterations-per-candidate 2
+  --max-iterations-per-candidate 2 \
+  --max-propose-retries 3
 ```
 
 Optional subset/order:
@@ -162,9 +163,15 @@ python3.12 -m llm_agent.run_greedy_episode \
   --focus-vars S,Y,B0
 ```
 
-Implementation note: in guided/greedy focus mode, proposer uses a two-stage
-format (`old_line`/`new_line` JSON from LLM) and then generates the unified
-diff deterministically in code.
+Implementation notes:
+
+- In guided/greedy focus mode, proposer uses a two-stage format
+  (`old_line`/`new_line` JSON from LLM) and then generates the unified diff
+  deterministically in code.
+- Guided mode validates strict JSON schema and performs one repair pass when
+  the first LLM response is malformed.
+- `--max-propose-retries` handles proposal-format/transport failures separately
+  from semantic candidate iterations.
 
 Defaults:
 

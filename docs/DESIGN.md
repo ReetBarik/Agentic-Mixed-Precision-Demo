@@ -4,11 +4,12 @@ This document records **why** the repository is structured the way it is, so you
 
 ## Overall goal
 
-The project supports **mixed-precision experiments** on Kokkos-backed targets and is set up so an **LLM-based agent** (see **`docs/TODO.md`**) can later propose source changes and verify them against the same pipeline. Today the repo provides:
+The project supports **mixed-precision experiments** on Kokkos-backed targets and includes an **LLM-based agent workflow** that can propose source changes and verify them against the same pipeline. Today the repo provides:
 
 1. **Drivers** that exercise selected functions (e.g. `ddilog` in `kokkosUtils.h`) with reproducible random inputs.
 2. Comparison of **double-precision baselines** to runs where individual locals are downcast to `float` (via hand-authored patches).
-3. Scripts to **sweep** or **greedily combine** those patches under a precision threshold — not an LLM; the LLM agent is **not** implemented here yet.
+3. Scripts to **sweep** or **greedily combine** hand-authored mutation patches under a precision threshold.
+4. LLM tooling (`llm_agent/`) for propose→verify episodes and greedy accumulation under policy and precision constraints.
 
 The repository is intentionally split so that **environment/build** concerns stay separate from **which function** is under test. That separation makes it easy to add drivers without rewriting orchestration.
 
@@ -70,10 +71,9 @@ Driver output uses a **header row**, a **metadata row** (line 2, starts with `#`
 ## What is intentionally *not* in this repo yet
 
 - **LangGraph graph definition** — orchestration can call existing scripts (`workflow.json` → **`mutation`** / **`ddilog_mutation`**); no graph code in-tree yet.
+- **Broad multi-target coverage** — `targets.json` is extensible, but the main configured target remains `ddilog` until more drivers are added.
 
-- **LLM-based agent** (propose or revise patches, then verify with compile → driver → `compare_results.py`) — not in-tree yet; see **`docs/TODO.md`**.
-
-Patch apply, single-id sweep, and greedy combo are **implemented**. The **`ddilog_*`** script names remain as thin wrappers for **`ddilog`**.
+Patch apply, single-id sweep, greedy combo, and LLM propose/verify flows are **implemented**. The **`ddilog_*`** script names remain as thin wrappers for **`ddilog`**.
 
 ## Checklist: adding a new target function
 

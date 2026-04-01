@@ -1,16 +1,21 @@
 # Future work
 
-## LLM-based mixed-precision agent (not implemented)
+## LLM-based mixed-precision agent (implemented baseline; extend next)
 
-**Goal:** An **in-repo** agent that uses an **LLM** to propose or revise source changes (unified diffs against `mutation_candidates.implementation_relative`), then **verifies** them with the existing pipeline: `compile.sh` → driver → `compare_results.py` vs double baseline, with a precision threshold from `compare_results.py` / `--min-digits`.
+**Current status:** The in-repo LLM workflow is available in `llm_agent/`:
 
-**Rough shape:**
+- Propose-only patch generation (`patch_proposer`)
+- Isolated verify (`patch_verify`)
+- One-shot propose→verify episodes with retries (`run_episode`)
+- Greedy accumulation over semantic vars (`run_greedy_episode`)
 
-- Read **`targets.json`** and the implementation file for the chosen driver (e.g. `ql::ddilog` in `src/kokkosUtils.h`).
-- LLM proposes a patch (or iterates after failure); apply with `patch -p1` or equivalent; optional LangGraph-style graph is fine as long as the **LLM is the proposal step**.
-- Reuse **`scripts/run_experiment.sh`**, **`scripts/apply_mutation_patch.py`**, **`scripts/compare_results.py`**, and hand-authored **`patches/<driver>/`** as references or starting points — the agent is **not** a rename of those scripts.
+The current flow already reuses the existing compile/driver/compare pipeline and records per-attempt results under `experiments/<driver>/generated/`.
 
-**Status:** Not in this repository yet. Patches under `patches/ddilog/` remain **human-curated**; sweep/combo scripts only **search** fixed patch sets.
+**Next goals:**
+
+- Expand coverage beyond `ddilog` by adding more drivers in `targets.json` + `driver/<id>_driver.cc`.
+- Improve coupled-variable handling so policy checks do not over-prune valid proposals for tightly linked symbols.
+- Add richer run-level metrics (e.g., proposal format failures, policy rejects, numeric fails) for easier diagnostics across episodes.
 
 ## Improve proposal summarizer robustness
 

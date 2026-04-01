@@ -7,6 +7,11 @@ kokkos/
 # Build / experiment logs (regenerated locally)
 build_logs/
 
+# Generated onboarding artifacts (ephemeral validation outputs)
+experiments/*/generated/
+experiments/*/generated_driver/
+experiments/tmp/target_specs_draft.json
+
 # Python caches
 **/__pycache__/
 *.py[cod]
