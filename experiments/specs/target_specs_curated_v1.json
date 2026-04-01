@@ -100,7 +100,10 @@
       "call": {
         "expression": "ql::Li2omrat<TOutput, TMass, TScale>({x}, {y})"
       },
-      "locals_for_downcast": []
+      "locals_for_downcast": [
+        "omarg",
+        "arg"
+      ]
     },
     {
       "id": "l0",
@@ -132,7 +135,10 @@
       "call": {
         "expression": "ql::L0<TOutput, TMass, TScale>({x}, {y})"
       },
-      "locals_for_downcast": []
+      "locals_for_downcast": [
+        "L0",
+        "denom"
+      ]
     },
     {
       "id": "l1",
@@ -164,7 +170,10 @@
       "call": {
         "expression": "ql::L1<TOutput, TMass, TScale>({x}, {y})"
       },
-      "locals_for_downcast": []
+      "locals_for_downcast": [
+        "L1",
+        "denom"
+      ]
     },
     {
       "id": "li2omx_real",
@@ -210,7 +219,14 @@
       "call": {
         "expression": "ql::Li2omx<TOutput, TMass, TScale>({x1}, {x2}, {ieps1}, {ieps2})"
       },
-      "locals_for_downcast": []
+      "locals_for_downcast": [
+        "prod",
+        "Li2omx",
+        "arg",
+        "ieps",
+        "lnarg",
+        "lnomarg"
+      ]
     },
     {
       "id": "li2omx2_real",
@@ -256,7 +272,15 @@
       "call": {
         "expression": "ql::Li2omx2<TOutput, TMass, TScale>({v}, {w}, {x}, {y})"
       },
-      "locals_for_downcast": []
+      "locals_for_downcast": [
+        "arg",
+        "omarg",
+        "prod",
+        "Li2omx2",
+        "arg2",
+        "lnarg",
+        "lnomarg"
+      ]
     }
   ]
 }
