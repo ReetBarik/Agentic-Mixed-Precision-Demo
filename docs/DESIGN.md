@@ -9,7 +9,7 @@ The project supports **mixed-precision experiments** on Kokkos-backed targets an
 1. **Drivers** that exercise selected functions (e.g. `ddilog` in `kokkosUtils.h`) with reproducible random inputs.
 2. Comparison of **double-precision baselines** to runs where individual locals are downcast to `float` (via hand-authored patches).
 3. Scripts to **sweep** or **greedily combine** hand-authored mutation patches under a precision threshold.
-4. LLM tooling (`llm_agent/`) for propose→verify episodes and greedy accumulation under policy and precision constraints.
+4. LLM tooling (`llm_agent/`) for propose→verify episodes, greedy accumulation, and spec-driven onboarding/validation via ephemeral drivers.
 
 The repository is intentionally split so that **environment/build** concerns stay separate from **which function** is under test. That separation makes it easy to add drivers without rewriting orchestration.
 
@@ -94,6 +94,8 @@ Patch apply, single-id sweep, greedy combo, and LLM propose/verify flows are **i
 | `docs/DESIGN.md` | This rationale (human-oriented) |
 | `scripts/compare_results.py` | Baseline vs candidate CSV validation |
 | `scripts/run_experiment.sh` | Optional incremental build, driver from `targets.json`, then `compare_results.py` |
+| `llm_agent/onboard_target.py` | Spec-driven onboarding/validation without editing `targets.json` or `CMakeLists.txt` |
+| `experiments/specs/target_specs_curated_v1.json` | Curated onboarding targets for `onboard_target.py` |
 | `scripts/run_ddilog_experiment.sh` | Wrapper: `run_experiment.sh --driver ddilog` |
 | `scripts/apply_mutation_patch.py` | Apply or revert `patches/<driver>/<id>.patch` |
 | `scripts/apply_ddilog_patch.sh` | Wrapper: `apply_mutation_patch.py` for `ddilog` |

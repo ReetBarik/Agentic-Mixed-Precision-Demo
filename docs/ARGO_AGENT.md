@@ -49,6 +49,38 @@ export ARGO_USERNAME=<your_anl_username>
 python3.12 -m llm_agent.cli --base-url http://127.0.0.1:8092 --prompt "Reply with OK"
 ```
 
+## Spec-driven target onboarding and validation
+
+Use this flow to onboard a target function from a JSON spec without editing
+`targets.json` or `CMakeLists.txt`. It generates an ephemeral driver under
+`experiments/<target>/generated_driver/`, compiles in an isolated temp build,
+and runs baseline/candidate compare.
+
+Curated spec file:
+
+`experiments/specs/target_specs_curated_v1.json`
+
+Example:
+
+```bash
+python3.12 -m llm_agent.onboard_target \
+  --spec-file experiments/specs/target_specs_curated_v1.json \
+  --target-id l0 \
+  --generator llm \
+  --base-url http://127.0.0.1:8092 \
+  --apply --allow-existing --regen-baseline --min-digits 10
+```
+
+Notes:
+
+- `--generator deterministic` uses built-in rendering only.
+- `--generator llm` asks Argo to draft/repair driver code (compile-aware loop).
+- `--allow-existing` reuses/overwrites prior generated driver paths.
+- The report JSON includes step-by-step status and artifacts under
+  `experiments/<target>/generated/onboarding_apply_<timestamp>.json`.
+- Build pipeline behavior is policy-driven: try repeat compile first, and if it
+  fails in the current environment, fall back to bootstrap automatically.
+
 ## Generate a patch proposal (LLM only)
 
 This step asks Argo to propose a unified diff for a target driver using
