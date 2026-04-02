@@ -58,6 +58,33 @@ def _load_targets_locals(root, driver_id):
     return []
 
 
+def _load_spec_target(root, spec_file, target_id):
+    path = spec_file if os.path.isabs(spec_file) else os.path.join(root, spec_file)
+    try:
+        with open(path, encoding="utf-8") as f:
+            payload = json.load(f)
+    except Exception:
+        return None
+    if isinstance(payload, dict) and isinstance(payload.get("targets"), list):
+        for t in payload.get("targets", []):
+            if t.get("id") == target_id:
+                return t
+    if isinstance(payload, dict) and payload.get("id") == target_id:
+        return payload
+    return None
+
+
+def _load_spec_locals(root, spec_file, target_id):
+    tgt = _load_spec_target(root, spec_file, target_id)
+    if not tgt:
+        return []
+    out = []
+    for sym in tgt.get("locals_for_downcast", []) or []:
+        if isinstance(sym, str) and sym.strip():
+            out.append(sym.strip())
+    return out
+
+
 def _load_impl_rel(root, driver_id):
     try:
         with open(os.path.join(root, "targets.json"), encoding="utf-8") as f:
@@ -69,6 +96,13 @@ def _load_impl_rel(root, driver_id):
             mc = d.get("mutation_candidates") or {}
             return mc.get("implementation_relative") or "src/kokkosUtils.h"
     return "src/kokkosUtils.h"
+
+
+def _load_impl_rel_from_spec(root, spec_file, target_id):
+    tgt = _load_spec_target(root, spec_file, target_id)
+    if not tgt:
+        return "src/kokkosUtils.h"
+    return tgt.get("header_path") or "src/kokkosUtils.h"
 
 
 def _validate_guided_patch(patch_path, impl_rel, focus_var, known_symbols):
@@ -248,6 +282,8 @@ def _summarize_patch(patch_path):
 def main():
     ap = argparse.ArgumentParser(description="Run one propose+verify LLM patch episode")
     ap.add_argument("--driver", default="ddilog")
+    ap.add_argument("--spec-file", default="", help="Optional spec JSON for spec-mode episodes")
+    ap.add_argument("--target-id", default="", help="Target id in spec file (defaults to --driver)")
     ap.add_argument("--base-url", default=None)
     ap.add_argument("--user", default=None)
     ap.add_argument("--model", default="claudeopus46")
@@ -286,12 +322,15 @@ def main():
     args = ap.parse_args()
 
     root = _repo_root()
-    out_dir = args.output_dir or os.path.join(root, "experiments", args.driver, "generated")
+    episode_id = args.target_id or args.driver
+    out_dir = args.output_dir or os.path.join(root, "experiments", episode_id, "generated")
     if not os.path.isdir(out_dir):
         os.makedirs(out_dir)
     ts = time.strftime("%Y%m%d_%H%M%S")
     result = {
         "driver": args.driver,
+        "spec_file": args.spec_file or None,
+        "target_id": (args.target_id or None),
         "propose_exit": None,
         "verify_exit": None,
         "pass": False,
@@ -306,10 +345,16 @@ def main():
         },
     }
     focus_vars = [x.strip() for x in args.focus_vars.split(",") if x.strip()]
-    if args.guided_search and not focus_vars:
-        focus_vars = _load_targets_locals(root, args.driver)
-    known_symbols = _load_targets_locals(root, args.driver)
-    impl_rel = _load_impl_rel(root, args.driver)
+    if args.spec_file:
+        if args.guided_search and not focus_vars:
+            focus_vars = _load_spec_locals(root, args.spec_file, episode_id)
+        known_symbols = _load_spec_locals(root, args.spec_file, episode_id)
+        impl_rel = _load_impl_rel_from_spec(root, args.spec_file, episode_id)
+    else:
+        if args.guided_search and not focus_vars:
+            focus_vars = _load_targets_locals(root, args.driver)
+        known_symbols = _load_targets_locals(root, args.driver)
+        impl_rel = _load_impl_rel(root, args.driver)
     if not focus_vars:
         focus_vars = [""]
 
@@ -366,6 +411,8 @@ def main():
                 "--output",
                 patch_path,
             ]
+            if args.spec_file:
+                propose_cmd += ["--spec-file", args.spec_file, "--target-id", episode_id]
             if args.base_url:
                 propose_cmd += ["--base-url", args.base_url]
             if args.user:
@@ -439,6 +486,8 @@ def main():
                 "--report",
                 report_path,
             ]
+            if args.spec_file:
+                verify_cmd += ["--spec-file", args.spec_file, "--target-id", episode_id]
             if args.no_build:
                 verify_cmd.append("--no-build")
             if args.keep_worktree:

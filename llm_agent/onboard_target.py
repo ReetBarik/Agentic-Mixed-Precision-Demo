@@ -214,10 +214,52 @@ def _enforce_csv_contract(driver_src):
 
 def _render_driver_source(spec):
     target_id = spec["id"]
-    fn = spec["function_symbol"]
-    x_min = spec["x_min"]
-    x_max = spec["x_max"]
     output_mode = spec["output_mode"]
+    inputs = spec.get("inputs") or [
+        {
+            "name": "x",
+            "ctype": "TMass",
+            "distribution": "uniform_real",
+            "min": spec["x_min"],
+            "max": spec["x_max"],
+        }
+    ]
+    call_expr = (spec.get("call") or {}).get("expression", "").strip()
+    if not call_expr:
+        fn = spec["function_symbol"]
+        call_expr = "ql::{0}<TOutput, TMass, TScale>({x})".format(fn)
+
+    view_decl_lines = []
+    mirror_decl_lines = []
+    dist_decl_lines = []
+    fill_lines = []
+    copy_lines = []
+    meta_pairs = []
+    call_eval = call_expr
+
+    for inp in inputs:
+        name = inp["name"]
+        ctype = inp.get("ctype", "TMass")
+        lo = float(inp.get("min", -4.0))
+        hi = float(inp.get("max", 4.0))
+        call_eval = call_eval.replace("{" + name + "}", "{0}_d(i)".format(name))
+
+        view_decl_lines.append(
+            '        Kokkos::View<{0}*> {1}_d("{1}", batch_size);'.format(ctype, name)
+        )
+        mirror_decl_lines.append(
+            "        auto {0}_h = Kokkos::create_mirror_view({0}_d);".format(name)
+        )
+        dist_decl_lines.append(
+            "        std::uniform_real_distribution<double> dist_{0}({1}, {2});".format(
+                name, lo, hi
+            )
+        )
+        fill_lines.append(
+            "            {0}_h(i) = static_cast<{1}>(dist_{0}(rng));".format(name, ctype)
+        )
+        copy_lines.append("        Kokkos::deep_copy({0}_d, {0}_h);".format(name))
+        meta_pairs.append("{0}_min={1} {0}_max={2}".format(name, lo, hi))
 
     write_line = (
         "            ql::printDoubleBits(y_h(i), out);\n"
@@ -234,6 +276,7 @@ def _render_driver_source(spec):
         if output_mode == "real"
         else "Kokkos::View<TOutput*> y_d(\"y\", batch_size);"
     )
+    meta_suffix = (" " + " ".join(meta_pairs)) if meta_pairs else ""
 
     return """#include <Kokkos_Core.hpp>
 
@@ -267,22 +310,22 @@ int main(int argc, char* argv[]) {{
             seed = static_cast<std::uint64_t>(std::stoull(argv[3]));
         }}
 
-        Kokkos::View<TMass*> x_d("x", batch_size);
+{input_views}
         {y_view_decl}
 
-        auto x_h = Kokkos::create_mirror_view(x_d);
+{input_mirrors}
         std::mt19937_64 rng(seed);
-        std::uniform_real_distribution<TMass> dist({x_min}, {x_max});
+{input_dists}
         for (std::size_t i = 0; i < batch_size; ++i) {{
-            x_h(i) = dist(rng);
+{input_fill}
         }}
-        Kokkos::deep_copy(x_d, x_h);
+{input_copy}
 
         Kokkos::parallel_for(
             "{target_id}_batch",
             Kokkos::RangePolicy<Kokkos::IndexType<std::size_t>>(0, batch_size),
             KOKKOS_LAMBDA(std::size_t i) {{
-                y_d(i) = ql::{fn}<TOutput, TMass, TScale>(x_d(i));
+                y_d(i) = {call_eval};
             }});
         Kokkos::fence();
 
@@ -296,7 +339,7 @@ int main(int argc, char* argv[]) {{
         }}
         out << "{header}\\n";
         out << "# target_id={target_id} seed=" << seed << " batch_size=" << batch_size
-            << " x_min={x_min} x_max={x_max}\\n";
+            << "{meta_suffix}\\n";
         for (std::size_t i = 0; i < batch_size; ++i) {{
             out << i << ',';
 {write_line}            out << '\\n';
@@ -307,11 +350,15 @@ int main(int argc, char* argv[]) {{
 }}
 """.format(
         target_id=target_id,
-        fn=fn,
-        x_min=x_min,
-        x_max=x_max,
         header=header,
+        input_views="\n".join(view_decl_lines),
+        input_mirrors="\n".join(mirror_decl_lines),
+        input_dists="\n".join(dist_decl_lines),
+        input_fill="\n".join(fill_lines),
+        input_copy="\n".join(copy_lines),
         y_view_decl=y_view_decl,
+        call_eval=call_eval,
+        meta_suffix=meta_suffix,
         write_line=write_line,
     )
 

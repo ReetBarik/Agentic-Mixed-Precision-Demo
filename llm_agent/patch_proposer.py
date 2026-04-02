@@ -26,6 +26,35 @@ def _driver_entry(targets, driver_id):
     return None
 
 
+def _load_spec_target(spec_file, target_id):
+    with open(spec_file, encoding="utf-8") as f:
+        payload = json.load(f)
+    if isinstance(payload, dict) and isinstance(payload.get("targets"), list):
+        for t in payload.get("targets", []):
+            if t.get("id") == target_id:
+                return t
+    if isinstance(payload, dict) and payload.get("id") == target_id:
+        return payload
+    return None
+
+
+def _driver_from_spec(target):
+    return {
+        "id": target.get("id"),
+        "summary": "Spec target {0}".format(target.get("id")),
+        "input_domain": {"inputs": target.get("inputs", [])},
+        "mutation_candidates": {
+            "implementation_relative": target.get("header_path", "src/kokkosUtils.h"),
+            "patches_available": [],
+            "locals": [
+                {"symbol": s}
+                for s in (target.get("locals_for_downcast", []) or [])
+                if isinstance(s, str) and s.strip()
+            ],
+        },
+    }
+
+
 def _extract_patch_text(text):
     # Prefer explicit unified diff blocks if present.
     start = text.find("--- ")
@@ -226,6 +255,8 @@ def _build_messages(args, driver, impl_rel, impl_src):
 def main():
     ap = argparse.ArgumentParser(description="Generate a unified diff proposal using Argo")
     ap.add_argument("--driver", default="ddilog", help="targets.json drivers[].id")
+    ap.add_argument("--spec-file", default="", help="Optional spec JSON file")
+    ap.add_argument("--target-id", default="", help="Target id when using --spec-file")
     ap.add_argument("--min-digits", type=float, default=10.0)
     ap.add_argument("--base-url", default=None, help="Argo proxy base URL")
     ap.add_argument("--user", default=None, help="Argo username (default ARGO_USERNAME)")
@@ -254,11 +285,30 @@ def main():
     args = ap.parse_args()
 
     root = _repo_root()
-    targets = _load_targets(root)
-    driver = _driver_entry(targets, args.driver)
-    if not driver:
-        print("error: unknown driver id {!r}".format(args.driver), file=sys.stderr)
-        return 2
+    if args.spec_file:
+        target_id = args.target_id or args.driver
+        spec_path = args.spec_file
+        if not os.path.isabs(spec_path):
+            spec_path = os.path.join(root, spec_path)
+        if not os.path.isfile(spec_path):
+            print("error: spec file not found: {0}".format(spec_path), file=sys.stderr)
+            return 2
+        spec_target = _load_spec_target(spec_path, target_id)
+        if not spec_target:
+            print(
+                "error: target id {0!r} not found in spec file".format(target_id),
+                file=sys.stderr,
+            )
+            return 2
+        driver = _driver_from_spec(spec_target)
+        out_driver_id = target_id
+    else:
+        targets = _load_targets(root)
+        driver = _driver_entry(targets, args.driver)
+        if not driver:
+            print("error: unknown driver id {!r}".format(args.driver), file=sys.stderr)
+            return 2
+        out_driver_id = args.driver
 
     mc = driver.get("mutation_candidates") or {}
     impl_rel = mc.get("implementation_relative")
@@ -312,7 +362,7 @@ def main():
         out_path = args.output
     else:
         ts = __import__("time").strftime("%Y%m%d_%H%M%S")
-        out_dir = os.path.join(root, "experiments", args.driver, "generated")
+        out_dir = os.path.join(root, "experiments", out_driver_id, "generated")
         if not os.path.isdir(out_dir):
             os.makedirs(out_dir)
         out_path = os.path.join(out_dir, "proposed_patch_{}.patch".format(ts))

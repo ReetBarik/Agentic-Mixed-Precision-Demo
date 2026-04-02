@@ -5,6 +5,7 @@ import argparse
 import json
 import os
 import re
+import glob
 import shutil
 import subprocess
 import sys
@@ -47,6 +48,19 @@ def _load_driver(root, driver_id):
     return None
 
 
+def _load_spec_target(root, spec_file, target_id):
+    path = spec_file if os.path.isabs(spec_file) else os.path.join(root, spec_file)
+    with open(path, encoding="utf-8") as f:
+        payload = json.load(f)
+    if isinstance(payload, dict) and isinstance(payload.get("targets"), list):
+        for t in payload.get("targets", []):
+            if t.get("id") == target_id:
+                return t
+    if isinstance(payload, dict) and payload.get("id") == target_id:
+        return payload
+    return None
+
+
 def _candidate_symbols(driver):
     mc = driver.get("mutation_candidates") or {}
     out = []
@@ -57,9 +71,21 @@ def _candidate_symbols(driver):
     return out
 
 
+def _candidate_symbols_from_spec(target):
+    out = []
+    for sym in (target.get("locals_for_downcast", []) or []):
+        if isinstance(sym, str) and sym.strip():
+            out.append(sym.strip())
+    return out
+
+
 def _impl_rel(driver):
     mc = driver.get("mutation_candidates") or {}
     return mc.get("implementation_relative") or "src/kokkosUtils.h"
+
+
+def _impl_rel_from_spec(target):
+    return target.get("header_path") or "src/kokkosUtils.h"
 
 
 def _exec_rel(driver, driver_id):
@@ -110,7 +136,79 @@ def _validate_guided_patch(patch_path, impl_rel, focus_var, known_symbols, accep
     return True, None
 
 
-def _verify_with_stack(root, driver_id, patch_stack, batch, seed, min_digits, no_build):
+def _extract_report_file(stdout_text):
+    try:
+        obj = json.loads(stdout_text)
+        return obj.get("report_file")
+    except Exception:
+        pass
+    marker = '"report_file":'
+    if marker not in stdout_text:
+        return None
+    i = stdout_text.rfind(marker)
+    snippet = stdout_text[i:]
+    q1 = snippet.find('"', len(marker))
+    q2 = snippet.find('"', q1 + 1)
+    if q1 >= 0 and q2 > q1:
+        return snippet[q1 + 1 : q2]
+    return None
+
+
+def _latest_onboard_report(worktree, target_id):
+    pattern = os.path.join(
+        worktree, "experiments", target_id, "generated", "onboarding_apply_*.json"
+    )
+    files = sorted(glob.glob(pattern))
+    if not files:
+        return None
+    return files[-1]
+
+
+def _run_onboard_apply(worktree, spec_file, target_id, batch, seed, min_digits, regen_baseline):
+    cmd = [
+        sys.executable,
+        "-m",
+        "llm_agent.onboard_target",
+        "--spec-file",
+        spec_file,
+        "--target-id",
+        target_id,
+        "--generator",
+        "deterministic",
+        "--apply",
+        "--allow-existing",
+        "--batch",
+        str(batch),
+        "--seed",
+        str(seed),
+        "--min-digits",
+        str(min_digits),
+    ]
+    if regen_baseline:
+        cmd.append("--regen-baseline")
+    rc, out = _run(cmd, cwd=worktree)
+    report_file = _extract_report_file(out) or _latest_onboard_report(worktree, target_id)
+    summary = None
+    if report_file and os.path.isfile(report_file):
+        try:
+            with open(report_file, encoding="utf-8") as f:
+                summary = json.load(f)
+        except Exception:
+            summary = None
+    return rc, out, report_file, summary
+
+
+def _verify_with_stack(
+    root,
+    driver_id,
+    patch_stack,
+    batch,
+    seed,
+    min_digits,
+    no_build,
+    spec_file="",
+    target_id="",
+):
     base_tmp = tempfile.mkdtemp(prefix="llm-greedy-verify-")
     worktree = os.path.join(base_tmp, "wt")
     out = {
@@ -138,6 +236,29 @@ def _verify_with_stack(root, driver_id, patch_stack, batch, seed, min_digits, no
                 pass
         os.makedirs(build_dir, exist_ok=True)
 
+        if spec_file:
+            spec_abs = spec_file if os.path.isabs(spec_file) else os.path.join(root, spec_file)
+            if spec_abs.startswith(root + os.sep):
+                spec_rel = os.path.relpath(spec_abs, root)
+                spec_in_worktree = os.path.join(worktree, spec_rel)
+            else:
+                spec_in_worktree = spec_abs
+            resolved_target = target_id or driver_id
+            rc_base, out_base, rpt_base, _sum_base = _run_onboard_apply(
+                worktree=worktree,
+                spec_file=spec_in_worktree,
+                target_id=resolved_target,
+                batch=batch,
+                seed=seed,
+                min_digits=min_digits,
+                regen_baseline=True,
+            )
+            out["logs"]["onboard_baseline"] = out_base[-12000:]
+            out["onboard_baseline_report"] = rpt_base
+            if rc_base != 0:
+                out["apply_exit"] = 2
+                return 2, out
+
         for pth in patch_stack:
             with open(pth, encoding="utf-8", errors="replace") as pf:
                 p = subprocess.run(
@@ -152,6 +273,35 @@ def _verify_with_stack(root, driver_id, patch_stack, batch, seed, min_digits, no
             if p.returncode != 0:
                 out["apply_exit"] = p.returncode
                 return 2, out
+
+        if spec_file:
+            resolved_target = target_id or driver_id
+            rc_run, out_run, rpt_run, sum_run = _run_onboard_apply(
+                worktree=worktree,
+                spec_file=spec_in_worktree,
+                target_id=resolved_target,
+                batch=batch,
+                seed=seed,
+                min_digits=min_digits,
+                regen_baseline=False,
+            )
+            out["onboard_apply_report"] = rpt_run
+            out["logs"]["experiment"] = out_run[-20000:]
+            out["experiment_exit"] = (0 if rc_run == 0 else 2)
+            out["pass"] = rc_run == 0
+            if sum_run:
+                steps = {s.get("step"): s for s in sum_run.get("steps", [])}
+                run_step = steps.get("run_candidate") or {}
+                run_artifacts = run_step.get("artifacts") or {}
+                out["candidate_csv"] = run_artifacts.get("run_csv")
+                cmp_step = steps.get("smoke_compare") or {}
+                cmp_details = cmp_step.get("details") or {}
+                tail = cmp_details.get("log_tail") or ""
+                if tail:
+                    out["logs"]["experiment"] = (
+                        (out["logs"].get("experiment", "") or "") + "\n" + tail
+                    )[-20000:]
+            return (0 if out["pass"] else 1), out
 
         # Compile inside the temp worktree first, then run experiment with --no-build.
         compile_script = os.path.join(worktree, "scripts", "compile.sh")
@@ -212,6 +362,8 @@ def _verify_with_stack(root, driver_id, patch_stack, batch, seed, min_digits, no
 def main():
     ap = argparse.ArgumentParser(description="LLM greedy accumulation controller")
     ap.add_argument("--driver", default="ddilog")
+    ap.add_argument("--spec-file", default="", help="Optional spec JSON for spec-mode greedy runs")
+    ap.add_argument("--target-id", default="", help="Target id in spec file (defaults to --driver)")
     ap.add_argument("--base-url", default=None)
     ap.add_argument("--user", default=None)
     ap.add_argument("--model", default="claudeopus46")
@@ -232,20 +384,32 @@ def main():
     args = ap.parse_args()
 
     root = _repo_root()
-    driver = _load_driver(root, args.driver)
-    if not driver:
-        print("error: unknown driver id {0}".format(args.driver), file=sys.stderr)
-        return 2
+    run_id = args.target_id or args.driver
+    if args.spec_file:
+        try:
+            spec_target = _load_spec_target(root, args.spec_file, run_id)
+        except Exception:
+            spec_target = None
+        if not spec_target:
+            print("error: unknown spec target id {0}".format(run_id), file=sys.stderr)
+            return 2
+        all_symbols = _candidate_symbols_from_spec(spec_target)
+        impl_rel = _impl_rel_from_spec(spec_target)
+    else:
+        driver = _load_driver(root, args.driver)
+        if not driver:
+            print("error: unknown driver id {0}".format(args.driver), file=sys.stderr)
+            return 2
+        all_symbols = _candidate_symbols(driver)
+        impl_rel = _impl_rel(driver)
 
-    all_symbols = _candidate_symbols(driver)
     if args.focus_vars.strip():
         requested = [x.strip() for x in args.focus_vars.split(",") if x.strip()]
         symbols = [s for s in requested if s in set(all_symbols)]
     else:
         symbols = list(all_symbols)
-    impl_rel = _impl_rel(driver)
 
-    out_dir = args.output_dir or os.path.join(root, "experiments", args.driver, "generated")
+    out_dir = args.output_dir or os.path.join(root, "experiments", run_id, "generated")
     if not os.path.isdir(out_dir):
         os.makedirs(out_dir)
     run_ts = time.strftime("%Y%m%d_%H%M%S")
@@ -288,6 +452,8 @@ def main():
                 "--output",
                 patch_path,
             ]
+            if args.spec_file:
+                propose_cmd += ["--spec-file", args.spec_file, "--target-id", run_id]
             if args.base_url:
                 propose_cmd += ["--base-url", args.base_url]
             if args.user:
@@ -336,6 +502,8 @@ def main():
                 seed=args.seed,
                 min_digits=args.min_digits,
                 no_build=args.no_build,
+                spec_file=args.spec_file,
+                target_id=run_id,
             )
             attempt["verify_exit"] = rc_ver
             attempt["pass"] = rc_ver == 0
@@ -370,6 +538,8 @@ def main():
 
     result = {
         "driver": args.driver,
+        "spec_file": args.spec_file or None,
+        "target_id": args.target_id or None,
         "mode": "llm_greedy_accumulate",
         "min_digits_threshold": args.min_digits,
         "accepted_vars": accepted_vars,
