@@ -9,7 +9,7 @@ from typing import Dict, List, Optional, TypedDict
 
 class FunctionParam(TypedDict):
     name: str
-    type: str           # as it appears in source, e.g. "TMass const&"
+    type: str           # as it appears in source, e.g. "double const&"
     is_const: bool
     is_ref: bool
     is_output: bool     # True = output-by-reference, not an input
@@ -27,9 +27,9 @@ class FunctionSignature(TypedDict):
     template_params: List[dict]       # [{"name": "T", "kind": "typename"}, ...]
     input_params: List[FunctionParam]
     output_params: List[FunctionParam]  # void-return output-by-reference params
-    call_expression: str  # e.g. "ql::ddilog<TOutput,TMass,TScale>({x})"
+    call_expression: str  # e.g. "ns::compute<T, U>({x})"
     locals_for_downcast: List[str]    # local double/float vars in function body
-    concrete_template_types: dict     # e.g. {"TOutput": "std::complex<double>", "TMass": "double"}
+    concrete_template_types: dict     # e.g. {"T": "double", "U": "std::complex<double>"}
 
 
 class AnalyzeState(TypedDict):

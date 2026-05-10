@@ -69,24 +69,33 @@ def enforce_csv_contract(driver_src: str) -> tuple:
 
 
 def render_driver_source(spec: dict) -> str:
-    """Generate an ephemeral C++ Kokkos driver from a target spec."""
+    """Generate an ephemeral C++ driver from a target spec.
+
+    The driver is framework-agnostic at the template level: the target's header,
+    template-alias mapping, return type, call expression, and per-input ctypes all
+    come from the spec. The bit-printing helper is inlined locally so the driver
+    has no dependency on helpers defined in the target header.
+    """
     target_id = spec["id"]
     output_mode = spec["output_mode"]
-    inputs = spec.get("inputs") or [
-        {
-            "name": "x",
-            "ctype": "TMass",
-            "distribution": "uniform_real",
-            "min": spec.get("x_min", -4.0),
-            "max": spec.get("x_max", 4.0),
-        }
-    ]
+    return_type = spec.get("return_type")
+    if not return_type:
+        raise ValueError("spec missing return_type")
+    header_path = spec.get("header_path")
+    if not header_path:
+        raise ValueError("spec missing header_path")
+    header_fname = os.path.basename(header_path)
+
+    inputs = spec.get("inputs")
+    if not inputs:
+        raise ValueError("spec missing inputs")
+
     # call.expression uses {name} as placeholder tokens, not Python format placeholders
     call_expr = (spec.get("call") or {}).get("expression", "").strip()
     if not call_expr:
-        fn = spec["function_symbol"]
-        # Build with {{name}} so after .format(fn=fn) the result has literal {name}
-        call_expr = "ql::{fn}<TOutput, TMass, TScale>({{x}})".format(fn=fn)
+        raise ValueError("spec missing call.expression")
+
+    template_types = spec.get("concrete_template_types") or {}
 
     view_decl_lines = []
     mirror_decl_lines = []
@@ -98,7 +107,9 @@ def render_driver_source(spec: dict) -> str:
 
     for inp in inputs:
         name = inp["name"]
-        ctype = inp.get("ctype", "TMass")
+        ctype = inp.get("ctype")
+        if not ctype:
+            raise ValueError("input {0!r} missing ctype".format(name))
         lo = float(inp.get("min", -4.0))
         hi = float(inp.get("max", 4.0))
         call_eval = call_eval.replace("{" + name + "}", "{0}_d(i)".format(name))
@@ -120,37 +131,46 @@ def render_driver_source(spec: dict) -> str:
         meta_pairs.append("{0}_min={1} {0}_max={2}".format(name, lo, hi))
 
     write_line = (
-        "            ql::printDoubleBits(y_h(i), out);\n"
+        "            print_double_bits(y_h(i), out);\n"
         if output_mode == "real"
         else (
-            "            ql::printDoubleBits(y_h(i).real(), out);\n"
+            "            print_double_bits(y_h(i).real(), out);\n"
             "            out << ',';\n"
-            "            ql::printDoubleBits(y_h(i).imag(), out);\n"
+            "            print_double_bits(y_h(i).imag(), out);\n"
         )
     )
     header = "id,real hex" if output_mode == "real" else "id,real hex,imag hex"
-    y_view_decl = (
-        'Kokkos::View<TMass*> y_d("y", batch_size);'
-        if output_mode == "real"
-        else 'Kokkos::View<TOutput*> y_d("y", batch_size);'
-    )
+    y_view_decl = 'Kokkos::View<{0}*> y_d("y", batch_size);'.format(return_type)
     meta_suffix = (" " + " ".join(meta_pairs)) if meta_pairs else ""
+    using_decls = "\n".join(
+        "using {0} = {1};".format(name, value) for name, value in template_types.items()
+    )
 
     return """#include <Kokkos_Core.hpp>
 
+#include <cinttypes>
 #include <cstdint>
+#include <cstdio>
 #include <cstdlib>
 #include <fstream>
 #include <iostream>
 #include <random>
 #include <string>
 
-#include "kokkosUtils.h"
+#include "{header_fname}"
+
+namespace {{
+inline void print_double_bits(double x, std::ostream& os) {{
+    union {{ double d; std::uint64_t u; }} conv;
+    conv.d = x;
+    char buf[32];
+    if (std::snprintf(buf, sizeof(buf), "0x%016" PRIx64, conv.u) > 0)
+        os << buf;
+}}
+}}
 
 // AUTO-GENERATED EPHEMERAL DRIVER FROM TARGET SPEC.
-using TOutput = Kokkos::complex<double>;
-using TMass = double;
-using TScale = double;
+{using_decls}
 
 int main(int argc, char* argv[]) {{
     Kokkos::initialize(argc, argv);
@@ -208,7 +228,9 @@ int main(int argc, char* argv[]) {{
 }}
 """.format(
         target_id=target_id,
+        header_fname=header_fname,
         header=header,
+        using_decls=using_decls,
         input_views="\n".join(view_decl_lines),
         input_mirrors="\n".join(mirror_decl_lines),
         input_dists="\n".join(dist_decl_lines),
@@ -274,7 +296,14 @@ def build_and_run(
         {ok: bool, csv_path: str|None, error: str|None, logs: dict}
     """
     target_id = spec["id"]
-    header_rel = spec.get("header_path", "src/kokkosUtils.h")
+    header_rel = spec.get("header_path")
+    if not header_rel:
+        return {
+            "ok": False,
+            "csv_path": None,
+            "error": "spec missing header_path",
+            "logs": {},
+        }
     header_fname = os.path.basename(header_rel)
 
     driver_src, _ = enforce_csv_contract(render_driver_source(spec))

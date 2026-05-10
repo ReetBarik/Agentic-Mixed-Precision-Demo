@@ -29,7 +29,7 @@ Rules:
   distinct signatures across all overloads. Two overloads collapse to the same signature
   when two different template parameters are mapped to the same concrete type — so if
   any called function has overloads distinguished only by different template parameters
-  (e.g. one overload uses TOutput, another uses TMass), those parameters MUST be mapped
+  (e.g. one overload uses TOut, another uses TIn), those parameters MUST be mapped
   to different concrete types.
 - You must call extract_signature with a complete, valid answer.
 """

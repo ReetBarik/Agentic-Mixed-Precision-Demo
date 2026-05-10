@@ -158,7 +158,7 @@ def run_downcast_skill(state: OptimizationState) -> dict:
 
     inputs = []
     for p in sig.get("input_params", []):
-        # Strip qualifiers to get the bare ctype (e.g. "TMass const&" → "TMass")
+        # Strip qualifiers to get the bare ctype (e.g. "double const&" → "double")
         ctype = re.sub(r"\b(const|volatile)\b", "", p["type"]).replace("&", "").replace("*", "").strip()
         inputs.append({
             "name": p["name"],
@@ -169,18 +169,20 @@ def run_downcast_skill(state: OptimizationState) -> dict:
         })
 
     spec_dict = {
-        "id":                  sig["function_name"],
-        "header_path":         sig["file_path"],
-        "function_symbol":     sig["function_name"],
-        "framework":           sig.get("framework"),
-        "output_mode":         output_mode,
-        "inputs":              inputs or None,
-        "call":                {"expression": sig.get("call_expression", "")},
-        "locals_for_downcast": sig.get("locals_for_downcast", []),
+        "id":                       sig["function_name"],
+        "header_path":              sig["file_path"],
+        "function_symbol":          sig["function_name"],
+        "framework":                sig.get("framework"),
+        "output_mode":              output_mode,
+        "return_type":              return_type,
+        "inputs":                   inputs or None,
+        "call":                     {"expression": sig.get("call_expression", "")},
+        "locals_for_downcast":      sig.get("locals_for_downcast", []),
+        "concrete_template_types":  sig.get("concrete_template_types") or {},
     }
 
     # Generate baseline in the same format as downcast candidates (build_and_run /
-    # render_driver_source / ql::printDoubleBits), not the LLM driver's hex CSV.
+    # render_driver_source), not the LLM driver's hex CSV.
     ts = time.strftime("%Y%m%d_%H%M%S")
     baseline_dir = os.path.join(root, "experiments", sig["function_name"], "generated")
     os.makedirs(baseline_dir, exist_ok=True)

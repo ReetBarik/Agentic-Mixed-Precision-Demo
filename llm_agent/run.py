@@ -2,8 +2,8 @@
 
 Usage:
     python3.12 -m llm_agent.run \\
-        --file src/kokkosUtils.h \\
-        --function ddilog \\
+        --file path/to/header.h \\
+        --function function_name \\
         [--skills downcast] \\
         [--min-digits 10] \\
         [--batch 10] \\
