@@ -1,3 +1,0 @@
-/home/rbarik/Agentic-Mixed-Precision-Demo/build/CMakeFiles/ddilog_driver.dir
-/home/rbarik/Agentic-Mixed-Precision-Demo/build/CMakeFiles/edit_cache.dir
-/home/rbarik/Agentic-Mixed-Precision-Demo/build/CMakeFiles/rebuild_cache.dir

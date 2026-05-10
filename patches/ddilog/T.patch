@@ -1,5 +1,0 @@
---- a/src/kokkosUtils.h
-+++ b/src/kokkosUtils.h
-@@ -170 +170 @@
--        const TMass T = -x;
-+        const float T = static_cast<float>(-x);

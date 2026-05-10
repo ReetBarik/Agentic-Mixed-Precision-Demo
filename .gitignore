@@ -1,16 +1,12 @@
-# Local session notes (untracked)
-docs/Session context.md
-
-# Local Kokkos clone (use build_with_Kokkos.sh / prepare workflow)
+# Local Kokkos clone (installed out-of-tree; sourced via scripts/prepare.sh)
 kokkos/
 
-# Build / experiment logs (regenerated locally)
+# Build artifacts and logs (regenerated locally)
+build/
 build_logs/
 
-# Generated onboarding artifacts (ephemeral validation outputs)
+# Generated agent outputs (per-target, ephemeral verification artifacts)
 experiments/*/generated/
-experiments/*/generated_driver/
-experiments/tmp/target_specs_draft.json
 
 # Python caches
 **/__pycache__/
