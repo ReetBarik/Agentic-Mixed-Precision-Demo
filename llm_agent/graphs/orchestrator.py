@@ -154,7 +154,7 @@ def run_downcast_skill(state: OptimizationState) -> dict:
 
     # Build a spec dict compatible with render_driver_source / build_and_run.
     return_type = sig.get("return_type", "")
-    output_mode = "complex" if ("TOutput" in return_type or "complex" in return_type.lower()) else "real"
+    output_mode = "complex" if "complex" in return_type.lower() else "real"
 
     inputs = []
     for p in sig.get("input_params", []):

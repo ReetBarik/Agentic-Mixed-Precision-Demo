@@ -173,7 +173,9 @@ def policy_check(state: DowncastState) -> dict:
         return {"policy_reject": "no proposal produced"}
 
     var = state["current_variable"]
-    expected_file = state["spec"].get("header_path", "src/kokkosUtils.h")
+    expected_file = state["spec"].get("header_path")
+    if not expected_file:
+        return {"policy_reject": "spec missing header_path"}
 
     if proposal["file_path"] != expected_file:
         return {

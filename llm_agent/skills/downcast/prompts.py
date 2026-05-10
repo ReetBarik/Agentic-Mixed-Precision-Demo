@@ -23,24 +23,23 @@ Rules:
   rewriting initialization syntax without changing the type, is NOT a downcast and will
   be rejected. If no safe float downcast exists for the focused variable, set new_line
   identical to old_line to signal that this variable should be skipped.
-- A complex variable (e.g. std::complex<double>, Kokkos::complex<double>) must only be
-  downcast to the same complex template instantiated with a lower-precision scalar
-  (e.g. std::complex<float>, Kokkos::complex<float>). Never replace a complex type
-  with a scalar type.
+- A complex variable (e.g. std::complex<double>) must only be downcast to the same
+  complex template instantiated with a lower-precision scalar (e.g. std::complex<float>).
+  Never replace a complex type with a scalar type.
 """
 
 PROPOSE_PATCH_TOOL = {
     "name": "propose_patch",
     "description": (
         "Propose a single source line replacement to downcast a local variable "
-        "from double to float precision in a Kokkos C++ kernel."
+        "from double to float precision in a C++ kernel."
     ),
     "input_schema": {
         "type": "object",
         "properties": {
             "file_path": {
                 "type": "string",
-                "description": "Repository-relative path to the file to modify (e.g. src/kokkosUtils.h).",
+                "description": "Repository-relative path to the header/source file to modify.",
             },
             "old_line": {
                 "type": "string",
@@ -69,7 +68,9 @@ def build_initial_user_message(
     min_digits: float,
 ) -> dict:
     """Build the first user message for a variable's optimization conversation."""
-    header_path = spec.get("header_path", "src/kokkosUtils.h")
+    header_path = spec.get("header_path")
+    if not header_path:
+        raise ValueError("spec missing header_path")
 
     # Show the current state of the file (with accepted patches already applied)
     if accepted_patches:
