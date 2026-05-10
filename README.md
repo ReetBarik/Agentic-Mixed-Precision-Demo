@@ -87,7 +87,8 @@ flowchart TD
 ├── src/                         # Example target: kokkosUtils.h (Kokkos C++ library)
 ├── scripts/
 │   ├── compare_results.py       # Numerical comparison tool (baseline vs candidate CSV)
-│   └── prepare.sh               # Loads build environment modules
+│   ├── prepare.sh               # Loads build environment modules
+│   └── setup_argo_proxy.sh      # Starts the Argo SSH tunnel + proxy (used by run-argo.sh)
 ├── llm_agent/
 │   ├── run.py                   # CLI entry point (called by run-argo.sh)
 │   ├── config.py                # Model name, iteration limits
@@ -146,22 +147,30 @@ If running outside JLSE, set `ANTHROPIC_API_KEY` and omit `--base-url` from `llm
 ./run-argo.sh --file src/kokkosUtils.h --function ddilog --skills downcast --min-digits 10 --batch 10
 ```
 
-**Output** — a JSON summary printed to stdout and written under `experiments/<function>/generated/`:
+**Output** — a JSON summary written to `experiments/<function>/generated/<function>_summary_<timestamp>.json`:
 
 ```json
 {
-  "function": "ddilog",
+  "function_name": "ddilog",
+  "file_path": "src/kokkosUtils.h",
   "framework": "kokkos",
-  "accepted_variables": ["S"],
-  "rejected_variables": ["T", "Y", "H", "ALFA", "B1", "B2", "B0"],
-  "accepted_patches": [
-    {
-      "file_path": "src/kokkosUtils.h",
-      "old_line": "        TMass S;",
-      "new_line": "        float S;",
-      "reasoning": "..."
+  "baseline_csv": "experiments/ddilog/generated/ddilog_baseline_10_123_<ts>.csv",
+  "error": null,
+  "skill_results": {
+    "downcast": {
+      "accepted_variables": ["S", "A", "B1", "B2", "B0"],
+      "rejected_variables": ["T", "Y", "H", "ALFA"],
+      "accepted_patches": [
+        {
+          "file_path": "src/kokkosUtils.h",
+          "old_line": "        TMass S;",
+          "new_line": "        float S;",
+          "reasoning": "..."
+        }
+      ],
+      "trace": "... (per-attempt records: proposal, policy_reject, verify_pass, min_precise_digits)"
     }
-  ]
+  }
 }
 ```
 
