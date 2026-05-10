@@ -33,16 +33,9 @@ def compare(baseline_csv: str, candidate_csv: str, min_digits: float) -> dict:
     )
     log = result.stdout or ""
 
-    # Scalar format: min_precise_digits=X
+    # compare_results.py emits a single aggregate line: "... min_precise_digits=X ..."
     m = re.search(r"(?<![_a-z])min_precise_digits=([0-9.eE+-]+)", log)
-    if m:
-        min_precise_digits = float(m.group(1))
-    else:
-        # Complex format: min_precise_digits_real=X min_precise_digits_imag=X
-        mr = re.search(r"min_precise_digits_real=([0-9.eE+-]+)", log)
-        mi = re.search(r"min_precise_digits_imag=([0-9.eE+-]+)", log)
-        vals = [float(x.group(1)) for x in (mr, mi) if x]
-        min_precise_digits = min(vals) if vals else None
+    min_precise_digits = float(m.group(1)) if m else None
 
     return {
         "pass": result.returncode == 0,

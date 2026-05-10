@@ -154,18 +154,26 @@ def run_downcast_skill(state: OptimizationState) -> dict:
 
     # Build a spec dict compatible with render_driver_source / build_and_run.
     return_type = sig.get("return_type", "")
-    output_mode = "complex" if "complex" in return_type.lower() else "real"
+
+    def _strip_ctype(raw: str) -> str:
+        """Strip cv-qualifiers, references, and pointer markers to leave the value type."""
+        return re.sub(r"\b(const|volatile)\b", "", raw).replace("&", "").replace("*", "").strip()
 
     inputs = []
     for p in sig.get("input_params", []):
-        # Strip qualifiers to get the bare ctype (e.g. "double const&" → "double")
-        ctype = re.sub(r"\b(const|volatile)\b", "", p["type"]).replace("&", "").replace("*", "").strip()
         inputs.append({
             "name": p["name"],
-            "ctype": ctype,
+            "ctype": _strip_ctype(p["type"]),
             "distribution": "uniform_real",
             "min": p.get("domain_min", -4.0),
             "max": p.get("domain_max", 4.0),
+        })
+
+    outputs = []
+    for p in sig.get("output_params", []):
+        outputs.append({
+            "name": p["name"],
+            "ctype": _strip_ctype(p["type"]),
         })
 
     spec_dict = {
@@ -173,9 +181,9 @@ def run_downcast_skill(state: OptimizationState) -> dict:
         "header_path":              sig["file_path"],
         "function_symbol":          sig["function_name"],
         "framework":                sig.get("framework"),
-        "output_mode":              output_mode,
         "return_type":              return_type,
         "inputs":                   inputs or None,
+        "outputs":                  outputs,
         "call":                     {"expression": sig.get("call_expression", "")},
         "locals_for_downcast":      sig.get("locals_for_downcast", []),
         "concrete_template_types":  sig.get("concrete_template_types") or {},

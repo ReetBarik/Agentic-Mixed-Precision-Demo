@@ -1,23 +1,25 @@
 #!/usr/bin/env python3
 """
-Compare a candidate results CSV against a baseline CSV (hex-encoded scalars).
+Compare a candidate results CSV against a baseline CSV (hex-encoded float64 scalars).
 
 CSV layout:
-  Line 1: header — either "id,real hex" (real output) or "id,real hex,imag hex" (complex).
+  Line 1: header — "id" plus one column per scalar value being verified.
+          Column names are informational; every value column is interpreted as a
+          float64 IEEE bit pattern. Complex outputs are split into two columns by
+          the producing driver (typically `<name>__re`, `<name>__im`).
   Line 2: run metadata, must start with '#'. Space-separated key=value tokens, e.g.:
           # target_id=ddilog seed=1 batch_size=64 x_min=-4.0 x_max=4.0
   Following lines: one sample per row.
 
-Baseline and candidate must carry the same run metadata (target, seed, batch, input domain
-keys when present); otherwise comparison is refused.
+Baseline and candidate must carry the same run metadata (target, seed, batch, input
+domain keys when present); otherwise comparison is refused.
 
 Precise digits follow the logic of qcdloop error_analysis plot_precision_analysis.py
 calculate_precise_digits (FP64-style), with max 16 digits and 1e-16 relative floor.
 
-Pass (complex): min_i digits(real) >= threshold AND min_i digits(imag) >= threshold.
-Pass (real): min_i digits(real) >= threshold.
-Rows with NaN in baseline or candidate for a component are skipped for that component;
-if no finite rows remain, exit with error.
+Pass: per-column min digits across samples >= threshold for EVERY value column.
+Rows with NaN/Inf in baseline or candidate for a given column are skipped for that
+column; if any column ends up with no finite samples, exit with error.
 """
 
 import argparse
@@ -153,18 +155,10 @@ def load_csv(path: Path) -> Tuple[List[str], Dict[str, str], List[List[str]]]:
     return header, meta, data_rows
 
 
-def classify_header(header: List[str]) -> str:
-    if len(header) == 2:
-        return "real"
-    if len(header) == 3:
-        return "complex"
-    raise ValueError(f"expected 2 or 3 columns, got {len(header)}: {header}")
-
-
 def validate_and_pair(
     base_rows: List[List[str]],
     cand_rows: List[List[str]],
-    kind: str,
+    expected_cols: int,
     batch_size: int,
 ) -> None:
     if len(base_rows) != batch_size:
@@ -175,14 +169,12 @@ def validate_and_pair(
         raise ValueError("baseline and candidate data row counts differ")
 
     for i, (br, cr) in enumerate(zip(base_rows, cand_rows)):
-        if len(br) != len(cr):
-            raise ValueError(f"row {i}: column count mismatch")
+        if len(br) != expected_cols:
+            raise ValueError(f"row {i} (baseline): expected {expected_cols} columns, got {len(br)}")
+        if len(cr) != expected_cols:
+            raise ValueError(f"row {i} (candidate): expected {expected_cols} columns, got {len(cr)}")
         if br[0] != cr[0]:
             raise ValueError(f"row {i}: id mismatch {br[0]!r} vs {cr[0]!r}")
-        if kind == "real" and len(br) != 2:
-            raise ValueError(f"row {i}: expected 2 columns for real mode")
-        if kind == "complex" and len(br) != 3:
-            raise ValueError(f"row {i}: expected 3 columns for complex mode")
 
 
 def main() -> int:
@@ -211,76 +203,61 @@ def main() -> int:
         )
         return 2
 
+    if len(h0) < 2 or h0[0] != "id":
+        print(f"error: header must be 'id,<col1>,...'; got {h0!r}", file=sys.stderr)
+        return 2
+
+    value_cols = h0[1:]
+    expected_cols = len(h0)
+
     try:
         assert_comparable_meta(m0, m1, str(args.baseline), str(args.candidate))
     except ValueError as e:
         print(f"error: {e}", file=sys.stderr)
         return 2
 
-    kind = classify_header(h0)
     batch_size = int(m0["batch_size"])
     try:
-        validate_and_pair(r0, r1, kind, batch_size)
+        validate_and_pair(r0, r1, expected_cols, batch_size)
     except ValueError as e:
         print(f"error: {e}", file=sys.stderr)
         return 2
 
-    digits_real: List[float] = []
-    digits_imag: List[float] = []
+    # Per-column digit lists
+    per_col_digits: List[List[float]] = [[] for _ in value_cols]
 
-    for i, (br, cr) in enumerate(zip(r0, r1)):
-        if kind == "real":
-            tb = hex_to_float(br[1])
-            tc = hex_to_float(cr[1])
+    for br, cr in zip(r0, r1):
+        for col_idx in range(len(value_cols)):
+            tb = hex_to_float(br[col_idx + 1])
+            tc = hex_to_float(cr[col_idx + 1])
             if math.isnan(tb) or math.isnan(tc) or math.isinf(tb) or math.isinf(tc):
                 continue
-            err = abs(tc - tb)
-            digits_real.append(calculate_precise_digits(tb, err))
-        else:
-            tb_r = hex_to_float(br[1])
-            tb_i = hex_to_float(br[2])
-            tc_r = hex_to_float(cr[1])
-            tc_i = hex_to_float(cr[2])
-            skip_r = (
-                math.isnan(tb_r)
-                or math.isnan(tc_r)
-                or math.isinf(tb_r)
-                or math.isinf(tc_r)
-            )
-            skip_i = (
-                math.isnan(tb_i)
-                or math.isnan(tc_i)
-                or math.isinf(tb_i)
-                or math.isinf(tc_i)
-            )
-            if not skip_r:
-                digits_real.append(calculate_precise_digits(tb_r, abs(tc_r - tb_r)))
-            if not skip_i:
-                digits_imag.append(calculate_precise_digits(tb_i, abs(tc_i - tb_i)))
+            per_col_digits[col_idx].append(calculate_precise_digits(tb, abs(tc - tb)))
 
-    th = args.min_digits
-    if kind == "real":
-        if not digits_real:
-            print("error: no finite rows left after skipping NaN/Inf", file=sys.stderr)
+    # Every column must have at least one finite sample
+    for name, digits in zip(value_cols, per_col_digits):
+        if not digits:
+            print(
+                f"error: column {name!r} has no finite samples after skipping NaN/Inf",
+                file=sys.stderr,
+            )
             return 2
-        mnr = min(digits_real)
-        ok = mnr >= th
-        print(f"mode=real samples_used={len(digits_real)} min_precise_digits={mnr:.6g} threshold={th}")
-        print("PASS" if ok else "FAIL")
-        return 0 if ok else 1
 
-    if not digits_real or not digits_imag:
-        print(
-            "error: need at least one finite sample for both real and imag after skipping NaN/Inf",
-            file=sys.stderr,
-        )
-        return 2
-    mnr = min(digits_real)
-    mni = min(digits_imag)
-    ok = mnr >= th and mni >= th
+    per_col_min = [min(d) for d in per_col_digits]
+    aggregate_min = min(per_col_min)
+    th = args.min_digits
+    ok = aggregate_min >= th
+
+    cols_summary = " ".join(
+        "{0}:{1:.6g}".format(name, mn) for name, mn in zip(value_cols, per_col_min)
+    )
     print(
-        f"mode=complex samples_used_real={len(digits_real)} samples_used_imag={len(digits_imag)} "
-        f"min_precise_digits_real={mnr:.6g} min_precise_digits_imag={mni:.6g} threshold={th}"
+        "samples_used={n} columns=[{cols}] min_precise_digits={agg:.6g} threshold={th}".format(
+            n=batch_size,
+            cols=cols_summary,
+            agg=aggregate_min,
+            th=th,
+        )
     )
     print("PASS" if ok else "FAIL")
     return 0 if ok else 1

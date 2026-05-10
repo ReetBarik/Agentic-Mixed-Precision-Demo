@@ -35,6 +35,9 @@ def validate_target_id(target_id: str) -> bool:
     return bool(re.fullmatch(r"[a-z][a-z0-9_]*", target_id))
 
 
+_HEADER_LINE_RE = re.compile(r'out\s*<<\s*"id,')
+
+
 def enforce_csv_contract(driver_src: str) -> tuple:
     """Ensure header line appears before metadata line in the generated driver."""
     lines = driver_src.splitlines()
@@ -43,7 +46,7 @@ def enforce_csv_contract(driver_src: str) -> tuple:
     meta_end = -1
     for i, ln in enumerate(lines):
         s = ln.strip()
-        if 'out << "id,real hex' in s or 'out << "id,real hex,imag hex' in s:
+        if header_idx < 0 and _HEADER_LINE_RE.search(s):
             header_idx = i
         if 'out << "# target_id=' in s and meta_start < 0:
             meta_start = i
@@ -68,16 +71,48 @@ def enforce_csv_contract(driver_src: str) -> tuple:
     return driver_src, warnings
 
 
+_COMPLEX_PREFIXES = ("Kokkos::complex<", "std::complex<")
+_REAL_SCALAR_TYPES = frozenset({"float", "double", "long double"})
+
+
+def _resolve_type(ctype: str, template_types: dict) -> str:
+    """Resolve a template alias to its concrete C++ type, recursively if needed."""
+    seen = set()
+    cur = ctype.strip()
+    while cur in template_types and cur not in seen:
+        seen.add(cur)
+        cur = template_types[cur].strip()
+    return cur
+
+
+def _classify_floating(ctype: str, template_types: dict) -> str:
+    """Return 'real', 'complex', or 'other' for a value-type ctype.
+
+    Resolves through concrete_template_types so aliases (e.g. TOutput = Kokkos::complex<double>)
+    classify correctly. Anything that isn't a floating real or complex (e.g. int, bool, struct)
+    is 'other' — computed by the driver but not serialized to CSV.
+    """
+    resolved = _resolve_type(ctype, template_types)
+    if any(resolved.startswith(p) for p in _COMPLEX_PREFIXES):
+        return "complex"
+    if resolved in _REAL_SCALAR_TYPES:
+        return "real"
+    return "other"
+
+
 def render_driver_source(spec: dict) -> str:
     """Generate an ephemeral C++ driver from a target spec.
 
-    The driver is framework-agnostic at the template level: the target's header,
-    template-alias mapping, return type, call expression, and per-input ctypes all
-    come from the spec. The bit-printing helper is inlined locally so the driver
-    has no dependency on helpers defined in the target header.
+    Generic over input/output shape: the spec's `inputs`, `outputs`, `return_type`, and
+    `call.expression` (with `{name}` placeholders for both inputs and outputs) drive every
+    part of the generated driver. Value-returning functions get a `_y_d` view and the call
+    is emitted as `_y_d(i) = call_expr`. Void-returning functions emit `call_expr;` and
+    rely on output-by-reference parameters to deliver results. CSV columns are produced
+    for the return value (if floating) and every floating output param (real → 1 hex col,
+    complex → 2 hex cols). Non-floating outputs (e.g. integer flags) are computed and
+    written back to host memory but skipped from the CSV.
     """
     target_id = spec["id"]
-    output_mode = spec["output_mode"]
     return_type = spec.get("return_type")
     if not return_type:
         raise ValueError("spec missing return_type")
@@ -96,12 +131,13 @@ def render_driver_source(spec: dict) -> str:
         raise ValueError("spec missing call.expression")
 
     template_types = spec.get("concrete_template_types") or {}
+    outputs = spec.get("outputs") or []
 
-    view_decl_lines = []
-    mirror_decl_lines = []
-    dist_decl_lines = []
-    fill_lines = []
-    copy_lines = []
+    input_view_lines = []
+    input_mirror_lines = []
+    input_dist_lines = []
+    input_fill_lines = []
+    input_copy_lines = []
     meta_pairs = []
     call_eval = call_expr
 
@@ -113,34 +149,99 @@ def render_driver_source(spec: dict) -> str:
         lo = float(inp.get("min", -4.0))
         hi = float(inp.get("max", 4.0))
         call_eval = call_eval.replace("{" + name + "}", "{0}_d(i)".format(name))
-        view_decl_lines.append(
+        input_view_lines.append(
             '        Kokkos::View<{0}*> {1}_d("{1}", batch_size);'.format(ctype, name)
         )
-        mirror_decl_lines.append(
+        input_mirror_lines.append(
             "        auto {0}_h = Kokkos::create_mirror_view({0}_d);".format(name)
         )
-        dist_decl_lines.append(
+        input_dist_lines.append(
             "        std::uniform_real_distribution<double> dist_{0}({1}, {2});".format(
                 name, lo, hi
             )
         )
-        fill_lines.append(
+        input_fill_lines.append(
             "            {0}_h(i) = static_cast<{1}>(dist_{0}(rng));".format(name, ctype)
         )
-        copy_lines.append("        Kokkos::deep_copy({0}_d, {0}_h);".format(name))
+        input_copy_lines.append("        Kokkos::deep_copy({0}_d, {0}_h);".format(name))
         meta_pairs.append("{0}_min={1} {0}_max={2}".format(name, lo, hi))
 
-    write_line = (
-        "            print_double_bits(y_h(i), out);\n"
-        if output_mode == "real"
-        else (
-            "            print_double_bits(y_h(i).real(), out);\n"
-            "            out << ',';\n"
-            "            print_double_bits(y_h(i).imag(), out);\n"
+    # Output-by-reference params: declare a device View per output, substitute the
+    # placeholder in the call, and copy back to host after the kernel runs. Floating
+    # outputs additionally get a CSV column; non-floating outputs are computed but
+    # excluded from numerical verification.
+    output_view_lines = []
+    output_copy_back_lines = []
+    csv_columns = []  # list of (col_name, host_expr)
+    for out in outputs:
+        name = out["name"]
+        ctype = out.get("ctype")
+        if not ctype:
+            raise ValueError("output {0!r} missing ctype".format(name))
+        call_eval = call_eval.replace("{" + name + "}", "{0}_d(i)".format(name))
+        output_view_lines.append(
+            '        Kokkos::View<{0}*> {1}_d("{1}", batch_size);'.format(ctype, name)
         )
-    )
-    header = "id,real hex" if output_mode == "real" else "id,real hex,imag hex"
-    y_view_decl = 'Kokkos::View<{0}*> y_d("y", batch_size);'.format(return_type)
+        output_copy_back_lines.append(
+            "        auto {0}_h = Kokkos::create_mirror_view_and_copy("
+            "Kokkos::HostSpace(), {0}_d);".format(name)
+        )
+        kind = _classify_floating(ctype, template_types)
+        if kind == "real":
+            csv_columns.append((name, "{0}_h(i)".format(name)))
+        elif kind == "complex":
+            csv_columns.append((name + "__re", "{0}_h(i).real()".format(name)))
+            csv_columns.append((name + "__im", "{0}_h(i).imag()".format(name)))
+        # 'other' → not serialized
+
+    # Return-value handling: a value-returning function gets its own _y_d view that
+    # the kernel writes into; void-returning functions just invoke the call as a
+    # statement. The leading underscore on _y avoids clashing with any user-named
+    # output called 'y'.
+    is_void = return_type.strip() == "void"
+    if is_void:
+        y_view_block = ""
+        kernel_body = "                {0};".format(call_eval)
+        y_copy_back = ""
+    else:
+        y_view_block = (
+            '        Kokkos::View<{0}*> _y_d("_y", batch_size);'.format(return_type)
+        )
+        kernel_body = "                _y_d(i) = {0};".format(call_eval)
+        y_copy_back = (
+            "        auto _y_h = Kokkos::create_mirror_view_and_copy("
+            "Kokkos::HostSpace(), _y_d);"
+        )
+        kind = _classify_floating(return_type, template_types)
+        if kind == "real":
+            csv_columns.append(("_y", "_y_h(i)"))
+        elif kind == "complex":
+            csv_columns.append(("_y__re", "_y_h(i).real()"))
+            csv_columns.append(("_y__im", "_y_h(i).imag()"))
+        else:
+            raise ValueError(
+                "return_type {0!r} is neither floating real nor complex; "
+                "cannot verify numerically".format(return_type)
+            )
+
+    if not csv_columns:
+        raise ValueError(
+            "function has no floating-point outputs to verify against "
+            "(return_type={0!r}, outputs={1!r})".format(
+                return_type, [o["name"] for o in outputs]
+            )
+        )
+
+    header = "id," + ",".join(c[0] for c in csv_columns)
+    write_lines = []
+    for idx, (_col_name, host_expr) in enumerate(csv_columns):
+        write_lines.append(
+            "            print_double_bits({0}, out);".format(host_expr)
+        )
+        if idx < len(csv_columns) - 1:
+            write_lines.append("            out << ',';")
+    write_block = "\n".join(write_lines)
+
     meta_suffix = (" " + " ".join(meta_pairs)) if meta_pairs else ""
     using_decls = "\n".join(
         "using {0} = {1};".format(name, value) for name, value in template_types.items()
@@ -189,7 +290,8 @@ int main(int argc, char* argv[]) {{
         }}
 
 {input_views}
-        {y_view_decl}
+{output_views}
+{y_view_block}
 
 {input_mirrors}
         std::mt19937_64 rng(seed);
@@ -203,11 +305,12 @@ int main(int argc, char* argv[]) {{
             "{target_id}_batch",
             Kokkos::RangePolicy<Kokkos::IndexType<std::size_t>>(0, batch_size),
             KOKKOS_LAMBDA(std::size_t i) {{
-                y_d(i) = {call_eval};
+{kernel_body}
             }});
         Kokkos::fence();
 
-        auto y_h = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), y_d);
+{output_copies}
+{y_copy_back}
 
         std::ofstream out(out_path);
         if (!out) {{
@@ -220,7 +323,8 @@ int main(int argc, char* argv[]) {{
             << "{meta_suffix}\\n";
         for (std::size_t i = 0; i < batch_size; ++i) {{
             out << i << ',';
-{write_line}            out << '\\n';
+{write_block}
+            out << '\\n';
         }}
     }}
     Kokkos::finalize();
@@ -231,15 +335,18 @@ int main(int argc, char* argv[]) {{
         header_fname=header_fname,
         header=header,
         using_decls=using_decls,
-        input_views="\n".join(view_decl_lines),
-        input_mirrors="\n".join(mirror_decl_lines),
-        input_dists="\n".join(dist_decl_lines),
-        input_fill="\n".join(fill_lines),
-        input_copy="\n".join(copy_lines),
-        y_view_decl=y_view_decl,
-        call_eval=call_eval,
+        input_views="\n".join(input_view_lines),
+        output_views="\n".join(output_view_lines),
+        y_view_block=y_view_block,
+        input_mirrors="\n".join(input_mirror_lines),
+        input_dists="\n".join(input_dist_lines),
+        input_fill="\n".join(input_fill_lines),
+        input_copy="\n".join(input_copy_lines),
+        output_copies="\n".join(output_copy_back_lines),
+        y_copy_back=y_copy_back,
+        kernel_body=kernel_body,
         meta_suffix=meta_suffix,
-        write_line=write_line,
+        write_block=write_block,
     )
 
 
