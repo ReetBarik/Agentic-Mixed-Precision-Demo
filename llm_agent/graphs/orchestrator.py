@@ -32,7 +32,7 @@ from llm_agent.state import (
     DriverState,
     OptimizationState,
 )
-from llm_agent.tools.build import build_and_run
+from llm_agent.tools.spec_revise import build_and_run_with_revision
 
 # Compiled subgraphs (module-level singletons)
 _analyze_graph = build_analyze_graph()
@@ -200,13 +200,15 @@ def run_downcast_skill(state: OptimizationState) -> dict:
             sig["function_name"], state["batch"], state["seed"], ts
         ),
     )
-    baseline_result = build_and_run(
+    baseline_result, spec_dict = build_and_run_with_revision(
         root=root,
         spec=spec_dict,
         impl_source=impl_source,
         batch=state["batch"],
         seed=state["seed"],
         out_csv=downcast_baseline_csv,
+        max_attempts=state.get("max_driver_retries", 3),
+        base_url=state.get("base_url"),
     )
     if not baseline_result.get("ok"):
         return {
