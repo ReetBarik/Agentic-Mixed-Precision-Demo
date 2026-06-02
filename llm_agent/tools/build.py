@@ -139,6 +139,10 @@ def render_driver_source(spec: dict) -> str:
     input_fill_lines = []
     input_copy_lines = []
     meta_pairs = []
+    adv_zero_lines = []   # slot 0: value closest to 0 in the input domain
+    adv_max_lines  = []   # slot 1: domain maximum
+    adv_min_lines  = []   # slot 2: domain minimum
+    adv_mid_lines  = []   # slot 3: domain midpoint
     call_eval = call_expr
 
     for inp in inputs:
@@ -165,6 +169,12 @@ def render_driver_source(spec: dict) -> str:
         )
         input_copy_lines.append("        Kokkos::deep_copy({0}_d, {0}_h);".format(name))
         meta_pairs.append("{0}_min={1} {0}_max={2}".format(name, lo, hi))
+        near_zero = max(lo, min(hi, 0.0))
+        mid = 0.5 * (lo + hi)
+        adv_zero_lines.append("            {0}_h(0) = static_cast<{1}>({2!r});".format(name, ctype, near_zero))
+        adv_max_lines.append( "            {0}_h(1) = static_cast<{1}>({2!r});".format(name, ctype, hi))
+        adv_min_lines.append( "            {0}_h(2) = static_cast<{1}>({2!r});".format(name, ctype, lo))
+        adv_mid_lines.append( "            {0}_h(3) = static_cast<{1}>({2!r});".format(name, ctype, mid))
 
     # Output-by-reference params: declare a device View per output, substitute the
     # placeholder in the call, and copy back to host after the kernel runs. Floating
@@ -242,7 +252,24 @@ def render_driver_source(spec: dict) -> str:
             write_lines.append("            out << ',';")
     write_block = "\n".join(write_lines)
 
+    adv_block = (
+        "        const std::size_t n_adv = std::min(std::size_t(4), batch_size);\n"
+        "        if (n_adv > 0) {\n"
+        + "\n".join(adv_zero_lines) + "\n"
+        + "        }\n"
+        + "        if (n_adv > 1) {\n"
+        + "\n".join(adv_max_lines) + "\n"
+        + "        }\n"
+        + "        if (n_adv > 2) {\n"
+        + "\n".join(adv_min_lines) + "\n"
+        + "        }\n"
+        + "        if (n_adv > 3) {\n"
+        + "\n".join(adv_mid_lines) + "\n"
+        + "        }"
+    )
+
     meta_suffix = (" " + " ".join(meta_pairs)) if meta_pairs else ""
+    meta_suffix += " adversarial_count=4"
     using_decls = "\n".join(
         "using {0} = {1};".format(name, value) for name, value in template_types.items()
     )
@@ -296,7 +323,8 @@ int main(int argc, char* argv[]) {{
 {input_mirrors}
         std::mt19937_64 rng(seed);
 {input_dists}
-        for (std::size_t i = 0; i < batch_size; ++i) {{
+{adv_block}
+        for (std::size_t i = n_adv; i < batch_size; ++i) {{
 {input_fill}
         }}
 {input_copy}
@@ -340,6 +368,7 @@ int main(int argc, char* argv[]) {{
         y_view_block=y_view_block,
         input_mirrors="\n".join(input_mirror_lines),
         input_dists="\n".join(input_dist_lines),
+        adv_block=adv_block,
         input_fill="\n".join(input_fill_lines),
         input_copy="\n".join(input_copy_lines),
         output_copies="\n".join(output_copy_back_lines),

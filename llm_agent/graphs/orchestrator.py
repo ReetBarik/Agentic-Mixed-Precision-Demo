@@ -5,8 +5,6 @@ Flow:
          │
     run_analyze   ──(error)──► aggregate_results ──► END
          │
-    run_driver    ──(error)──► aggregate_results
-         │
     init_candidate_loop ──(error / no candidates)──► aggregate_results
          │
     pick_candidate ──(no candidates left)──► maybe_requeue ──(done)──► aggregate_results
@@ -36,11 +34,9 @@ from llm_agent import config
 from llm_agent.skills.downcast.graph import build_downcast_graph
 from llm_agent.skills.downcast.prompts import build_tool_result_feedback
 from llm_agent.skills.analyze.graph import build_analyze_graph
-from llm_agent.skills.driver.graph import build_driver_graph
 from llm_agent.state import (
     AnalyzeState,
     DowncastProposerState,
-    DriverState,
     OptimizationState,
 )
 from llm_agent.tools.build import apply_patches, build_and_run
@@ -49,7 +45,6 @@ from llm_agent.tools.spec_revise import build_and_run_with_revision
 
 # Compiled subgraphs (module-level singletons)
 _analyze_graph = build_analyze_graph()
-_driver_graph = build_driver_graph()
 _downcast_graph = build_downcast_graph()
 
 
@@ -106,45 +101,6 @@ def run_analyze(state: OptimizationState) -> dict:
 
     return {"signature": sig, "error": None}
 
-
-def run_driver_skill(state: OptimizationState) -> dict:
-    """Invoke the driver subgraph to generate, compile, and run a baseline."""
-    if state.get("error"):
-        return {}
-
-    sig = state["signature"]
-    driver_state = DriverState(
-        signature=sig,
-        root=state["root"],
-        batch=state["batch"],
-        seed=state["seed"],
-        max_iterations=state.get("max_driver_retries", 5),
-        driver_source=None,
-        cmake_source=None,
-        exe_path=None,
-        out_csv=None,
-        compile_error=None,
-        compile_ok=False,
-        run_ok=False,
-        messages=[],
-        iteration=0,
-        error=None,
-        _last_tool_use_id=None,
-    )
-
-    result = _driver_graph.invoke(driver_state)
-    err = result.get("error")
-    compile_err = result.get("compile_error")
-    baseline_csv = result.get("out_csv")
-
-    if err or not baseline_csv:
-        detail = err or compile_err or "driver skill produced no baseline CSV"
-        return {
-            "error": "driver skill failed: {0}".format(detail),
-            "baseline_csv": None,
-        }
-
-    return {"baseline_csv": baseline_csv, "error": None}
 
 
 def _build_spec_dict(sig: dict) -> dict:
@@ -574,7 +530,6 @@ def aggregate_results(state: OptimizationState) -> dict:
         "function_name":    fn_name,
         "file_path":        state.get("file_path"),
         "framework":        sig.get("framework") if sig else None,
-        "baseline_csv":     state.get("baseline_csv"),
         "error":            state.get("error"),
         # New orchestrator-loop fields
         "final_patch_set":      state.get("patch_set") or [],
@@ -601,12 +556,6 @@ def aggregate_results(state: OptimizationState) -> dict:
 # ---------------------------------------------------------------------------
 
 def route_after_analyze(
-    state: OptimizationState,
-) -> Literal["run_driver", "aggregate_results"]:
-    return "aggregate_results" if state.get("error") else "run_driver"
-
-
-def route_after_driver(
     state: OptimizationState,
 ) -> Literal["init_candidate_loop", "aggregate_results"]:
     return "aggregate_results" if state.get("error") else "init_candidate_loop"
@@ -654,7 +603,6 @@ def build_orchestrator():
 
     g.add_node("load_target",           load_target)
     g.add_node("run_analyze",           run_analyze)
-    g.add_node("run_driver",            run_driver_skill)
     g.add_node("init_candidate_loop",   init_candidate_loop)
     g.add_node("pick_candidate",        pick_candidate)
     g.add_node("invoke_proposer",       invoke_proposer)
@@ -669,11 +617,6 @@ def build_orchestrator():
     g.add_conditional_edges(
         "run_analyze",
         route_after_analyze,
-        {"run_driver": "run_driver", "aggregate_results": "aggregate_results"},
-    )
-    g.add_conditional_edges(
-        "run_driver",
-        route_after_driver,
         {"init_candidate_loop": "init_candidate_loop", "aggregate_results": "aggregate_results"},
     )
     g.add_conditional_edges(

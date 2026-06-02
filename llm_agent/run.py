@@ -18,6 +18,7 @@ Usage:
 import argparse
 import json
 import os
+import shutil
 import sys
 
 from llm_agent import config
@@ -108,10 +109,21 @@ def main() -> None:
         metavar="DIR",
         help="Repository root (default: inferred from this file's location).",
     )
+    parser.add_argument(
+        "--clean",
+        action="store_true",
+        help="Delete the output directory before running.",
+    )
 
     args = parser.parse_args()
 
     root = args.root or os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+
+    if args.clean:
+        output_dir = args.output_dir or os.path.join(root, "experiments")
+        if os.path.isdir(output_dir):
+            shutil.rmtree(output_dir)
+            print("Removed", output_dir)
 
     initial_state = OptimizationState(
         # Input parameters
@@ -129,7 +141,6 @@ def main() -> None:
         output_dir=args.output_dir,
         # Set by agents during run
         signature=None,
-        baseline_csv=None,
         skill_results={},
         error=None,
         # Candidate loop state — initialized by init_candidate_loop
@@ -160,7 +171,6 @@ def main() -> None:
         "function":           final_state.get("function_name"),
         "file":               final_state.get("file_path"),
         "framework":          (final_state.get("signature") or {}).get("framework"),
-        "baseline_csv":       final_state.get("baseline_csv"),
         "error":              final_state.get("error"),
         "accepted_variables": final_state.get("accepted_variables") or [],
         "deferred_variables": [dv["name"] for dv in (final_state.get("deferred") or [])],

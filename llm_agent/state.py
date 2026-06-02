@@ -131,7 +131,6 @@ class OptimizationState(TypedDict):
 
     # Set by agents during run
     signature: Optional[FunctionSignature]
-    baseline_csv: Optional[str]
     skill_results: Dict[str, dict]
     error: Optional[str]
 
