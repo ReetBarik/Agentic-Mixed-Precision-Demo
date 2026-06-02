@@ -81,10 +81,31 @@ def extract_signature(state: AnalyzeState) -> dict:
 
     tool_block = next((b for b in response.content if b.type == "tool_use"), None)
     if tool_block is None:
+        # Log what was returned to help diagnose proxy/model issues.
+        import sys
+        text_blocks = [b.text for b in response.content if b.type == "text"]
+        if text_blocks:
+            print(
+                "[analyze] LLM returned text instead of tool call (stop_reason={0}): {1}".format(
+                    response.stop_reason, text_blocks[0][:300]
+                ),
+                file=sys.stderr,
+            )
+        else:
+            print(
+                "[analyze] LLM returned no tool call and no text. stop_reason={0}, content types={1}".format(
+                    response.stop_reason,
+                    [b.type for b in response.content],
+                ),
+                file=sys.stderr,
+            )
+        # Don't set error — let validate handle retries so the iteration cap is respected.
+        # Reset messages so the next attempt starts with a fresh initial user turn.
         return {
-            "messages": messages,
-            "error": "LLM did not return a tool call",
+            "messages": [],
             "signature": None,
+            "error": None,
+            "_last_tool_use_id": None,
         }
 
     inp = tool_block.input
@@ -158,13 +179,20 @@ def validate(state: AnalyzeState) -> dict:
             state["max_iterations"], reason
         )}
 
-    # Build rejection feedback and increment iteration for retry
-    feedback = build_rejection_feedback(tool_use_id or "unknown", reason)
+    # Build retry state. When the LLM returned no tool call (tool_use_id is None),
+    # reset messages for a fresh start rather than appending a confusing tool_result.
+    if tool_use_id:
+        feedback = build_rejection_feedback(tool_use_id, reason)
+        new_messages = list(state["messages"]) + [feedback]
+    else:
+        new_messages = []  # fresh start — no tool_use_id to attach feedback to
+
     return {
-        "messages": list(state["messages"]) + [feedback],
+        "messages": new_messages,
         "iteration": iteration + 1,
         "signature": None,
         "error": None,
+        "_last_tool_use_id": None,
     }
 
 

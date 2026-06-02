@@ -10,6 +10,7 @@ Usage:
         [--seed 123] \\
         [--max-iterations 3] \\
         [--max-driver-retries 5] \\
+        [--max-requeue-cycles 2] \\
         [--base-url http://127.0.0.1:8083/argoapi/] \\
         [--output-dir experiments/generated/]
 """
@@ -83,6 +84,13 @@ def main() -> None:
         help="Max compile-fix iterations for the driver skill (default: %(default)s).",
     )
     parser.add_argument(
+        "--max-requeue-cycles",
+        type=int,
+        default=config.MAX_REQUEUE_CYCLES,
+        metavar="N",
+        help="Max full re-queue passes for deferred variables (default: %(default)s).",
+    )
+    parser.add_argument(
         "--base-url",
         default=None,
         metavar="URL",
@@ -106,6 +114,7 @@ def main() -> None:
     root = args.root or os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
     initial_state = OptimizationState(
+        # Input parameters
         file_path=args.file,
         function_name=args.function,
         root=root,
@@ -114,25 +123,54 @@ def main() -> None:
         seed=args.seed,
         max_iterations=args.max_iterations,
         max_driver_retries=args.max_driver_retries,
+        max_requeue_cycles=args.max_requeue_cycles,
         skills=args.skills,
         base_url=args.base_url,
         output_dir=args.output_dir,
+        # Set by agents during run
         signature=None,
         baseline_csv=None,
         skill_results={},
         error=None,
+        # Candidate loop state — initialized by init_candidate_loop
+        candidates=[],
+        deferred=[],
+        patch_set=[],
+        accepted_variables=[],
+        impl_source=None,
+        spec=None,
+        downcast_baseline_csv=None,
+        trace=[],
+        requeue_cycles=0,
+        # Per-variable iteration state — reset by pick_candidate
+        current_variable=None,
+        iteration=0,
+        proposer_messages=[],
+        current_tool_use_id=None,
+        current_proposal=None,
+        propose_error=None,
+        policy_reject=None,
+        verify_result=None,
     )
 
     orchestrator = build_orchestrator()
     final_state = orchestrator.invoke(initial_state)
 
     summary = {
-        "function":      final_state.get("function_name"),
-        "file":          final_state.get("file_path"),
-        "framework":     (final_state.get("signature") or {}).get("framework"),
-        "baseline_csv":  final_state.get("baseline_csv"),
-        "error":         final_state.get("error"),
-        "skill_results": final_state.get("skill_results") or {},
+        "function":           final_state.get("function_name"),
+        "file":               final_state.get("file_path"),
+        "framework":          (final_state.get("signature") or {}).get("framework"),
+        "baseline_csv":       final_state.get("baseline_csv"),
+        "error":              final_state.get("error"),
+        "accepted_variables": final_state.get("accepted_variables") or [],
+        "deferred_variables": [dv["name"] for dv in (final_state.get("deferred") or [])],
+        "rejected_variables": [
+            r["variable"]
+            for r in (final_state.get("trace") or [])
+            if r.get("outcome") == "rejected_permanently"
+        ],
+        "requeue_cycles_used": final_state.get("requeue_cycles", 0),
+        "patch_set":          final_state.get("patch_set") or [],
     }
 
     print(json.dumps(summary, indent=2))

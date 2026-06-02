@@ -41,6 +41,7 @@ class AnalyzeState(TypedDict):
     iteration: int
     max_iterations: int
     error: Optional[str]
+    _last_tool_use_id: Optional[str]  # set by extract_signature when LLM returns a tool call
 
 
 class DriverState(TypedDict):
@@ -69,6 +70,13 @@ class PatchProposal(TypedDict):
     reasoning: str
 
 
+class DeferredVariable(TypedDict):
+    name: str
+    failed_at_patchset_size: int
+    requeue_count: int
+    last_failure_reason: str  # "policy_reject" | "build_fail" | "verify_fail" | "propose_error"
+
+
 class AttemptRecord(TypedDict):
     variable: str
     iteration: int
@@ -77,41 +85,34 @@ class AttemptRecord(TypedDict):
     verify_pass: bool
     min_precise_digits: Optional[float]
     error: Optional[str]
+    patchset_size_when_attempted: int
+    outcome: str  # "accepted" | "deferred" | "rejected_permanently" | "retry"
 
 
-class DowncastState(TypedDict):
-    # Target context (set once at start, read-only during run)
+# ---------------------------------------------------------------------------
+# Downcast proposer subgraph state
+# (used by the shrunk downcast skill — pure proposer, no loop logic)
+# ---------------------------------------------------------------------------
+
+class DowncastProposerState(TypedDict):
     spec: dict
-    root: str
-    impl_source: str       # Original unpatched source content
-    baseline_csv: str
-    min_digits: float
-    batch: int
-    seed: int
-    max_iterations: int    # Max proposal attempts per variable
-
-    # Iteration control (mutated as the subgraph progresses)
-    variables: List[str]           # Remaining variables to try
-    current_variable: Optional[str]
-    iteration: int                 # Attempt count for current_variable
-
-    # Per-attempt transient state (reset each iteration)
-    current_proposal: Optional[PatchProposal]
-    current_tool_use_id: Optional[str]
-    policy_reject: Optional[str]
-    verify_result: Optional[dict]
-    propose_error: Optional[str]
-
-    # Accumulated results
+    impl_source: str             # pristine unpatched source
     accepted_patches: List[PatchProposal]
     accepted_variables: List[str]
-    rejected_variables: List[str]
-    trace: List[AttemptRecord]
+    current_variable: str
+    iteration: int
+    max_iterations: int
+    min_digits: float
+    base_url: Optional[str]
+    messages: List[dict]         # LLM conversation history for this variable
+    proposal: Optional[PatchProposal]
+    current_tool_use_id: Optional[str]
+    propose_error: Optional[str]
 
-    # LLM conversation history for the current variable (plain list, not add_messages;
-    # reset to [] by pick_variable, explicitly extended by propose and record_result)
-    messages: List[dict]
 
+# ---------------------------------------------------------------------------
+# Top-level orchestrator state
+# ---------------------------------------------------------------------------
 
 class OptimizationState(TypedDict):
     # Input parameters
@@ -123,6 +124,7 @@ class OptimizationState(TypedDict):
     seed: int
     max_iterations: int
     max_driver_retries: int
+    max_requeue_cycles: int
     skills: List[str]
     base_url: Optional[str]
     output_dir: Optional[str]
@@ -132,3 +134,24 @@ class OptimizationState(TypedDict):
     baseline_csv: Optional[str]
     skill_results: Dict[str, dict]
     error: Optional[str]
+
+    # Candidate loop state — set by init_candidate_loop
+    candidates: List[str]
+    deferred: List[dict]            # DeferredVariable dicts
+    patch_set: List[PatchProposal]  # orchestrator-owned cumulative accepted patches
+    accepted_variables: List[str]   # variables with an accepted patch
+    impl_source: Optional[str]      # pristine source loaded once
+    spec: Optional[dict]            # build spec dict built once
+    downcast_baseline_csv: Optional[str]
+    trace: List[dict]               # AttemptRecord dicts
+    requeue_cycles: int
+
+    # Per-variable iteration state — reset by pick_candidate
+    current_variable: Optional[str]
+    iteration: int
+    proposer_messages: List[dict]   # conversation history for current variable
+    current_tool_use_id: Optional[str]
+    current_proposal: Optional[PatchProposal]
+    propose_error: Optional[str]
+    policy_reject: Optional[str]
+    verify_result: Optional[dict]
