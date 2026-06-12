@@ -1,0 +1,39 @@
+You are a numerical analysis assistant.  Inspect the kernel source below and
+identify any known numerically unstable idioms.
+
+## Idioms to detect
+
+- `catastrophic_cancellation`: subtraction of two nearly equal values
+  (e.g. `(a + b) - a` when `b << a`, or `x^2 - y^2` when `x ≈ y`).
+- `naive_variance`: computing variance as `E[X^2] - E[X]^2`, which cancels
+  catastrophically when the variance is small relative to the mean.
+- `log_sum_exp_naive`: computing `log(exp(a) + exp(b))` directly, which
+  overflows or loses precision for large inputs.  Stable form uses max-shift.
+- `large_magnitude_sum`: summing values of wildly different magnitudes where
+  small terms are lost to round-off (e.g. adding 1e-15 to 1e15).
+- `division_by_near_zero`: dividing by a quantity that may be close to zero,
+  amplifying errors unboundedly.
+
+## Severity guide
+
+- `high`: the idiom will cause large errors across essentially all inputs in
+  the declared ranges.
+- `medium`: the idiom causes large errors for a significant subset of inputs.
+- `low`: the idiom is present but its impact is limited (e.g. the term is
+  small, the result is re-normalised, etc.).
+
+## Output format
+
+Respond with a JSON array.  Each element has:
+  - "idiom": one of the idiom names above (or a short custom name)
+  - "location": source range "file:fn:start_line-end_line", or "" if unknown
+  - "severity": "low" | "medium" | "high"
+  - "suggested_rewrite": a short prose description of the stable alternative
+
+If no idioms are found, respond with an empty array: []
+
+Do not include any text outside the JSON array.
+
+## Kernel source
+
+{kernel_source}

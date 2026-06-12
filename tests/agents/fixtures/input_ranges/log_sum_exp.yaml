@@ -1,0 +1,3 @@
+ranges:
+  a: [0.0, 1.0]
+  b: [100.0, 200.0]   # b >> a → exp(b) dominates, exp(a) lost to round-off

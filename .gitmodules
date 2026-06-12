@@ -1,0 +1,4 @@
+[submodule "third_party/tracked"]
+	path = third_party/tracked
+	url = https://github.com/ReetBarik/kokkos-extended-precision-demo.git
+	branch = tracked

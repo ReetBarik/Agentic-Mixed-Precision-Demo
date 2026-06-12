@@ -1,0 +1,4 @@
+ranges:
+  a: [1.0, 1.0e6]
+  b: [1.0e-15, 1.0e-8]   # small values whose sum the compensator must preserve
+  c: [1.0e-15, 1.0e-8]

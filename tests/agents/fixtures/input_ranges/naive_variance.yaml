@@ -1,0 +1,4 @@
+ranges:
+  sum_x: [1.0e6, 1.0e6]    # large mean
+  sum_x2: [1.0e12, 1.0e12] # sum of squares (n samples, each ~1e6)
+  n: [1.0, 1.0]            # single sample — exposes cancellation
