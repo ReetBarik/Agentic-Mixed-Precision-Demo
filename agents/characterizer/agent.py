@@ -57,6 +57,7 @@ def run(state: PipelineState) -> dict:
             kernel_name=kernel_name,
             flag_threshold=cfg.flag_threshold,
             top_n=cfg.top_n_hotspots,
+            sample_count=spec.sample_count,
         )
 
         # Step 5: symbolic overlay (best-effort, never gates pipeline)

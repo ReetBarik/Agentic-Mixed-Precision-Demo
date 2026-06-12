@@ -1,0 +1,7 @@
+[
+  {
+    "call_site": "operator+ and operator- on Tracked<double> in cancellation.cpp",
+    "strategy": "interop_shim",
+    "justification": "Both operations are native overloads on tracked::Tracked<T> with no external math calls; ADL resolves them through Tracked's built-in arithmetic operators, so no shim or wrap is needed beyond what Tracked already provides."
+  }
+]

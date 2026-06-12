@@ -21,6 +21,7 @@ def parse(
     kernel_name: str,
     flag_threshold: float = 1e8,
     top_n: int = 10,
+    sample_count: int | None = None,
 ) -> SensitivityProfile:
     """Parse a Tracked JSONL journal into a SensitivityProfile."""
 
@@ -85,7 +86,8 @@ def parse(
             "for major framework calls."
         )
 
-    samples_run = sum(r.sample_count for r in op_records)
+    # sample_count is kernel invocations; fall back to total JSONL records if unknown
+    samples_run = sample_count if sample_count is not None else len(raw_records)
 
     return SensitivityProfile(
         kernel=kernel_name,

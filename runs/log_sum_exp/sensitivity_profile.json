@@ -1,0 +1,87 @@
+{
+  "kernel": "log_sum_exp_naive",
+  "samples_run": 512,
+  "per_op": [
+    {
+      "op": "exp",
+      "location": "",
+      "max_cond": 199.93535021611603,
+      "max_rel_err": 4.439456584928526e-14,
+      "sample_count": 1024,
+      "provenance_union": [
+        "b",
+        "a"
+      ],
+      "flagged": false
+    },
+    {
+      "op": "add",
+      "location": "",
+      "max_cond": 1.0,
+      "max_rel_err": 4.4505588151747774e-14,
+      "sample_count": 512,
+      "provenance_union": [
+        "b",
+        "a"
+      ],
+      "flagged": false
+    },
+    {
+      "op": "log",
+      "location": "",
+      "max_cond": 0.009994798940629428,
+      "max_rel_err": 2.242638961071085e-16,
+      "sample_count": 512,
+      "provenance_union": [
+        "b",
+        "a"
+      ],
+      "flagged": false
+    }
+  ],
+  "per_line": {},
+  "per_variable": {
+    "b": 199.93535021611603,
+    "a": 199.93535021611603
+  },
+  "top_hotspots": [
+    {
+      "op": "exp",
+      "location": "",
+      "max_cond": 199.93535021611603,
+      "max_rel_err": 4.439456584928526e-14,
+      "sample_count": 1024,
+      "provenance_union": [
+        "b",
+        "a"
+      ],
+      "flagged": false
+    },
+    {
+      "op": "add",
+      "location": "",
+      "max_cond": 1.0,
+      "max_rel_err": 4.4505588151747774e-14,
+      "sample_count": 512,
+      "provenance_union": [
+        "b",
+        "a"
+      ],
+      "flagged": false
+    },
+    {
+      "op": "log",
+      "location": "",
+      "max_cond": 0.009994798940629428,
+      "max_rel_err": 2.242638961071085e-16,
+      "sample_count": 512,
+      "provenance_union": [
+        "b",
+        "a"
+      ],
+      "flagged": false
+    }
+  ],
+  "opaque_coverage": 0.0,
+  "notes": []
+}

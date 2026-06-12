@@ -1,0 +1,68 @@
+{
+  "kernel": "kahan_sum",
+  "samples_run": 512,
+  "per_op": [
+    {
+      "op": "sub",
+      "location": "",
+      "max_cond": 1.5993446277285508e+16,
+      "max_rel_err": 3.648226460506358e+22,
+      "sample_count": 3072,
+      "provenance_union": [
+        "b",
+        "c",
+        "a"
+      ],
+      "flagged": true
+    },
+    {
+      "op": "add",
+      "location": "",
+      "max_cond": 1.0,
+      "max_rel_err": 38827.22360776874,
+      "sample_count": 1024,
+      "provenance_union": [
+        "b",
+        "c",
+        "a"
+      ],
+      "flagged": false
+    }
+  ],
+  "per_line": {},
+  "per_variable": {
+    "b": 1.5993446277285508e+16,
+    "c": 1.5993446277285508e+16,
+    "a": 1.5993446277285508e+16
+  },
+  "top_hotspots": [
+    {
+      "op": "sub",
+      "location": "",
+      "max_cond": 1.5993446277285508e+16,
+      "max_rel_err": 3.648226460506358e+22,
+      "sample_count": 3072,
+      "provenance_union": [
+        "b",
+        "c",
+        "a"
+      ],
+      "flagged": true
+    },
+    {
+      "op": "add",
+      "location": "",
+      "max_cond": 1.0,
+      "max_rel_err": 38827.22360776874,
+      "sample_count": 1024,
+      "provenance_union": [
+        "b",
+        "c",
+        "a"
+      ],
+      "flagged": false
+    }
+  ],
+  "opaque_coverage": 0.0,
+  "notes": []
+}

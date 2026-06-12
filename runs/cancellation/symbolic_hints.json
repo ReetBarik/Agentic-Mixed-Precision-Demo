@@ -1,0 +1,8 @@
+[
+  {
+    "idiom": "catastrophic_cancellation",
+    "location": "cancellation_check:2-4",
+    "severity": "high",
+    "suggested_rewrite": "Return b directly instead of computing (a + b) - a, or if measuring round-off intentionally, document it. For sums, use compensated summation (Kahan) to preserve small addends."
+  }
+]

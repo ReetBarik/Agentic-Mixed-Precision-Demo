@@ -1,0 +1,92 @@
+{
+  "kernel": "naive_variance",
+  "samples_run": 2048,
+  "per_op": [
+    {
+      "op": "sub",
+      "location": "",
+      "max_cond": 9007199254740992.0,
+      "max_rel_err": 4.0,
+      "sample_count": 512,
+      "provenance_union": [
+        "sum_x",
+        "n",
+        "sum_x2"
+      ],
+      "flagged": true
+    },
+    {
+      "op": "div",
+      "location": "",
+      "max_cond": 1.0,
+      "max_rel_err": 2.220446049250313e-16,
+      "sample_count": 1024,
+      "provenance_union": [
+        "sum_x",
+        "n",
+        "sum_x2"
+      ],
+      "flagged": false
+    },
+    {
+      "op": "mul",
+      "location": "",
+      "max_cond": 1.0,
+      "max_rel_err": 3.3306690738754696e-16,
+      "sample_count": 512,
+      "provenance_union": [
+        "sum_x",
+        "n"
+      ],
+      "flagged": false
+    }
+  ],
+  "per_line": {},
+  "per_variable": {
+    "sum_x": 9007199254740992.0,
+    "n": 9007199254740992.0,
+    "sum_x2": 9007199254740992.0
+  },
+  "top_hotspots": [
+    {
+      "op": "sub",
+      "location": "",
+      "max_cond": 9007199254740992.0,
+      "max_rel_err": 4.0,
+      "sample_count": 512,
+      "provenance_union": [
+        "sum_x",
+        "n",
+        "sum_x2"
+      ],
+      "flagged": true
+    },
+    {
+      "op": "div",
+      "location": "",
+      "max_cond": 1.0,
+      "max_rel_err": 2.220446049250313e-16,
+      "sample_count": 1024,
+      "provenance_union": [
+        "sum_x",
+        "n",
+        "sum_x2"
+      ],
+      "flagged": false
+    },
+    {
+      "op": "mul",
+      "location": "",
+      "max_cond": 1.0,
+      "max_rel_err": 3.3306690738754696e-16,
+      "sample_count": 512,
+      "provenance_union": [
+        "sum_x",
+        "n"
+      ],
+      "flagged": false
+    }
+  ],
+  "opaque_coverage": 0.0,
+  "notes": []
+}

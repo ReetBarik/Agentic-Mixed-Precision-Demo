@@ -1,0 +1,63 @@
+{
+  "kernel": "cancellation_check",
+  "samples_run": 1024,
+  "per_op": [
+    {
+      "op": "sub",
+      "location": "",
+      "max_cond": 37687026170465.41,
+      "max_rel_err": 0.01255230125523046,
+      "sample_count": 512,
+      "provenance_union": [
+        "b",
+        "a"
+      ],
+      "flagged": true
+    },
+    {
+      "op": "add",
+      "location": "",
+      "max_cond": 1.0,
+      "max_rel_err": 2.220446049250313e-16,
+      "sample_count": 512,
+      "provenance_union": [
+        "b",
+        "a"
+      ],
+      "flagged": false
+    }
+  ],
+  "per_line": {},
+  "per_variable": {
+    "b": 37687026170465.41,
+    "a": 37687026170465.41
+  },
+  "top_hotspots": [
+    {
+      "op": "sub",
+      "location": "",
+      "max_cond": 37687026170465.41,
+      "max_rel_err": 0.01255230125523046,
+      "sample_count": 512,
+      "provenance_union": [
+        "b",
+        "a"
+      ],
+      "flagged": true
+    },
+    {
+      "op": "add",
+      "location": "",
+      "max_cond": 1.0,
+      "max_rel_err": 2.220446049250313e-16,
+      "sample_count": 512,
+      "provenance_union": [
+        "b",
+        "a"
+      ],
+      "flagged": false
+    }
+  ],
+  "opaque_coverage": 0.0,
+  "notes": []
+}

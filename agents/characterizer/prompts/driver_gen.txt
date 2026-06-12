@@ -21,6 +21,9 @@ Produce the following in a single response:
 
 1. `driver_source` — a complete, self-contained `.cpp` file that:
    a. Includes the necessary Tracked headers (`<tracked/tracked.hpp>`,
+      `<tracked/ops.hpp>` — always include this; it defines `tracked::log`,
+      `tracked::exp`, `tracked::sqrt`, `tracked::abs`, `tracked::sin`,
+      `tracked::cos`, `tracked::atan2` which interop shims delegate to —
       `<tracked/complex.hpp>` when complex types are needed,
       `<tracked/journal.hpp>`).
    b. For each non-templatable framework math call, adds an interop shim

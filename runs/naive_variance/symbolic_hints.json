@@ -1,0 +1,8 @@
+[
+  {
+    "idiom": "naive_variance",
+    "location": "naive_variance:4-8",
+    "severity": "high",
+    "suggested_rewrite": "Use a numerically stable algorithm such as Welford's online algorithm or the two-pass algorithm that computes the mean first and then sums (x_i - mean)^2, avoiding the cancellation of E[X^2] - E[X]^2."
+  }
+]
