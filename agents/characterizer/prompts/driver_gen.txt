@@ -141,6 +141,38 @@ Produce the following in a single response:
    Never discard provenance.  An opaque call with no tracked inputs produces
    records with empty provenance, making attribution impossible.
 
+8. **Source location capture (`TRACKED_HERE`).**  When you emit Tracked
+   arithmetic in the driver itself — inside interop shims, opaque wrappers,
+   `kAbs`/`kLog` definitions, post-processing, anywhere driver-side ops run
+   — use named Tracked functions with `TRACKED_HERE` so journal records
+   carry `file:fn:line` for per-line attribution.  Prefer:
+
+     `tracked::sub(a, b, TRACKED_HERE)` over `a - b`
+     `tracked::log(x, TRACKED_HERE)` over `tracked::log(x)`
+     `tracked::mul(x, y, TRACKED_HERE)` over `x * y`
+
+   Example inside an interop shim:
+
+     ```cpp
+     template <class T>
+     tracked::Tracked<T> kAbs(const tracked::Complex<T>& z) {
+         auto re = z.real();
+         auto im = z.imag();
+         auto re2 = tracked::mul(re, re, TRACKED_HERE);
+         auto im2 = tracked::mul(im, im, TRACKED_HERE);
+         auto sum = tracked::add(re2, im2, TRACKED_HERE);
+         return tracked::sqrt(sum, TRACKED_HERE);
+     }
+     ```
+
+   This populates the characterizer's `per_line` rollup with per-source-line
+   sensitivity data.  Operators (`+ - * /`) emit `at:""` and lose that
+   attribution.
+
+   **Limitation:** you can NOT add `TRACKED_HERE` inside the user's kernel
+   body — it's their code, we must `#include` it verbatim.  Driver-side ops
+   are the only place to add location capture.
+
 ## Critical rules
 
 - **Never rewrite or simplify the kernel body.** Always `#include` the

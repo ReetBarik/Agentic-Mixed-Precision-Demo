@@ -89,6 +89,35 @@ caught and corrected automatically within the pipeline.
 
 ---
 
+## 0.5. `TRACKED_HERE` in driver-side ops (already done)
+
+The `driver_gen.txt` prompt now includes rule 8 instructing the LLM to use
+named `tracked::` functions with `TRACKED_HERE` for any arithmetic emitted
+on the driver side (inside shims, opaque wrappers, post-processing).  After
+this change, future runs should populate the `per_line` rollup with
+locations for shim-side ops.
+
+**Known limitation:** kernel-internal ops still emit `at:""` because we
+`#include` the kernel verbatim and never modify it.  Calibration fixtures
+(cancellation, naive_variance, kahan) have `TRACKED_HERE` baked in because
+they're our test fixtures.  Real-world kernels like cLn, Lnrat will only
+have per-line attribution for the driver-side opaque/shim ops.
+
+If in the future you want full per-line attribution on a user kernel, the
+options are:
+  (a) Document that users can add `TRACKED_HERE` to their own code for
+      better characterization.  Cheap, optional, doesn't break anything.
+  (b) Have the characterizer emit a copy of the kernel with `TRACKED_HERE`
+      injected at every operator site.  Violates the "never rewrite the
+      kernel" rule — don't.
+  (c) Use `__FILE__`/`__LINE__` macros in the operator overloads themselves.
+      Requires changes to the Tracked library and would explode record
+      sizes.  Don't.
+
+Option (a) is the only sane path, and only when the user opts in.
+
+---
+
 ## 1. `cLn` end-to-end
 
 ### 1a. Kokkos availability check
