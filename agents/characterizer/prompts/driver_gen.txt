@@ -151,18 +151,22 @@ Produce the following in a single response:
      `tracked::log(x, TRACKED_HERE)` over `tracked::log(x)`
      `tracked::mul(x, y, TRACKED_HERE)` over `x * y`
 
-   Example inside an interop shim:
+   Example inside an interop shim into a framework namespace:
 
      ```cpp
-     template <class T>
-     tracked::Tracked<T> kAbs(const tracked::Complex<T>& z) {
-         auto re = z.real();
-         auto im = z.imag();
-         auto re2 = tracked::mul(re, re, TRACKED_HERE);
-         auto im2 = tracked::mul(im, im, TRACKED_HERE);
-         auto sum = tracked::add(re2, im2, TRACKED_HERE);
-         return tracked::sqrt(sum, TRACKED_HERE);
+     namespace std {
+         inline tracked::Tracked<double> log(const tracked::Tracked<double>& x) {
+             return tracked::log(x, TRACKED_HERE);   // propagates location
+         }
      }
+     ```
+
+   Example for any driver-side computation (post-processing, ad-hoc helpers,
+   or arithmetic emitted inside a shim body):
+
+     ```cpp
+     auto sum  = tracked::add(a, b,   TRACKED_HERE);
+     auto prod = tracked::mul(sum, c, TRACKED_HERE);
      ```
 
    This populates the characterizer's `per_line` rollup with per-source-line
