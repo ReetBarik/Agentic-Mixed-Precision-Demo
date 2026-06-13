@@ -1,0 +1,22 @@
+[
+  {
+    "call_site": "ql::kAbs(tracked::Tracked<T>) @ lnrat_kernel.hpp (forward decl)",
+    "strategy": "interop_shim",
+    "justification": "Standard absolute-value op on a scalar tracked type; delegate directly to tracked::abs so interior numerics (and condition number) are recorded."
+  },
+  {
+    "call_site": "ql::kLog(tracked::Tracked<T>) @ lnrat_kernel.hpp (forward decl)",
+    "strategy": "interop_shim",
+    "justification": "Standard log on a scalar tracked type; delegate directly to tracked::log for full provenance and sensitivity capture."
+  },
+  {
+    "call_site": "ql::kAbs(tracked::Complex<T>) @ lnrat_kernel.hpp (forward decl)",
+    "strategy": "opaque_wrap",
+    "justification": "Kokkos::abs has no overload for tracked::Complex<T>; we compute |z| on the underlying Kokkos::complex<T> and re-enter the tracked domain via tracked::opaque, forwarding both component provenances."
+  },
+  {
+    "call_site": "ql::kLog(tracked::Complex<T>) @ lnrat_kernel.hpp (forward decl)",
+    "strategy": "opaque_wrap",
+    "justification": "Kokkos::log on tracked::Complex<T> is not available; wrap the Kokkos::complex<T> result with tracked::opaque per-component so downstream arithmetic still carries x/y provenance."
+  }
+]

@@ -1,0 +1,141 @@
+{
+  "kernel": "Lnrat",
+  "samples_run": 256,
+  "per_op": [
+    {
+      "op": "sub",
+      "location": "",
+      "max_cond": 150.09157817895266,
+      "max_rel_err": 6.665405035863999e-14,
+      "sample_count": 256,
+      "provenance_union": [
+        "x",
+        "y"
+      ],
+      "flagged": false
+    },
+    {
+      "op": "add",
+      "location": "",
+      "max_cond": 27.825676536729844,
+      "max_rel_err": 1.2357082706739783e-14,
+      "sample_count": 512,
+      "provenance_union": [
+        "x",
+        "y"
+      ],
+      "flagged": false
+    },
+    {
+      "op": "div",
+      "location": "",
+      "max_cond": 1.0,
+      "max_rel_err": 6.67650726611025e-14,
+      "sample_count": 768,
+      "provenance_union": [
+        "x",
+        "y"
+      ],
+      "flagged": false
+    },
+    {
+      "op": "mul",
+      "location": "",
+      "max_cond": 1.0,
+      "max_rel_err": 3.3306690738754696e-16,
+      "sample_count": 768,
+      "provenance_union": [
+        "x",
+        "y"
+      ],
+      "flagged": false
+    },
+    {
+      "op": "opaque",
+      "location": "",
+      "max_cond": 1.0,
+      "max_rel_err": 6.687609496356502e-14,
+      "sample_count": 512,
+      "provenance_union": [
+        "Kokkos::log.im",
+        "x",
+        "Kokkos::log.re",
+        "y"
+      ],
+      "flagged": false
+    }
+  ],
+  "per_line": {},
+  "per_variable": {
+    "x": 150.09157817895266,
+    "y": 150.09157817895266,
+    "Kokkos::log.re": 1.0,
+    "Kokkos::log.im": 1.0
+  },
+  "top_hotspots": [
+    {
+      "op": "sub",
+      "location": "",
+      "max_cond": 150.09157817895266,
+      "max_rel_err": 6.665405035863999e-14,
+      "sample_count": 256,
+      "provenance_union": [
+        "x",
+        "y"
+      ],
+      "flagged": false
+    },
+    {
+      "op": "add",
+      "location": "",
+      "max_cond": 27.825676536729844,
+      "max_rel_err": 1.2357082706739783e-14,
+      "sample_count": 512,
+      "provenance_union": [
+        "x",
+        "y"
+      ],
+      "flagged": false
+    },
+    {
+      "op": "div",
+      "location": "",
+      "max_cond": 1.0,
+      "max_rel_err": 6.67650726611025e-14,
+      "sample_count": 768,
+      "provenance_union": [
+        "x",
+        "y"
+      ],
+      "flagged": false
+    },
+    {
+      "op": "mul",
+      "location": "",
+      "max_cond": 1.0,
+      "max_rel_err": 3.3306690738754696e-16,
+      "sample_count": 768,
+      "provenance_union": [
+        "x",
+        "y"
+      ],
+      "flagged": false
+    },
+    {
+      "op": "opaque",
+      "location": "",
+      "max_cond": 1.0,
+      "max_rel_err": 6.687609496356502e-14,
+      "sample_count": 512,
+      "provenance_union": [
+        "Kokkos::log.im",
+        "x",
+        "Kokkos::log.re",
+        "y"
+      ],
+      "flagged": false
+    }
+  ],
+  "opaque_coverage": 0.2,
+  "notes": []
+}

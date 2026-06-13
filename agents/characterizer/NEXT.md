@@ -3,31 +3,89 @@
 **Branch:** `langgraph-agents` (continuing).
 **Sibling dep:** `kokkos-extended-precision-demo` branch `tracked` at
 commit `8cae2c0` or later (Tracked v1.1 with the opaque fix).
-**Last commit on this branch:** `6d357bb` (TRACKED_HERE in fixtures + README walkthrough).
+**Last commit on this branch:** cLn + Lnrat end-to-end runs, fixture infrastructure,
+framework detection fixes, prompt additions for complex/Kokkos drivers.
 
 This is the followup to `agents/characterizer/PLAN.md` after the v1 vertical
 slice landed.  Four calibration fixtures (cancellation, naive_variance,
 log_sum_exp, kahan) already run end-to-end and produce sensitivity profiles
-that flag the expected hotspots.  Items below are what's left to get the
-slice to "done enough to start strategy agent work."
+that flag the expected hotspots.  cLn and Lnrat (QCDLoop) also now run.
+Items below are what's left to get the slice to "done enough to start strategy
+agent work."
 
 ## Priority order
 
-1. **`cLn` end-to-end** — first complex/Kokkos test.  Required to prove the
-   characterizer handles real-world kernels.
-2. **A few more QCDLoop kernels** — `Lnrat`, `fndd`, maybe `ddilog`.  Cheap
-   wins once `cLn` works.
+1. **Driver compile-retry loop** — highest priority missing feature.  See §0.
+2. **More QCDLoop kernels** — `fndd`, maybe `ddilog`.  See §2.
 3. **Test suite expansion** — `test_build_run_stub.py`,
    `test_characterizer_e2e.py`.  Deferred from v1 because they need cmake
    + LLM infra.
 4. **Snapshot tests for prompts** — `test_driver_gen.py`,
    `test_symbolic_overlay.py`.  Lowest priority; nice to have for prompt
    regression but slow to write and maintain.
-Items 1 and 2 are the real work; 3 and 4 are polish.
+Item 1 is the real infrastructure gap; 2 is the real work; 3 and 4 are polish.
 
 **Note on `runs/`:** committed intentionally so the user (developing on a
 remote cluster) can share run artifacts with assistants who don't have
 SSH access.  Do not gitignore.  Add new runs as they're produced.
+
+---
+
+## 0. Driver compile-retry loop (highest priority)
+
+Currently `driver_gen.generate()` makes a single LLM call and returns.  If the
+generated driver fails to compile, the error surfaces as a pipeline failure and
+the user has to fix the fixture or prompt by hand and re-run.  This is wrong —
+the README diagram explicitly shows:
+
+```
+H[Compile]
+H -- Failed --> I[Feed error back to LLM]
+I --> G
+```
+
+### What to build
+
+A multi-turn retry loop, up to `cfg.max_driver_retries` attempts (default 5):
+
+1. Call `driver_gen.generate(spec, cfg, messages=[])` → driver source.
+2. Call `build_run_agent.build_and_run(driver_source, ...)`.
+3. If `returncode == 0`: break → success.
+4. If retries remain: append the LLM's previous response and the build error as
+   a two-message follow-up turn, then call `driver_gen.generate()` again with
+   the extended message history.  The LLM sees its own previous attempt plus
+   the compiler output and revises.
+5. After `max_driver_retries` failures: surface as a pipeline error (current
+   behaviour).
+
+### Implementation sketch
+
+`driver_gen.generate()` gains an optional `messages` parameter (the full
+conversation history so far).  On the first call it's a single user message
+(the current prompt).  On retry it's extended with:
+
+```python
+[
+    *prev_messages,
+    {"role": "assistant", "content": prev_response.content},  # LLM's tool call
+    {"role": "user", "content": (
+        "The driver above failed to compile.  Build error:\n\n"
+        f"```\n{stderr[:3000]}\n```\n\n"
+        "Please revise the driver to fix the compilation error.  "
+        "Do not change the kernel logic — only fix the driver scaffolding."
+    )},
+]
+```
+
+The retry loop lives in `characterizer/agent.py` between steps 2 and 3.
+`driver_gen.generate()` stays responsible for a single LLM round-trip;
+the loop assembles the conversation and drives the iteration.
+
+### Why this matters
+
+Fixture bugs that currently require manual intervention (type mismatches in
+helper signatures, missing includes, incorrect template instantiations) would be
+caught and corrected automatically within the pipeline.
 
 ---
 

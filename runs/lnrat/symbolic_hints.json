@@ -1,0 +1,20 @@
+[
+  {
+    "idiom": "division_by_near_zero",
+    "location": "Lnrat:complex_overload",
+    "severity": "medium",
+    "suggested_rewrite": "Computing r = x / y without guarding against |y| \u2248 0; for small y this amplifies error unboundedly. Use log(x) - log(y) directly (with branch handling) or check |y| against a tolerance before forming the ratio."
+  },
+  {
+    "idiom": "division_by_near_zero",
+    "location": "Lnrat:real_overload",
+    "severity": "medium",
+    "suggested_rewrite": "x / y can blow up when y is near zero; prefer log|x| - log|y| to avoid forming the ratio, which both prevents overflow/underflow and reduces error amplification."
+  },
+  {
+    "idiom": "catastrophic_cancellation",
+    "location": "Lnrat:complex_overload",
+    "severity": "low",
+    "suggested_rewrite": "log(kAbs(r)) where r = x/y suffers cancellation when |r| \u2248 1 (i.e. x \u2248 y); use log1p(|r|-1) computed from a stable expression, or log|x| - log|y|, to preserve precision near the branch."
+  }
+]

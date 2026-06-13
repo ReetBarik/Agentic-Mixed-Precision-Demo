@@ -54,7 +54,7 @@ def build_and_run(
         f"-DCMAKE_BUILD_TYPE=Release",
     ]
     if framework == "kokkos-serial" and cfg.kokkos_root:
-        configure_cmd.append(f"-DKokkos_DIR={cfg.kokkos_root}")
+        configure_cmd.append(f"-DCMAKE_PREFIX_PATH={cfg.kokkos_root}")
 
     configure_result = subprocess.run(
         configure_cmd,
@@ -126,14 +126,17 @@ def _render_cmake(framework: str, cfg: PipelineConfig) -> str:
 
     find_package_lines = ""
     link_libs = ""
+    extra_include_dirs = ""
     if framework == "kokkos-serial":
         find_package_lines = "find_package(Kokkos REQUIRED)"
         link_libs = "Kokkos::kokkos"
+        if cfg.kokkos_root:
+            extra_include_dirs = str(cfg.kokkos_root / "include")
 
     return template.format(
         cxx_standard=cfg.cxx_standard,
         find_package_lines=find_package_lines,
         tracked_include_dir=tracked_include,
-        extra_include_dirs="",
+        extra_include_dirs=extra_include_dirs,
         link_libs=link_libs,
     )

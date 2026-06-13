@@ -1,0 +1,5 @@
+ranges:
+  x_re: [0.5, 3.0]   # real part of complex x
+  x_im: [-1.0, 1.0]  # imag part — small values exercise near-branch-cut path
+  y_re: [0.5, 3.0]   # real part of complex y
+  y_im: [-1.0, 1.0]  # imag part

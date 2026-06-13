@@ -1,0 +1,4 @@
+ranges:
+  z_re:  [-2.0,  2.0]   # real part of complex input z
+  z_im:  [-1.0,  1.0]   # imag part — small values exercise near-branch-cut path
+  isig:  [-1.0,  1.0]   # branch-cut sign selector

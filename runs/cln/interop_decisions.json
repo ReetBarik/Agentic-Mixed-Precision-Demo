@@ -1,0 +1,27 @@
+[
+  {
+    "call_site": "ql::kLog(const tracked::Complex<T>&) @ cln_kernel.hpp (else branch and -z branch)",
+    "strategy": "opaque_wrap",
+    "justification": "Kokkos::log on Kokkos::complex<T> has no Tracked overload; we compute the raw result and wrap with tracked::opaque, forwarding both components so provenance is preserved."
+  },
+  {
+    "call_site": "ql::kLog(const tracked::Tracked<T>&) \u2014 scalar overload (declared in header for completeness)",
+    "strategy": "interop_shim",
+    "justification": "Delegates directly to tracked::log, which is the instrumented scalar logarithm provided by <tracked/ops.hpp>."
+  },
+  {
+    "call_site": "ql::kAbs(const tracked::Tracked<T>&) \u2014 scalar overload",
+    "strategy": "interop_shim",
+    "justification": "Delegates to tracked::abs from <tracked/ops.hpp>; fully instrumented."
+  },
+  {
+    "call_site": "ql::kAbs(const tracked::Complex<T>&) \u2014 complex magnitude",
+    "strategy": "interop_shim",
+    "justification": "Reimplemented as sqrt(re*re+im*im) using tracked primitives so every sub-op is journaled (the kernel does not actually call this overload, but it is declared so we must define it)."
+  },
+  {
+    "call_site": "ql::Sign(const T&) @ cln_kernel.hpp",
+    "strategy": "inline_reimpl",
+    "justification": "Already defined in the kernel header as a plain templated inline returning int; no shim needed and it works on Tracked<T> via its comparison operators."
+  }
+]

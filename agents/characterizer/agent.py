@@ -44,7 +44,7 @@ def run(state: PipelineState) -> dict:
         if run_result.returncode != 0:
             msg = (
                 f"build/run failed for {kernel_name}: "
-                f"{run_result.stderr[:500]}"
+                f"{run_result.stderr[:2000]}"
             )
             print(f"[characterizer] {msg}", file=sys.stderr)
             return {**updates, "errors": [msg]}
@@ -138,21 +138,26 @@ def _spec_build(
             else:
                 parameter_types.append((raw_param, raw_param))
 
-    # Detect framework from source text
+    # Detect framework from source text.
+    # Match Kokkos_Core.hpp, Kokkos::, and KOKKOS_ macros.
     framework = "plain-cpp"
-    if re.search(r"\bKokkos\b", source_text):
+    if re.search(r"Kokkos_Core\.hpp|Kokkos::|KOKKOS_", source_text):
         framework = "kokkos-serial"
 
     # Detect user-side dispatchers (function calls that look like kXxx)
     dispatcher_pattern = re.compile(r"\b(k[A-Z]\w+)\s*\(")
     detected_dispatchers = list(set(dispatcher_pattern.findall(source_text)))
 
-    # Heuristic template instantiation: real → Tracked<double>, complex → Complex<double>
+    # Per-parameter template instantiation: params that appear as arguments to
+    # Imag()/Real() calls are complex; all others are real scalars.
+    complex_param_names: set[str] = set()
+    for m in re.finditer(r'\b(?:Imag|Real)\s*\(\s*(\w+)', source_text):
+        complex_param_names.add(m.group(1))
+
     template_instantiation: dict[str, str] = {}
-    is_complex = bool(re.search(r"\bImag\b|\bReal\b|\bcomplex\b", source_text, re.IGNORECASE))
     for name, type_str in parameter_types:
         if "template" in type_str.lower() or type_str.startswith("T"):
-            if is_complex:
+            if name in complex_param_names:
                 template_instantiation[type_str] = "tracked::Complex<double>"
             else:
                 template_instantiation[type_str] = "tracked::Tracked<double>"

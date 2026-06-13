@@ -38,6 +38,11 @@ Produce the following in a single response:
       - Use `<random>` (`std::mt19937` seeded with 42) to draw uniform samples
         from each argument's `[min, max]` range on every iteration.
       - Wrap each sample: `auto x = tracked::track("x", x_sample);`
+      - For **complex parameters**, use the two-argument track factory:
+        `auto z = tracked::track("z", z_re_sample, z_im_sample);`
+        where `z_re_sample` and `z_im_sample` are sampled from the `z_re`
+        and `z_im` input ranges respectively.  The two components share the
+        provenance id `"z"`.
       - Call the kernel.
       - Print result only on the first iteration (avoid stdout flood).
       - After the loop, flush once: `tracked::journal::flush("journal.jsonl");`
@@ -61,6 +66,40 @@ Produce the following in a single response:
    Empty dict if none.
 
 4. `notes` — a short paragraph explaining your overall strategy.
+
+## Framework-specific rules
+
+- **Kokkos (`framework == "kokkos-serial"`)**: include `<Kokkos_Core.hpp>` and
+  wrap the entire body of `main()` in:
+  ```cpp
+  Kokkos::initialize();
+  {
+      // tracked::track calls, kernel invocation, journal flush here
+  }
+  Kokkos::finalize();
+  ```
+- **`KOKKOS_INLINE_FUNCTION`**: kernel source files may carry this macro on
+  function definitions.  When you include `<Kokkos_Core.hpp>` it is already
+  defined correctly.  If for any reason you don't include Kokkos, add:
+  ```cpp
+  #ifndef KOKKOS_INLINE_FUNCTION
+  #define KOKKOS_INLINE_FUNCTION inline
+  #endif
+  ```
+  before including the kernel header.
+- **Kokkos math on complex types**: `Kokkos::log`, `Kokkos::abs`, etc. are
+  NOT overloaded for `tracked::Complex<T>`.  Never call them directly on a
+  `tracked::Complex` value.  You MUST provide an `opaque_wrap` or
+  `interop_shim` for every such call site.  Example opaque_wrap for kLog:
+  ```cpp
+  template <class T>
+  inline tracked::Complex<T> kLog(const tracked::Complex<T>& z) {
+      Kokkos::complex<T> raw{z.real().value(), z.imag().value()};
+      Kokkos::complex<T> r = Kokkos::log(raw);
+      return tracked::opaque<T>("Kokkos::log", r.real(), r.imag(),
+                                z.real(), z.imag());
+  }
+  ```
 
 ## Strategy rules
 

@@ -1,0 +1,44 @@
+{
+  "kernel": "cLn",
+  "samples_run": 256,
+  "per_op": [
+    {
+      "op": "opaque",
+      "location": "",
+      "max_cond": 1.0,
+      "max_rel_err": 2.220446049250313e-16,
+      "sample_count": 512,
+      "provenance_union": [
+        "z",
+        "Kokkos::log.im",
+        "Kokkos::log.re"
+      ],
+      "flagged": false
+    }
+  ],
+  "per_line": {},
+  "per_variable": {
+    "z": 1.0,
+    "Kokkos::log.im": 1.0,
+    "Kokkos::log.re": 1.0
+  },
+  "top_hotspots": [
+    {
+      "op": "opaque",
+      "location": "",
+      "max_cond": 1.0,
+      "max_rel_err": 2.220446049250313e-16,
+      "sample_count": 512,
+      "provenance_union": [
+        "z",
+        "Kokkos::log.im",
+        "Kokkos::log.re"
+      ],
+      "flagged": false
+    }
+  ],
+  "opaque_coverage": 1.0,
+  "notes": [
+    "kernel is heavily opaque (100%); consider expanding Tracked op coverage or switching opaque\u2192interop for major framework calls."
+  ]
+}
