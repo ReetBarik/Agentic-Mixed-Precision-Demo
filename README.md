@@ -202,6 +202,98 @@ This makes accept/reject decisions deterministic and independent of platform flo
 
 ---
 
+## Characterizer slice (v2, langgraph-agents branch)
+
+The `agents/` tree implements the first vertical slice of the v2 multi-agent
+pipeline: a LangGraph orchestrator with a real characterizer agent and
+deterministic pass-through stubs for strategy / patcher / validator.  See
+`agents/characterizer/PLAN.md` for the design and `CHARACTERIZER_NOTES.md`
+for the framework-agnostic lessons feeding the prompt.
+
+### Prerequisites
+
+- Python deps:  `pip install -r requirements-langgraph.txt`
+- Tracked submodule:  `git submodule update --init --recursive`
+  (clones `kokkos-extended-precision-demo` @ `tracked` into
+  `third_party/tracked/`).
+- CMake (`>=3.18`) on PATH.
+- For Kokkos-backed kernels: a Serial-only Kokkos install.  The Tracked
+  repo ships `examples/cln_micro/build_kokkos_serial.sh` to produce one
+  at `$HOME/kokkos-install`.
+- Argo proxy running (the same `run-argo.sh` from the v1 workflow); the
+  characterizer's `driver_gen` and `symbolic_overlay` nodes hit it for
+  Claude Opus 4.7.
+
+### One kernel, end to end
+
+```bash
+python -m agents.cli characterize \
+  --kernel tests/agents/fixtures/kernels/cancellation.cpp \
+  --kernel-name cancellation_check \
+  --ranges-yaml tests/agents/fixtures/input_ranges/cancellation.yaml \
+  --samples 512 \
+  --out runs/cancellation
+```
+
+Artifacts land in `runs/cancellation/`:
+
+- `src/micro_driver.cpp`         — LLM-generated driver
+- `CMakeLists.txt`               — rendered build script
+- `interop_decisions.json`       — per-call strategy choices (shim / opaque / inline)
+- `journal.jsonl`                — raw Tracked output
+- `sensitivity_profile.json`     — characterizer's roll-up
+- `symbolic_hints.json`          — LLM idiom detection (best-effort)
+
+### Running against all calibration fixtures
+
+```bash
+for k in cancellation naive_variance log_sum_exp kahan; do
+  python -m agents.cli characterize \
+    --kernel tests/agents/fixtures/kernels/${k}.cpp \
+    --kernel-name $(python -c "print({'cancellation':'cancellation_check','naive_variance':'naive_variance','log_sum_exp':'log_sum_exp_naive','kahan':'kahan_sum'}['$k'])") \
+    --ranges-yaml tests/agents/fixtures/input_ranges/${k}.yaml \
+    --samples 512 \
+    --out runs/${k}
+done
+```
+
+Expected: each profile flags the predicted hotspot.  See
+`runs/<name>/sensitivity_profile.json` — the `top_hotspots` list is sorted
+by max condition number, descending.
+
+### Kokkos kernel (Serial backend)
+
+```bash
+python -m agents.cli characterize \
+  --kernel tests/agents/fixtures/kernels/cln_kernel.hpp \
+  --kernel-name cLn \
+  --ranges-yaml tests/agents/fixtures/input_ranges/cln_kernel.yaml \
+  --samples 256 \
+  --kokkos-root $HOME/kokkos-install \
+  --out runs/cln
+```
+
+The characterizer detects the Kokkos framework from the source, picks
+per-call strategies for `Kokkos::log` / `Kokkos::abs` (interop shim or
+opaque wrap), and propagates provenance through the boundary.
+
+### What's stubbed
+
+- **Strategy / patcher / validator** agents return identity — the
+  characterizer always exits the graph at strategy with an empty queue.
+- **Build/run agent** is a deterministic subprocess wrapper (no LLM).
+  Future work: LLM-driven build/run with framework detection and module
+  loading.
+
+### Tests
+
+```bash
+pytest tests/agents/test_log_parser.py
+```
+
+Pure-unit log parser tests (13).  E2E and driver-gen tests are deferred
+— see `agents/characterizer/PLAN.md` for the planned test suite.
+
 ## Adding a new target
 
 No catalog or spec file is needed. Just point the agent at any C++ header and function name:
