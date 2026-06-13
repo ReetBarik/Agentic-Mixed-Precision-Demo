@@ -20,10 +20,13 @@ agent work."
 3. **Test suite expansion** — `test_build_run_stub.py`,
    `test_characterizer_e2e.py`.  Deferred from v1 because they need cmake
    + LLM infra.
-4. **Snapshot tests for prompts** — `test_driver_gen.py`,
+4. **Relative paths in per_line keys** — low priority; needed before the
+   strategy agent does cross-run matching.  See §4.
+5. **Snapshot tests for prompts** — `test_driver_gen.py`,
    `test_symbolic_overlay.py`.  Lowest priority; nice to have for prompt
    regression but slow to write and maintain.
-Item 1 is the real infrastructure gap; 2 is the real work; 3 and 4 are polish.
+
+Item 1 is the real infrastructure gap; 2 is the real work; 3–5 are polish.
 
 **Note on `runs/`:** committed intentionally so the user (developing on a
 remote cluster) can share run artifacts with assistants who don't have
@@ -397,7 +400,39 @@ require external services.  Local-only with explicit marker selection.
 
 ---
 
-## 4. Snapshot tests for prompts (lowest priority)
+## 4. Relative paths in `per_line` keys (low priority)
+
+The `per_line` keys are absolute filesystem paths
+(e.g. `/home/rbarik/Agentic-Mixed-Precision-Demo/runs/log_sum_exp/src/micro_driver.cpp:exp:28`).
+Within a single run this is harmless — it's just a unique key.  Cross-run
+comparison (which the strategy agent will eventually want for
+"this same op also fired in baseline_runs/...") will break because the
+path varies by where the user clones the repo and where artifacts land.
+
+**Fix:** in `log_parser.parse`, normalize each `at` field to a path
+relative to the run's work directory (or to the kernel source root)
+before using it as an aggregation key.  Something like:
+
+```python
+loc = rec.get("at", rec.get("loc", rec.get("location", "")))
+if loc and work_dir:
+    file_part, _, lineinfo = loc.partition(":")
+    try:
+        rel = str(Path(file_part).resolve().relative_to(work_dir.resolve()))
+        loc = f"{rel}:{lineinfo}"
+    except ValueError:
+        pass  # path not under work_dir — keep absolute
+```
+
+Requires `parse` to take `work_dir` as a parameter (already passed in
+from `agent.py`, just add it to the signature).
+
+Not urgent for v1.  Bring this in when the strategy agent starts using
+location keys for matching across runs.
+
+---
+
+## 5. Snapshot tests for prompts (lowest priority)
 
 `tests/agents/test_driver_gen.py` using `syrupy` (or hand-rolled
 fixture diffing).  For each calibration kernel, run `driver_gen`,
