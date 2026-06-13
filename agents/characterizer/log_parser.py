@@ -31,7 +31,7 @@ def parse(
     aggregated: dict[tuple[str, str], _Agg] = {}
     for rec in raw_records:
         op = rec.get("op", "unknown")
-        loc = rec.get("loc", rec.get("location", ""))
+        loc = rec.get("at", rec.get("loc", rec.get("location", "")))
         cond = float(rec.get("cond", 0.0))
         rel_err = float(rec.get("rel_err", 0.0))
         prov = set(rec.get("prov", rec.get("provenance", [])))

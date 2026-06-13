@@ -1,8 +1,8 @@
 [
   {
     "idiom": "log_sum_exp_naive",
-    "location": "kernel.hpp:log_sum_exp_naive:7-9",
+    "location": "file:log_sum_exp_naive:11-13",
     "severity": "high",
-    "suggested_rewrite": "Use max-shift: let m = max(a,b); return m + log(exp(a-m) + exp(b-m)). This avoids overflow for large inputs and underflow/precision loss when one term dominates."
+    "suggested_rewrite": "Use max-shift: let m = max(a,b); return m + log(exp(a-m) + exp(b-m)), which avoids overflow for large inputs and underflow-to-zero issues."
   }
 ]

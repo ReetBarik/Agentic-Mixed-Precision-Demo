@@ -1,12 +1,12 @@
 [
   {
-    "call_site": "std::log @ log_sum_exp.cpp:9",
+    "call_site": "std::exp @ log_sum_exp.cpp:12 (inside log_sum_exp_naive)",
     "strategy": "interop_shim",
-    "justification": "Standard math function hard-coded with std:: prefix; shim into namespace std delegates to tracked::log which preserves provenance and computes condition numbers."
+    "justification": "std::exp is a stable, well-known math op; injecting an overload into namespace std that delegates to tracked::exp with TRACKED_HERE gives us full interior numerics and per-line attribution."
   },
   {
-    "call_site": "std::exp @ log_sum_exp.cpp:9",
+    "call_site": "std::log @ log_sum_exp.cpp:12 (inside log_sum_exp_naive)",
     "strategy": "interop_shim",
-    "justification": "Standard math function hard-coded with std:: prefix; shim into namespace std delegates to tracked::exp to fully characterize the exponential's sensitivity, which is the dominant numerical risk here."
+    "justification": "std::log is a stable, well-known math op; an interop shim delegating to tracked::log with TRACKED_HERE captures condition number / forward error and attributes records to the driver-side shim line."
   }
 ]

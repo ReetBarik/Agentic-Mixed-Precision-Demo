@@ -4,7 +4,7 @@
   "per_op": [
     {
       "op": "exp",
-      "location": "",
+      "location": "/home/rbarik/Agentic-Mixed-Precision-Demo/runs/log_sum_exp/src/micro_driver.cpp:exp:28",
       "max_cond": 199.93535021611603,
       "max_rel_err": 4.439456584928526e-14,
       "sample_count": 1024,
@@ -28,7 +28,7 @@
     },
     {
       "op": "log",
-      "location": "",
+      "location": "/home/rbarik/Agentic-Mixed-Precision-Demo/runs/log_sum_exp/src/micro_driver.cpp:log:25",
       "max_cond": 0.009994798940629428,
       "max_rel_err": 2.242638961071085e-16,
       "sample_count": 512,
@@ -39,7 +39,32 @@
       "flagged": false
     }
   ],
-  "per_line": {},
+  "per_line": {
+    "/home/rbarik/Agentic-Mixed-Precision-Demo/runs/log_sum_exp/src/micro_driver.cpp:exp:28": {
+      "op": "exp",
+      "location": "/home/rbarik/Agentic-Mixed-Precision-Demo/runs/log_sum_exp/src/micro_driver.cpp:exp:28",
+      "max_cond": 199.93535021611603,
+      "max_rel_err": 4.439456584928526e-14,
+      "sample_count": 1024,
+      "provenance_union": [
+        "b",
+        "a"
+      ],
+      "flagged": false
+    },
+    "/home/rbarik/Agentic-Mixed-Precision-Demo/runs/log_sum_exp/src/micro_driver.cpp:log:25": {
+      "op": "log",
+      "location": "/home/rbarik/Agentic-Mixed-Precision-Demo/runs/log_sum_exp/src/micro_driver.cpp:log:25",
+      "max_cond": 0.009994798940629428,
+      "max_rel_err": 2.242638961071085e-16,
+      "sample_count": 512,
+      "provenance_union": [
+        "b",
+        "a"
+      ],
+      "flagged": false
+    }
+  },
   "per_variable": {
     "b": 199.93535021611603,
     "a": 199.93535021611603
@@ -47,7 +72,7 @@
   "top_hotspots": [
     {
       "op": "exp",
-      "location": "",
+      "location": "/home/rbarik/Agentic-Mixed-Precision-Demo/runs/log_sum_exp/src/micro_driver.cpp:exp:28",
       "max_cond": 199.93535021611603,
       "max_rel_err": 4.439456584928526e-14,
       "sample_count": 1024,
@@ -71,7 +96,7 @@
     },
     {
       "op": "log",
-      "location": "",
+      "location": "/home/rbarik/Agentic-Mixed-Precision-Demo/runs/log_sum_exp/src/micro_driver.cpp:log:25",
       "max_cond": 0.009994798940629428,
       "max_rel_err": 2.242638961071085e-16,
       "sample_count": 512,
