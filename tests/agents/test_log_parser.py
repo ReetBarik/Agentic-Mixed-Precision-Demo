@@ -188,3 +188,77 @@ def test_alternate_field_names():
     profile = parse(path, kernel_name="k", flag_threshold=1e8)
     assert profile.per_op[0].location == "f.cpp:g:7"
     assert profile.per_op[0].provenance_union == {"p"}
+
+
+# ---------------------------------------------------------------------------
+# work_dir-relative location normalization
+# ---------------------------------------------------------------------------
+
+def test_work_dir_normalizes_absolute_paths(tmp_path):
+    """`at` paths inside work_dir become work_dir-relative."""
+    src_dir = tmp_path / "src"
+    src_dir.mkdir()
+    driver = src_dir / "micro_driver.cpp"
+    driver.write_text("// driver\n")
+
+    records = [
+        {"op": "exp", "at": f"{driver}:fn:28", "cond": 1e9, "rel_err": 0.0, "prov": ["x"]},
+    ]
+    path = _tmp_journal(records)
+    profile = parse(path, kernel_name="k", flag_threshold=1e8, work_dir=tmp_path)
+
+    assert profile.per_op[0].location == "src/micro_driver.cpp:fn:28"
+    assert "src/micro_driver.cpp:fn:28" in profile.per_line
+
+
+def test_work_dir_leaves_outside_paths_alone(tmp_path):
+    """Paths that don't sit under work_dir are left as-is."""
+    outside = tmp_path.parent / "definitely-not-under-workdir.cpp"
+    abs_loc = f"{outside}:foo:5"
+    records = [{"op": "add", "at": abs_loc, "cond": 1.0, "rel_err": 0.0, "prov": []}]
+    path = _tmp_journal(records)
+    profile = parse(path, kernel_name="k", flag_threshold=1e8, work_dir=tmp_path)
+    assert profile.per_op[0].location == abs_loc
+
+
+def test_no_work_dir_keeps_loc_unchanged(tmp_path):
+    """Without work_dir, the parser preserves prior behaviour (absolute keys)."""
+    driver = tmp_path / "micro_driver.cpp"
+    driver.write_text("// driver\n")
+    abs_loc = f"{driver}:fn:10"
+    records = [{"op": "sub", "at": abs_loc, "cond": 1.0, "rel_err": 0.0, "prov": []}]
+    path = _tmp_journal(records)
+    profile = parse(path, kernel_name="k", flag_threshold=1e8)  # work_dir omitted
+    assert profile.per_op[0].location == abs_loc
+
+
+def test_work_dir_malformed_loc_unchanged(tmp_path):
+    """Locations without a ':' separator pass through untouched."""
+    records = [{"op": "add", "at": "not_a_real_loc", "cond": 1.0, "rel_err": 0.0, "prov": []}]
+    path = _tmp_journal(records)
+    profile = parse(path, kernel_name="k", flag_threshold=1e8, work_dir=tmp_path)
+    assert profile.per_op[0].location == "not_a_real_loc"
+
+
+def test_work_dir_collapses_keys_across_clones(tmp_path):
+    """Two records pointing at different absolute paths that both resolve under
+    work_dir to the same relative location collapse into one per_line entry."""
+    src = tmp_path / "src"
+    src.mkdir()
+    driver = src / "d.cpp"
+    driver.write_text("// driver\n")
+
+    # Same file, expressed two ways: absolute, and via a './' detour
+    records = [
+        {"op": "sub", "at": f"{driver}:fn:1",                 "cond": 1e7, "rel_err": 0.0, "prov": []},
+        {"op": "sub", "at": f"{tmp_path}/./src/d.cpp:fn:1",   "cond": 1e9, "rel_err": 0.0, "prov": []},
+    ]
+    path = _tmp_journal(records)
+    profile = parse(path, kernel_name="k", flag_threshold=1e8, work_dir=tmp_path)
+
+    # Both rolled up under the same relative key → one OpRecord, max cond wins
+    assert len(profile.per_op) == 1
+    rec = profile.per_op[0]
+    assert rec.location == "src/d.cpp:fn:1"
+    assert rec.max_cond == pytest.approx(1e9)
+    assert rec.sample_count == 2

@@ -22,16 +22,29 @@ def parse(
     flag_threshold: float = 1e8,
     top_n: int = 10,
     sample_count: int | None = None,
+    work_dir: Path | None = None,
 ) -> SensitivityProfile:
-    """Parse a Tracked JSONL journal into a SensitivityProfile."""
+    """Parse a Tracked JSONL journal into a SensitivityProfile.
+
+    Parameters
+    ----------
+    work_dir:
+        If provided, source-location keys (``file:fn:line``) whose file part
+        is inside ``work_dir`` are normalized to paths relative to it.
+        This stabilizes ``per_line`` keys across machines/clones so that
+        downstream agents can match locations across runs.  Paths that lie
+        outside ``work_dir`` (or that can't be resolved) are left unchanged.
+    """
 
     raw_records = _load_jsonl(journal_path)
+    work_dir_resolved = work_dir.resolve() if work_dir is not None else None
 
     # Aggregate by (op, location)
     aggregated: dict[tuple[str, str], _Agg] = {}
     for rec in raw_records:
         op = rec.get("op", "unknown")
         loc = rec.get("at", rec.get("loc", rec.get("location", "")))
+        loc = _normalize_loc(loc, work_dir_resolved)
         cond = float(rec.get("cond", 0.0))
         rel_err = float(rec.get("rel_err", 0.0))
         prov = set(rec.get("prov", rec.get("provenance", [])))
@@ -119,6 +132,24 @@ class _Agg:
         self.max_rel_err = max(self.max_rel_err, rel_err)
         self.sample_count += 1
         self.provenance_union |= prov
+
+
+def _normalize_loc(loc: str, work_dir: Path | None) -> str:
+    """Make the file part of a ``file:fn:line`` location relative to work_dir.
+
+    Falls back to the original string if normalization is impossible (path
+    outside ``work_dir``, file doesn't exist, malformed location, etc.).
+    """
+    if not loc or work_dir is None:
+        return loc
+    file_part, sep, rest = loc.partition(":")
+    if not sep or not file_part:
+        return loc
+    try:
+        rel = Path(file_part).resolve().relative_to(work_dir)
+    except (ValueError, OSError):
+        return loc
+    return f"{rel.as_posix()}:{rest}"
 
 
 def _load_jsonl(path: Path) -> list[dict]:

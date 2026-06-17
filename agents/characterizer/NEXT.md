@@ -20,8 +20,7 @@ agent work."
 3. **Test suite expansion** — `test_build_run_stub.py`,
    `test_characterizer_e2e.py`.  Deferred from v1 because they need cmake
    + LLM infra.
-4. **Relative paths in per_line keys** — low priority; needed before the
-   strategy agent does cross-run matching.  See §4.
+4. **Relative paths in per_line keys** — ✅ done.  See §4.
 5. **Snapshot tests for prompts** — `test_driver_gen.py`,
    `test_symbolic_overlay.py`.  Lowest priority; nice to have for prompt
    regression but slow to write and maintain.
@@ -400,7 +399,20 @@ require external services.  Local-only with explicit marker selection.
 
 ---
 
-## 4. Relative paths in `per_line` keys (low priority)
+## 4. Relative paths in `per_line` keys (✅ done)
+
+Implemented: `log_parser.parse()` now takes an optional `work_dir` kwarg.
+When provided, the file part of every `at` / `loc` / `location` field is
+normalized via `Path.resolve().relative_to(work_dir.resolve())` before it
+becomes an aggregation key.  Paths outside `work_dir` (or malformed) are
+left unchanged.  `characterizer/agent.py` passes `cfg.out_dir` through, so
+`per_line` keys are now stable across machines/clones.
+
+Unit tests in `tests/agents/test_log_parser.py` cover normalization,
+out-of-tree pass-through, omission of `work_dir`, malformed locs, and
+key collapse across equivalent paths.
+
+Original sketch (kept for context):
 
 The `per_line` keys are absolute filesystem paths
 (e.g. `/home/rbarik/Agentic-Mixed-Precision-Demo/runs/log_sum_exp/src/micro_driver.cpp:exp:28`).

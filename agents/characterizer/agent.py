@@ -58,6 +58,7 @@ def run(state: PipelineState) -> dict:
             flag_threshold=cfg.flag_threshold,
             top_n=cfg.top_n_hotspots,
             sample_count=spec.sample_count,
+            work_dir=cfg.out_dir,
         )
 
         # Step 5: symbolic overlay (best-effort, never gates pipeline)
