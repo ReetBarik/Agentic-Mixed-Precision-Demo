@@ -1,230 +1,210 @@
 # Agentic Mixed-Precision Demo
 
-An LLM-powered agent that automatically finds safe **mixed-precision optimizations** in C++ scientific computing functions. Given any C++ function, the agent identifies which local variables can be safely downcast from `double` to `float` without losing numerical accuracy beyond a configurable threshold.
+An LLM-driven multi-agent pipeline that finds safe mixed-precision optimizations in C++ scientific computing kernels. Given one or more kernels, per-argument input ranges, a whole-application driver, and build instructions, the pipeline characterizes numerical sensitivity, picks fixes from a fixed catalog, applies them one at a time, and validates each against an FP128 reference.
 
-No manual configuration is required — the agent reads the source file directly, reasons about the function, and verifies each proposed change numerically.
-
----
-
-## What it does
-
-High-performance computing code is often written in `double` precision throughout for safety. In practice, many intermediate variables tolerate `float` precision without affecting the final result. Finding these variables manually is tedious and error-prone. This project automates that search:
-
-1. **Analyze** the target function to understand its signature and identify candidate local variables.
-2. **Generate** a test driver that calls the function with random inputs and records outputs.
-3. **Propose** a downcast for each candidate variable (e.g. change `double x` to `float x`).
-4. **Verify** numerically: compile with the patch, run it, and compare output against the double-precision baseline. Accept if the result agrees to at least N decimal digits; reject otherwise.
+The `langgraph-agents` branch implements **v2** of the system: a LangGraph orchestrator coordinating six pieces — characterizer, strategy, patcher, validator, build/run (shared), and the orchestrator itself — built around a sibling `Tracked<T>` C++ library that records per-operation condition numbers and accumulated error.
 
 ---
 
-## Agentic workflow
-
-The system is built as a set of **LangGraph** subgraphs (skills), each handling one stage of the pipeline. An orchestrator graph wires them together.
+## v2 pipeline
 
 ```mermaid
-flowchart TD
-    A([User: --file path --function name]) --> B
+%%{init: {'theme':'neutral', 'flowchart':{'curve':'basis'}, 'themeVariables':{'lineColor':'#888'}}}%%
+flowchart LR
+    U([User])
 
-    subgraph Orchestrator
-        B[Load & validate target file]
-        B --> C
-
-        subgraph AnalyzeSkill["Analyze Skill"]
-            C[Read source file]
-            C --> D[LLM extracts function signature\nInput params · return type · framework\nLocal variable candidates\nSafe template instantiation types]
-            D --> E{Valid?}
-            E -- No, retry --> D
-            E -- Yes --> F
-        end
-
-        F[Signature] --> G
-
-        subgraph DriverSkill["Driver Skill"]
-            G[LLM generates C++ test driver\n+ CMakeLists.txt]
-            G --> H[Compile]
-            H -- Failed --> I[Feed error back to LLM]
-            I --> G
-            H -- OK --> J[Run driver\nCollect baseline CSV]
-        end
-
-        J --> K
-
-        subgraph DowncastSkill["Downcast Skill"]
-            K[For each candidate variable...]
-            K --> L[LLM proposes type change\ne.g. double → float]
-            L --> M[Policy check\ne.g. must be lower-precision type]
-            M -- Rejected --> L
-            M -- OK --> N[Compile with patch]
-            N -- Build failed --> L
-            N -- OK --> O[Run & compare vs baseline]
-            O -- meets digit threshold --> P[Accept patch]
-            O -- fails --> Q{Retries left?}
-            Q -- Yes --> L
-            Q -- No --> R[Reject variable]
-            P --> K
-            R --> K
-        end
-
-        K --> S[Write summary JSON]
+    subgraph INPUTS[Inputs]
+        direction TB
+        K[/"Kernels + names + ranges"/]
+        D[/"Whole-app driver"/]
+        B[/"Build instructions"/]
+        F[/"Acceptance config"/]
     end
+
+    U --> INPUTS
+
+    subgraph ORCH["Orchestrator (LangGraph wiring + shared TypedDict state)"]
+        direction TB
+
+        subgraph CHAR[Characterizer Agent]
+            direction TB
+            CH1["1. Spec builder<br/>parse signature, classify params,<br/>pick Tracked types"]
+            CH1 --> CH2["2. Driver generator (LLM)<br/>write micro-driver with<br/>sampling loop + interop shims"]
+            CH2 --> CH3["3. Build &amp; run<br/>compile, execute,<br/>collect journal.jsonl"]
+            CH3 -. compile fail .-> CH2
+            CH3 --> CH4["4. Log parser<br/>per-op + per-line rollup,<br/>flag hotspots above threshold"]
+            CH4 --> CH5["5. Symbolic overlay (LLM, optional)<br/>detect unstable idioms in source"]
+            CH5 --> CH6["6. Emit artifacts"]
+        end
+
+        CHAR --> PROF[/"Sensitivity profile<br/>+ symbolic hints"/]
+        PROF --> STRAT["Strategy Agent (LLM)<br/>match catalog, rank by gain/risk"]
+        STRAT --> QUEUE[/"Strategy queue"/]
+
+        subgraph WALK["Strategy walk loop (Python)"]
+            direction LR
+            LOOP{Queue empty<br/>or budget hit?}
+            LOOP -->|No| PATCH["Patcher Agent (LLM)<br/>apply one strategy"]
+            PATCH --> VAL["Validator Agent<br/>build whole app, run,<br/>compare vs FP128"]
+            VAL -->|accept| KEEP["Keep patch<br/>new baseline"]
+            VAL -->|reject| FB["Revert<br/>structured failure feedback"]
+            KEEP --> LOOP
+            FB --> LOOP
+        end
+
+        QUEUE --> WALK
+        FB -.-> STRAT
+        WALK --> OUT[/"Optimized kernel<br/>+ JSON report"/]
+    end
+
+    K --> CHAR
+    D -.-> CHAR
+    B -.-> CHAR
+    D --> VAL
+    B --> VAL
+    F --> VAL
+
+    BR[("Build/Run Agent<br/>shared service")]
+    CH3 -. micro-driver mode .-> BR
+    VAL -. whole-app mode .-> BR
+
+    OUT --> Z([User])
+
+    classDef agent fill:#e8f4f8,stroke:#2b6cb0,stroke-width:2px,color:#1a365d
+    classDef plumbing fill:#f7fafc,stroke:#718096,stroke-width:1px,stroke-dasharray:4 3,color:#2d3748
+    classDef io fill:#fef5e7,stroke:#b7791f,stroke-width:1px,color:#744210
+    classDef shared fill:#e6fffa,stroke:#2c7a7b,stroke-width:2px,color:#234e52
+    classDef actor fill:#faf5ff,stroke:#6b46c1,stroke-width:2px,color:#322659
+    class CHAR,STRAT,PATCH,VAL agent
+    class ORCH,WALK,LOOP,KEEP,FB plumbing
+    class K,D,B,F,PROF,QUEUE,OUT io
+    class BR shared
+    class U,Z actor
 ```
 
-### Skills
+**Reading the diagram:**
 
-| Skill | Responsibility |
-|-------|---------------|
-| **Analyze** | Reads the full source file. Uses an LLM to extract the function signature (parameters, return type, portability framework), infer safe input domains for random testing, identify local floating-point variables as downcast candidates, and determine concrete template instantiation types that avoid compiler overload ambiguity. |
-| **Driver** | Uses an LLM to generate a complete, self-contained C++ test driver and its `CMakeLists.txt`. Handles the detected portability framework (Kokkos, SYCL, OpenMP, CUDA, HIP, or plain C++). Feeds compilation errors back to the LLM and retries until the driver compiles and runs successfully, producing a baseline CSV of outputs. |
-| **Downcast** | Iterates over each candidate local variable. For each one, asks an LLM to propose a source-level type change to a lower-precision type (e.g. `float`). Compiles the patched source, runs it with the same random inputs as the baseline, and compares outputs digit-by-digit. Accepts the patch if it meets the precision threshold, rejects it otherwise, and feeds verification results back to the LLM for the next attempt. |
+- Solid arrows = required data flow. Dotted arrows = optional / feedback / service calls.
+- Boxes tagged `(LLM)` make Anthropic API calls; everything else is deterministic Python.
+- The orchestrator and strategy-walk loop are LangGraph plumbing — no LLM, just routing and state.
+- The Build/Run Agent is a shared service called by both the characterizer (micro-driver mode) and the validator (whole-app mode), not a pipeline stage.
 
 ---
 
-## Repository layout
+## Inputs
 
-```
-.
-├── run-argo.sh                  # Entry point (handles tunnel + proxy + runs the agent)
-├── src/                         # Example target: kokkosUtils.h (Kokkos C++ library)
-├── scripts/
-│   ├── compare_results.py       # Numerical comparison tool (baseline vs candidate CSV)
-│   ├── prepare.sh               # Loads build environment modules
-│   └── setup_argo_proxy.sh      # Starts the Argo SSH tunnel + proxy (used by run-argo.sh)
-├── llm_agent/
-│   ├── run.py                   # CLI entry point (called by run-argo.sh)
-│   ├── config.py                # Model name, iteration limits
-│   ├── client.py                # Anthropic API client factory
-│   ├── state.py                 # TypedDicts for all graph states
-│   ├── graphs/
-│   │   └── orchestrator.py      # Top-level LangGraph graph
-│   ├── skills/
-│   │   ├── analyze/             # Signature extraction subgraph
-│   │   ├── driver/              # Driver generation + compile-iterate subgraph
-│   │   └── downcast/            # Patch proposal + verification subgraph
-│   └── tools/
-│       ├── build.py             # compile_driver(), run_driver(), build_and_run()
-│       └── compare.py           # Wrapper around scripts/compare_results.py
-└── experiments/                 # Output: baseline CSVs, candidate CSVs, summary JSONs
-```
+The pipeline takes six things from the user:
+
+| Input | Used by | Purpose |
+|-------|---------|---------|
+| Kernel source files | Characterizer | The C++ to instrument and analyze |
+| Kernel function names | Characterizer | Which functions inside the source to target |
+| Per-argument input ranges | Characterizer | Sampling intervals for each kernel argument |
+| Whole-app driver | Validator (primary), Characterizer (reference) | The real program that calls the kernels — used by the validator to test patches end-to-end and (lighter touch, planned) by the characterizer to mimic the real call convention |
+| Build instructions | Validator (primary), Characterizer (env extraction, planned) | cmake/script that builds the whole app — source of include paths, defs, link libs, flags |
+| Acceptance config | Validator | Metric (`min` / `p99` / `median` / `two-tier`), minimum digits, iteration budget, early-stop policy |
+
+---
+
+## Components
+
+### 1. Characterizer Agent
+
+Builds a per-kernel sensitivity profile by instrumenting the kernel with `Tracked<T>`, running it on randomly sampled inputs, and rolling up the per-operation telemetry. Six internal steps:
+
+1. **Spec builder** (pure Python) — parses the kernel signature, classifies each parameter as input / output / inout, picks Tracked instantiation types (real scalar or complex).
+2. **Driver generator** (LLM) — Claude writes a self-contained micro-driver that includes the kernel verbatim, wraps inputs with `tracked::track()`, calls the kernel in a sampling loop, and flushes a journal. Handles interop shims, opaque wraps, and inline reimplementations for non-templatable framework math.
+3. **Build & run** — calls the shared Build/Run agent in micro-driver mode. On configure or build failure, feeds the error back to the driver generator (multi-turn `tool_result`) and retries up to `--max-driver-attempts`.
+4. **Log parser** — reads the JSONL journal, aggregates per-op and per-line, flags ops above the condition-number threshold.
+5. **Symbolic overlay** (LLM, optional, best-effort) — separate Claude call that inspects the kernel source for known unstable idioms (catastrophic cancellation, naive variance, log-sum-exp, large-magnitude sum, division by near-zero). Never gates the pipeline.
+6. **Emit** — writes `sensitivity_profile.json`, `interop_decisions.json`, `symbolic_hints.json`, plus per-attempt artifacts under `attempts/` and a `retry_log.json` summary.
+
+### 2. Strategy Agent (LLM)
+
+Reads the sensitivity profile (and any symbolic hints), matches hotspots against a fixed catalog of optimizations, ranks the matches by expected gain and risk, and emits a queue of strategy attempts. The catalog is closed-set in v1 — the agent picks from a menu, doesn't invent novel transformations.
+
+| Strategy | Patch shape | Risk |
+|---|---|---|
+| Downcast (`double` → `float`) | Type swap | Low |
+| Float-float emulation (DD recovery) | Type swap | Low |
+| FMA insertion | Line rewrite | Low |
+| Algebraic rewrite (cancellation avoidance) | Line rewrite | Medium |
+| Horner's method | Line rewrite | Medium |
+| log-sum-exp rewrite | Multi-line | High |
+| Kahan / compensated summation | Multi-line | Medium |
+| Reassociation / pairwise summation | Multi-line | Medium |
+
+Each catalog entry declares its preconditions, patch shape, risk, and expected gain. On validator rejection, structured failure feedback (failing inputs, digits achieved vs required, per-variable error delta) flows back so later proposals are informed by what already failed.
+
+### 3. Patcher Agent (LLM)
+
+Applies one strategy at a time to the current kernel baseline. Three patch shapes supported:
+
+- Type swaps (one-line)
+- Single-line rewrites
+- Templated multi-line transformations (Kahan, log-sum-exp, etc.)
+
+No free-form function-level rewrites in v1. The patcher does not run anything and does not judge anything — it only produces a new version of the source.
+
+### 4. Validator Agent
+
+Takes the patched source, invokes the shared Build/Run agent in **whole-app mode** (the user's real driver + build script, not a synthesized micro-driver), and compares the output against an FP128 reference. Comparison is deterministic — `scripts/compare_results.py` computes per-sample matching significant decimal digits.
+
+Acceptance metric is configurable: `min` / `p99` / `median` / `two-tier`. Default: **p99 ≥ 10 digits**. Regardless of which metric gates acceptance, the full distribution (min, p1, p50, p99, max) is reported. On failure, sends a structured failure report back to the strategy agent.
+
+### 5. Build/Run Agent (shared service)
+
+Owns compilation, framework detection, include paths, link libraries, module loads, and execution. Two modes:
+
+- **Micro-driver mode** — called by the characterizer. The agent is given a generated `.cpp` plus an instrumentation spec; it renders a `CMakeLists.txt`, configures, builds, runs, and returns a `RunResult` with an explicit `phase` field (`configure` / `build` / `run` / `ok`) and the journal path if the run succeeded.
+- **Whole-app mode** — called by the validator. The agent runs the user's real build script against the patched source tree.
+
+Today it is a deterministic subprocess wrapper. Planned: LLM-driven framework detection, smarter error recovery, automatic module loading. Sharing one agent across both call sites means a single source of truth for build environment and (when smarts land) a single prompt to maintain.
+
+### 6. Orchestrator (LangGraph wiring + shared TypedDict state)
+
+Top-level LangGraph graph. Holds the shared `PipelineState` TypedDict, routes data between agents, owns the strategy-walk loop (queue management, accept/revert bookkeeping, iteration budget, stop conditions). No LLM — predictable plumbing by design. Loop semantics:
+
+- **Sequential layering** — each accepted patch becomes part of the new baseline; the next strategy is tested on top of the accumulated state.
+- **No combining strategies in v1** — one at a time, validate, keep or revert.
+- **Re-characterization between accepted patches deferred** — characterize once at the start, walk the queue.
+
+Stop conditions: queue exhausted, iteration budget reached (default 50), or optional early-stop after K consecutive failures.
+
+---
+
+## What's implemented vs stubbed today
+
+Status on `langgraph-agents` as of this README:
+
+| Component | Status |
+|---|---|
+| Characterizer — spec builder, driver-gen, log parser, symbolic overlay, retry loop | **Implemented** |
+| Build/Run agent — micro-driver mode (deterministic subprocess wrapper) | **Implemented** |
+| Build/Run agent — whole-app mode | Not yet wired |
+| Build/Run agent — LLM-driven framework detection / env extraction | Planned (`PLAN_build_env.md` upcoming) |
+| Strategy agent | Stub (returns identity, empty queue) |
+| Patcher agent | Stub |
+| Validator agent | Stub |
+| Orchestrator | Wires characterizer end-to-end; downstream stages are pass-through |
+
+The characterizer's vertical slice is end-to-end functional: six calibration fixtures (cancellation, cancellation_out, naive_variance, log_sum_exp, kahan, cLn, Lnrat) run and produce sensitivity profiles that flag the expected hotspots. See `agents/characterizer/NEXT.md` for the remaining work on this slice and `agents/characterizer/PLAN_retry_loop.md` for the design of the recently-landed compile-retry loop.
 
 ---
 
 ## Prerequisites
 
-**Build environment:**
-- C++17 compiler
-- CMake ≥ 3.16
-- The portability framework used by your target (e.g. Kokkos, OpenMP). For the included example (`kokkosUtils.h`) Kokkos must be on `CMAKE_PREFIX_PATH`.
-- `scripts/prepare.sh` must set up the build environment (module loads, paths).
-
-**Python:**
-- Python 3.12
-- Install dependencies: `pip install -r requirements-argo-agent.txt`
-
-**LLM access (Argonne JLSE):**
-The agent uses the Anthropic API routed through the Argo proxy on JLSE. `run-argo.sh` handles this automatically — it detects whether the SSH tunnel and proxy are already running (e.g. from an existing Claude Code session) and reuses them.
-
-If running outside JLSE, set `ANTHROPIC_API_KEY` and omit `--base-url` from `llm_agent/run.py`, or point `ANTHROPIC_BASE_URL` at your own proxy.
+- Python 3.12. Install deps: `pip install -r requirements-langgraph.txt`
+- Tracked submodule: `git submodule update --init --recursive` (clones `kokkos-extended-precision-demo` @ `tracked` into `third_party/tracked/`)
+- CMake ≥ 3.18 on PATH
+- For Kokkos-backed kernels: a Serial-only Kokkos install. The Tracked repo ships `examples/cln_micro/build_kokkos_serial.sh` to produce one at `$HOME/kokkos-install`
+- Argo proxy running (same `run-argo.sh` from the v1 workflow); the characterizer's `driver_gen` and `symbolic_overlay` nodes hit it for Claude Opus 4.7
 
 ---
 
-## Usage
+## Running the characterizer slice
 
-```bash
-./run-argo.sh --file <repo-relative-path-to-header> \
-              --function <function-name> \
-              [--skills downcast] \
-              [--min-digits 10] \
-              [--batch 10] \
-              [--seed 123] \
-              [--max-iterations 3] \
-              [--max-driver-retries 5] \
-              [--output-dir experiments/]
-```
-
-**Example** — optimize `ddilog` from the included Kokkos utility header:
-
-```bash
-./run-argo.sh --file src/kokkosUtils.h --function ddilog --skills downcast --min-digits 10 --batch 10
-```
-
-**Output** — a JSON summary written to `experiments/<function>/generated/<function>_summary_<timestamp>.json`:
-
-```json
-{
-  "function_name": "ddilog",
-  "file_path": "src/kokkosUtils.h",
-  "framework": "kokkos",
-  "baseline_csv": "experiments/ddilog/generated/ddilog_baseline_10_123_<ts>.csv",
-  "error": null,
-  "skill_results": {
-    "downcast": {
-      "accepted_variables": ["S", "A", "B1", "B2", "B0"],
-      "rejected_variables": ["T", "Y", "H", "ALFA"],
-      "accepted_patches": [
-        {
-          "file_path": "src/kokkosUtils.h",
-          "old_line": "        TMass S;",
-          "new_line": "        float S;",
-          "reasoning": "..."
-        }
-      ],
-      "trace": "... (per-attempt records: proposal, policy_reject, verify_pass, min_precise_digits)"
-    }
-  }
-}
-```
-
-### Key options
-
-| Option | Default | Description |
-|--------|---------|-------------|
-| `--file` | required | Repo-relative path to the C++ header containing the target function |
-| `--function` | required | Name of the function to optimize |
-| `--skills` | `downcast` | Optimization skills to run |
-| `--min-digits` | `10` | Minimum precise decimal digits required to accept a downcast |
-| `--batch` | `10` | Number of random input samples per run |
-| `--seed` | `123` | RNG seed (use the same seed across all runs for reproducibility) |
-| `--max-iterations` | `3` | Max LLM retry attempts per variable in the downcast skill |
-| `--max-driver-retries` | `5` | Max compile-fix attempts in the driver skill |
-
----
-
-## How verification works
-
-The agent uses **bitwise-reproducible** output comparison. For each run:
-
-1. The driver generates `batch` random inputs using a fixed seed.
-2. Outputs are serialized to CSV.
-3. `scripts/compare_results.py` computes the minimum number of matching significant decimal digits across all samples (`min_precise_digits`).
-4. A patch is accepted only if `min_precise_digits ≥ --min-digits` for all samples.
-
-This makes accept/reject decisions deterministic and independent of platform floating-point rounding modes.
-
----
-
-## Characterizer slice (v2, langgraph-agents branch)
-
-The `agents/` tree implements the first vertical slice of the v2 multi-agent
-pipeline: a LangGraph orchestrator with a real characterizer agent and
-deterministic pass-through stubs for strategy / patcher / validator.  See
-`agents/characterizer/PLAN.md` for the design and `CHARACTERIZER_NOTES.md`
-for the framework-agnostic lessons feeding the prompt.
-
-### Prerequisites
-
-- Python deps:  `pip install -r requirements-langgraph.txt`
-- Tracked submodule:  `git submodule update --init --recursive`
-  (clones `kokkos-extended-precision-demo` @ `tracked` into
-  `third_party/tracked/`).
-- CMake (`>=3.18`) on PATH.
-- For Kokkos-backed kernels: a Serial-only Kokkos install.  The Tracked
-  repo ships `examples/cln_micro/build_kokkos_serial.sh` to produce one
-  at `$HOME/kokkos-install`.
-- Argo proxy running (the same `run-argo.sh` from the v1 workflow); the
-  characterizer's `driver_gen` and `symbolic_overlay` nodes hit it for
-  Claude Opus 4.7.
-
-### One kernel, end to end
+Single fixture end-to-end:
 
 ```bash
 python -m agents.cli characterize \
@@ -232,19 +212,22 @@ python -m agents.cli characterize \
   --kernel-name cancellation_check \
   --ranges-yaml tests/agents/fixtures/input_ranges/cancellation.yaml \
   --samples 512 \
+  --max-driver-attempts 5 \
   --out runs/cancellation
 ```
 
 Artifacts land in `runs/cancellation/`:
 
-- `src/micro_driver.cpp`         — LLM-generated driver
-- `CMakeLists.txt`               — rendered build script
-- `interop_decisions.json`       — per-call strategy choices (shim / opaque / inline)
-- `journal.jsonl`                — raw Tracked output
-- `sensitivity_profile.json`     — characterizer's roll-up
-- `symbolic_hints.json`          — LLM idiom detection (best-effort)
+- `src/micro_driver.cpp` — winning (or last-tried) driver
+- `CMakeLists.txt` — rendered build script
+- `interop_decisions.json` — per-call strategy choices (shim / opaque / inline)
+- `journal.jsonl` — raw Tracked output
+- `sensitivity_profile.json` — characterizer's roll-up
+- `symbolic_hints.json` — LLM idiom detection (best-effort)
+- `attempts/` — per-retry driver source, stderr log, phase, returncode
+- `retry_log.json` — at-a-glance summary of the compile-retry sequence
 
-### Running against all calibration fixtures
+All calibration fixtures:
 
 ```bash
 for k in cancellation naive_variance log_sum_exp kahan; do
@@ -257,11 +240,9 @@ for k in cancellation naive_variance log_sum_exp kahan; do
 done
 ```
 
-Expected: each profile flags the predicted hotspot.  See
-`runs/<name>/sensitivity_profile.json` — the `top_hotspots` list is sorted
-by max condition number, descending.
+Each profile's `top_hotspots` (sorted by max condition number) should flag the predicted hotspot for that kernel.
 
-### Kokkos kernel (Serial backend)
+Kokkos kernel (Serial backend):
 
 ```bash
 python -m agents.cli characterize \
@@ -273,33 +254,64 @@ python -m agents.cli characterize \
   --out runs/cln
 ```
 
-The characterizer detects the Kokkos framework from the source, picks
-per-call strategies for `Kokkos::log` / `Kokkos::abs` (interop shim or
-opaque wrap), and propagates provenance through the boundary.
-
-### What's stubbed
-
-- **Strategy / patcher / validator** agents return identity — the
-  characterizer always exits the graph at strategy with an empty queue.
-- **Build/run agent** is a deterministic subprocess wrapper (no LLM).
-  Future work: LLM-driven build/run with framework detection and module
-  loading.
+The characterizer detects the Kokkos framework from the source, picks per-call strategies for `Kokkos::log` / `Kokkos::abs` (interop shim, opaque wrap, or — preferred — decomposed real-valued tracked ops), and propagates provenance through the boundary.
 
 ### Tests
 
 ```bash
 pytest tests/agents/test_log_parser.py
+pytest tests/agents/test_driver_retry_loop.py
 ```
 
-Pure-unit log parser tests (13).  E2E and driver-gen tests are deferred
-— see `agents/characterizer/PLAN.md` for the planned test suite.
+Pure-unit tests today: log parser (13 cases) and the retry-loop control flow / tool_use_id threading / role classification. End-to-end and driver-gen snapshot tests are deferred — see `agents/characterizer/NEXT.md` §3.
 
-## Adding a new target
+---
 
-No catalog or spec file is needed. Just point the agent at any C++ header and function name:
+## Repository layout
 
-```bash
-./run-argo.sh --file path/to/mylib.h --function my_compute_function --skills downcast --min-digits 10 --batch 20
+```
+.
+├── agents/                              # v2 multi-agent pipeline
+│   ├── cli.py                           # entry point: `python -m agents.cli characterize ...`
+│   ├── config.py                        # PipelineConfig + env defaults
+│   ├── orchestrator.py                  # LangGraph wiring
+│   ├── state.py                         # PipelineState TypedDict
+│   ├── build_run/                       # shared build/run service
+│   │   ├── agent.py                     # deterministic subprocess wrapper
+│   │   └── cmake_template.cmake         # micro-driver build template
+│   ├── characterizer/                   # characterizer agent
+│   │   ├── agent.py                     # 6-step pipeline + retry loop
+│   │   ├── driver_gen.py                # LLM micro-driver generation
+│   │   ├── log_parser.py                # journal.jsonl → SensitivityProfile
+│   │   ├── symbolic_overlay.py          # optional idiom detection
+│   │   ├── spec.py                      # InstrumentationSpec dataclass
+│   │   ├── profile.py                   # SensitivityProfile, OpRecord, etc.
+│   │   ├── prompts/                     # driver_gen.txt, symbolic_overlay.txt
+│   │   ├── PLAN.md                      # original v1 slice plan
+│   │   ├── NEXT.md                      # remaining work
+│   │   └── PLAN_retry_loop.md           # compile-retry loop design
+│   ├── strategy/                        # stub
+│   ├── patcher/                         # stub
+│   └── validator/                       # stub
+├── tests/agents/                        # fixtures + unit tests
+├── runs/                                # committed run artifacts (intentional;
+│                                        # lets remote-cluster runs be shared
+│                                        # with assistants that don't have SSH)
+├── third_party/tracked/                 # sibling Tracked<T> library (submodule)
+├── src/                                 # example kernels (kokkosUtils.h)
+├── scripts/                             # compare_results.py, build env helpers
+├── requirements-langgraph.txt           # v2 deps
+└── PLAN.md                              # top-level v2 architecture plan
 ```
 
-The analyze skill will automatically detect the portability framework, infer input domains from parameter names and types, and identify local variable candidates. The driver skill will generate and compile an appropriate test driver for the detected framework.
+---
+
+## Deferred to a future cut
+
+- Whole-app mode in the Build/Run agent and a real Validator agent
+- Whole-app driver + build script consumption by the characterizer (lighter-touch env extraction; design in `PLAN_build_env.md` upcoming)
+- Strategy combining (independence-class grouping using Tracked dataflow)
+- Re-characterization between accepted patches
+- Model-per-role assignment (cheap models for mechanical work, Opus for reasoning)
+- Free-form function-level rewrites
+- LLM-driven framework detection and module loading in Build/Run
