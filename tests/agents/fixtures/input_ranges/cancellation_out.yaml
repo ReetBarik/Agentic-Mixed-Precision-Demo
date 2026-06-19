@@ -1,0 +1,5 @@
+ranges:
+  a: [1.0, 1.0]          # constant — large magnitude
+  b: [1.0e-15, 1.0e-10]  # small perturbation — drives cancellation
+  # note: `out` is an output parameter (T&) with no range — the driver must
+  # default-construct it, not sample it.
