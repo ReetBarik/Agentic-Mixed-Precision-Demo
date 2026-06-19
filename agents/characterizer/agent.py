@@ -26,16 +26,45 @@ def run(state: PipelineState) -> dict:
         # Step 1: build instrumentation spec from source
         spec = _spec_build(source_files, kernel_name, input_ranges, cfg)
 
-        # Step 2: LLM generates the micro-driver
-        driver_result = driver_gen.generate(spec, cfg)
+        # Steps 2-3: generate the micro-driver, build/run it, and on a
+        # configure/build failure feed the error back to the LLM and retry.
+        # Runtime failures are NOT retried (the LLM can't touch kernel logic).
+        attempts: list[tuple] = []
+        messages = None
+        driver_result = None
+        run_result = None
 
-        # Step 3: build and run via deterministic subprocess wrapper
-        run_result = build_run_agent.build_and_run(
-            driver_source=driver_result.driver_source,
-            framework=spec.framework,
-            cfg=cfg,
-            work_dir=cfg.out_dir,
-        )
+        for attempt in range(1, cfg.max_driver_attempts + 1):
+            driver_result, messages = driver_gen.generate(spec, cfg, messages=messages)
+
+            run_result = build_run_agent.build_and_run(
+                driver_source=driver_result.driver_source,
+                framework=spec.framework,
+                cfg=cfg,
+                work_dir=cfg.out_dir,
+            )
+
+            _archive_attempt(cfg.out_dir, attempt, driver_result, run_result)
+            attempts.append((driver_result, run_result))
+
+            if run_result.phase == "ok":
+                break
+
+            if run_result.phase in {"configure", "build"} and attempt < cfg.max_driver_attempts:
+                print(
+                    f"[characterizer] driver {run_result.phase} failed "
+                    f"(attempt {attempt}/{cfg.max_driver_attempts}); feeding error back to LLM",
+                    file=sys.stderr,
+                )
+                messages = driver_gen.extend_with_build_error(
+                    messages, run_result, cfg, attempt, cfg.max_driver_attempts,
+                )
+                continue
+
+            # Runtime failure, or out of attempts — stop retrying.
+            break
+
+        _write_retry_log(cfg.out_dir, attempts, cfg.max_driver_attempts)
 
         updates: dict = {
             "instrumentation_specs": [spec],
@@ -43,7 +72,7 @@ def run(state: PipelineState) -> dict:
 
         if run_result.returncode != 0:
             msg = (
-                f"build/run failed for {kernel_name}: "
+                f"build/run failed for {kernel_name} after {len(attempts)} attempt(s): "
                 f"{run_result.stderr[:2000]}"
             )
             print(f"[characterizer] {msg}", file=sys.stderr)
@@ -163,6 +192,13 @@ def _spec_build(
             else:
                 template_instantiation[type_str] = "tracked::Tracked<double>"
 
+    # Classify each parameter as input / output / inout so the driver_gen LLM
+    # can handle void-returning, output-by-reference kernels correctly.
+    parameter_roles = [
+        _classify_role(type_str, name, input_ranges)
+        for name, type_str in parameter_types
+    ]
+
     return InstrumentationSpec(
         kernel_name=kernel_name,
         kernel_signature=raw_signature,
@@ -173,7 +209,76 @@ def _spec_build(
         framework=framework,
         source_files=source_files,
         detected_dispatchers=detected_dispatchers,
+        parameter_roles=parameter_roles,
     )
+
+
+def _classify_role(type_str: str, name: str, input_ranges: dict) -> str:
+    """Classify a parameter as input | output | inout.
+
+    Const-correctness is the only reliable signal short of parsing the kernel
+    body: a real output cannot be ``const`` in valid C++, so all const ref/ptr
+    params collapse safely to ``"input"``.  A mutable ref/ptr with a declared
+    input range is ``"inout"`` (kernel updates it in place); without a range it
+    is a pure ``"output"``.
+    """
+    has_ref_or_ptr = "&" in type_str or "*" in type_str
+    is_const = "const " in type_str or type_str.startswith("const")
+
+    if not has_ref_or_ptr:
+        return "input"                      # value type
+    if is_const:
+        return "input"                      # const ref/ptr always input
+    if name in input_ranges:
+        return "inout"                      # mutable + has range
+    return "output"                         # mutable, no range
+
+
+def _archive_attempt(work_dir, attempt: int, driver_result, run_result) -> None:
+    """Persist one driver attempt + its outcome under ``work_dir/attempts/``.
+
+    Each attempt writes ``NN_driver.cpp`` (exact source tried), ``NN_phase``,
+    ``NN_stderr.log`` (exactly what was/would be fed back to the LLM), and
+    ``NN_returncode`` so a failed run can be debugged after the fact.
+    """
+    if work_dir is None:
+        work_dir = run_result.work_dir
+    attempts_dir = Path(work_dir) / "attempts"
+    attempts_dir.mkdir(parents=True, exist_ok=True)
+    prefix = f"{attempt:02d}"
+    (attempts_dir / f"{prefix}_driver.cpp").write_text(
+        driver_result.driver_source, encoding="utf-8")
+    (attempts_dir / f"{prefix}_phase").write_text(run_result.phase, encoding="utf-8")
+    (attempts_dir / f"{prefix}_stderr.log").write_text(
+        run_result.stderr or "", encoding="utf-8")
+    (attempts_dir / f"{prefix}_returncode").write_text(
+        str(run_result.returncode), encoding="utf-8")
+
+
+def _write_retry_log(work_dir, attempts: list[tuple], max_attempts: int) -> None:
+    """Write an at-a-glance ``retry_log.json`` summary of all attempts."""
+    if not attempts:
+        return
+    if work_dir is None:
+        work_dir = attempts[-1][1].work_dir
+    final = attempts[-1][1]
+    log = {
+        "max_attempts": max_attempts,
+        "attempts_used": len(attempts),
+        "outcome": final.phase,
+        "attempts": [
+            {
+                "attempt": i,
+                "phase": rr.phase,
+                "returncode": rr.returncode,
+                "stderr_excerpt": (rr.stderr or "")[:500],
+                "notes": getattr(dr, "notes", ""),
+            }
+            for i, (dr, rr) in enumerate(attempts, start=1)
+        ],
+    }
+    (Path(work_dir) / "retry_log.json").write_text(
+        json.dumps(log, indent=2), encoding="utf-8")
 
 
 def _emit(work_dir: Path, driver_result, profile, hints: list) -> None:

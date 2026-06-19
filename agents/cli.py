@@ -36,6 +36,9 @@ def main() -> None:
     char.add_argument("--strategy-override", choices=["interop", "opaque", "inline"],
                       default=None,
                       help="Force a single interop strategy for all non-templatable calls.")
+    char.add_argument("--max-driver-attempts", type=int, default=5,
+                      help="Max LLM driver attempts incl. the first; retries on compile "
+                           "failure feed the build error back to the LLM (default: 5).")
     char.add_argument("--tracked-root", default=None,
                       help="Path to the Tracked library checkout (default: third_party/tracked).")
     char.add_argument("--kokkos-root", default=None,
@@ -59,6 +62,7 @@ def _run_characterize(args: argparse.Namespace) -> None:
         "sample_count": args.samples,
         "flag_threshold": args.flag_threshold,
         "strategy_override": args.strategy_override,
+        "max_driver_attempts": args.max_driver_attempts,
     }
     if args.tracked_root:
         cfg_kwargs["tracked_root"] = Path(args.tracked_root).resolve()

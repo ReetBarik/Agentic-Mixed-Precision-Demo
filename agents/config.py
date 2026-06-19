@@ -21,6 +21,8 @@ class PipelineConfig:
     top_n_hotspots: int = 10
     # Force a single interop strategy for all non-templatable calls: "interop" | "opaque" | "inline"
     strategy_override: str | None = None
+    max_driver_attempts: int = 5      # total LLM driver attempts incl. the first
+    retry_stderr_chars: int = 3000    # truncation budget for fed-back build stderr
     tracked_root: Path = field(
         default_factory=lambda: Path(__file__).parent.parent / "third_party" / "tracked"
     )

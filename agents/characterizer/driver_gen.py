@@ -66,14 +66,29 @@ _TOOL_SCHEMA = {
 }
 
 
-def generate(spec: InstrumentationSpec, cfg: PipelineConfig) -> DriverGenOutput:
-    """Call the LLM and return a DriverGenOutput."""
+def generate(
+    spec: InstrumentationSpec,
+    cfg: PipelineConfig,
+    messages: list[dict] | None = None,
+) -> tuple[DriverGenOutput, list[dict]]:
+    """Call the LLM and return the parsed output plus the full conversation.
 
-    prompt_template = (Path(__file__).parent / "prompts" / "driver_gen.txt").read_text(
-        encoding="utf-8"
-    )
+    ``messages is None`` (first turn): a single user message is built from the
+    spec and prompt template.  Otherwise ``messages`` is sent verbatim — the
+    caller is expected to have appended a ``tool_result`` reporting the prior
+    build error (see :func:`extend_with_build_error`).
 
-    user_message = _build_user_message(spec, cfg, prompt_template)
+    The returned ``messages`` is the input extended with this turn's assistant
+    response, so the caller can hand it straight back on the next retry without
+    reaching into the raw API response.
+    """
+
+    if messages is None:
+        prompt_template = (Path(__file__).parent / "prompts" / "driver_gen.txt").read_text(
+            encoding="utf-8"
+        )
+        user_message = _build_user_message(spec, cfg, prompt_template)
+        messages = [{"role": "user", "content": user_message}]
 
     client = anthropic.Anthropic(
         base_url=cfg.base_url,
@@ -85,11 +100,53 @@ def generate(spec: InstrumentationSpec, cfg: PipelineConfig) -> DriverGenOutput:
         max_tokens=4096,
         tools=[_TOOL_SCHEMA],
         tool_choice={"type": "any"},
-        messages=[{"role": "user", "content": user_message}],
+        messages=messages,
     )
 
+    # Extend the conversation with this assistant turn (as plain dicts so the
+    # history is JSON-serialisable and re-sendable on the next retry).
+    assistant_content = [block.model_dump() for block in response.content]
+    messages = messages + [{"role": "assistant", "content": assistant_content}]
+
     tool_input = _extract_tool_input(response)
-    return _parse_output(tool_input)
+    return _parse_output(tool_input), messages
+
+
+def extend_with_build_error(
+    messages: list[dict],
+    run_result,
+    cfg: PipelineConfig,
+    attempt: int,
+    max_attempts: int,
+) -> list[dict]:
+    """Append a ``tool_result`` user turn reporting a build/configure failure.
+
+    The Anthropic API requires the turn following an assistant ``tool_use`` to
+    open with a ``tool_result`` carrying the same ``tool_use_id``; we extract
+    that id from the most recent assistant turn in ``messages``.
+    """
+    tool_use_id = _last_tool_use_id(messages)
+    excerpt = (run_result.stderr or "")[: cfg.retry_stderr_chars]
+    feedback = (
+        f"Driver failed to {run_result.phase} (attempt {attempt}/{max_attempts}).\n\n"
+        f"Error output:\n```\n{excerpt}\n```\n\n"
+        "Revise the driver_source to fix this error. Do NOT modify kernel "
+        "logic — only fix the driver scaffolding (includes, shim/opaque "
+        "wrappers, type instantiations, init/finalize, sampling, journal "
+        "flush). Re-emit via emit_driver."
+    )
+    return messages + [
+        {
+            "role": "user",
+            "content": [
+                {
+                    "type": "tool_result",
+                    "tool_use_id": tool_use_id,
+                    "content": feedback,
+                }
+            ],
+        }
+    ]
 
 
 # ---------------------------------------------------------------------------
@@ -102,6 +159,7 @@ def _build_user_message(spec: InstrumentationSpec, cfg: PipelineConfig, prompt_t
             "kernel_name": spec.kernel_name,
             "kernel_signature": spec.kernel_signature,
             "parameter_types": spec.parameter_types,
+            "parameter_roles": spec.parameter_roles,
             "input_ranges": {k: list(v) for k, v in spec.input_ranges.items()},
             "framework": spec.framework,
             "detected_dispatchers": spec.detected_dispatchers,
@@ -134,6 +192,23 @@ def _build_user_message(spec: InstrumentationSpec, cfg: PipelineConfig, prompt_t
         f"## Kernel spec\n\n```json\n{spec_block}\n```{strategy_note}\n\n"
         f"## Kernel source\n\n{source_block}"
     )
+
+
+def _last_tool_use_id(messages: list[dict]) -> str:
+    """Return the id of the tool_use block in the most recent assistant turn."""
+    for msg in reversed(messages):
+        if msg.get("role") != "assistant":
+            continue
+        content = msg.get("content")
+        if isinstance(content, list):
+            for block in content:
+                btype = block.get("type") if isinstance(block, dict) else getattr(block, "type", None)
+                if btype == "tool_use":
+                    bid = block.get("id") if isinstance(block, dict) else getattr(block, "id", None)
+                    if bid:
+                        return bid
+        break  # only the latest assistant turn is relevant
+    raise ValueError("no tool_use block found in the most recent assistant turn")
 
 
 def _extract_tool_input(response) -> dict:
