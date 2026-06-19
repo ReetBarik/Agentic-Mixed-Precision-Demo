@@ -3,16 +3,22 @@ C++ source file that instruments a target kernel using the Tracked library,
 so that numerical sensitivity (condition numbers and relative forward error)
 can be measured for every arithmetic operation.
 
+If you receive a follow-up message reporting a build error from a previous
+attempt, revise the driver_source to fix that specific error.  Do NOT modify
+kernel logic — only fix the driver scaffolding.  Re-emit via emit_driver.
+
 ## What you receive
 
 - `kernel_name`: the name of the function to characterize
 - `kernel_signature`: the function's raw C++ signature text
 - `parameter_types`: list of (name, type) pairs for every parameter
+- `parameter_roles`: per-parameter role (input | output | inout), parallel to
+  `parameter_types`
 - `input_ranges`: per-argument (min, max) sampling intervals
 - `framework`: build framework the kernel uses — one of:
     "plain-cpp", "kokkos-serial", or a custom identifier
 - `detected_dispatchers`: list of user-side math dispatcher function names
-  (e.g. kAbs, kLog) visible in the source
+  (project-defined wrappers around math calls) visible in the source
 - `source_excerpt`: the relevant portion of the kernel source
 
 ## Your task
@@ -89,11 +95,14 @@ Produce the following in a single response:
   before including the kernel header.
 - **Kokkos math on complex types**: `Kokkos::log`, `Kokkos::abs`, etc. are
   NOT overloaded for `tracked::Complex<T>`.  Never call them directly on a
-  `tracked::Complex` value.  You MUST provide an `opaque_wrap` or
-  `interop_shim` for every such call site.  Example opaque_wrap for kLog:
+  `tracked::Complex` value.  You MUST provide a shim for every such call site.
+  **Prefer a real decomposition** (see "Complex elementary functions" below)
+  so the interior sensitivity is measured; fall back to `opaque_wrap` only when
+  no tractable real form exists.  Opaque fallback example (compiles, but loses
+  interior sensitivity — records cond = 1):
   ```cpp
   template <class T>
-  inline tracked::Complex<T> kLog(const tracked::Complex<T>& z) {
+  inline tracked::Complex<T> complex_log(const tracked::Complex<T>& z) {
       Kokkos::complex<T> raw{z.real().value(), z.imag().value()};
       Kokkos::complex<T> r = Kokkos::log(raw);
       return tracked::opaque<T>("Kokkos::log", r.real(), r.imag(),
@@ -143,7 +152,7 @@ Produce the following in a single response:
 
 8. **Source location capture (`TRACKED_HERE`).**  When you emit Tracked
    arithmetic in the driver itself — inside interop shims, opaque wrappers,
-   `kAbs`/`kLog` definitions, post-processing, anywhere driver-side ops run
+   custom dispatcher definitions, post-processing, anywhere driver-side ops run
    — use named Tracked functions with `TRACKED_HERE` so journal records
    carry `file:fn:line` for per-line attribution.  Prefer:
 
@@ -176,6 +185,86 @@ Produce the following in a single response:
    **Limitation:** you can NOT add `TRACKED_HERE` inside the user's kernel
    body — it's their code, we must `#include` it verbatim.  Driver-side ops
    are the only place to add location capture.
+
+## Complex elementary functions: decompose, don't opaque
+
+When the kernel applies an elementary function to a COMPLEX value (logarithm,
+modulus/abs, exp, sqrt, ...) and no overload exists for `tracked::Complex<T>`,
+you must supply a shim.  An `opaque_wrap` compiles but records cond = 1 for the
+whole call, so all interior sensitivity is lost.  When the function has a closed
+real form, REIMPLEMENT it with named tracked real ops (each carrying
+`TRACKED_HERE`) so the interior is measured:
+
+- **complex logarithm**: `log(z) = log(|z|) + i * atan2(Im z, Re z)`
+  ```cpp
+  template <class T>
+  tracked::Complex<T> complex_log(const tracked::Complex<T>& z) {
+      auto re = z.real();
+      auto im = z.imag();
+      auto mod2 = tracked::add(tracked::mul(re, re, TRACKED_HERE),
+                               tracked::mul(im, im, TRACKED_HERE), TRACKED_HERE);
+      auto logmod = tracked::log(tracked::sqrt(mod2, TRACKED_HERE), TRACKED_HERE);
+      auto arg    = tracked::atan2(im, re, TRACKED_HERE);
+      return tracked::Complex<T>(logmod, arg);
+  }
+  ```
+- **complex modulus**: `|z| = sqrt(Re z * Re z + Im z * Im z)` via the same
+  tracked ops.
+
+Bind whatever name the kernel actually calls (a framework function, a
+project-defined dispatcher, `std::`, etc.) to a shim like the above.  Reserve
+`opaque_wrap` for complex calls with no tractable real decomposition (special
+functions, vendor black boxes).  In `notes`, list which complex calls you
+decomposed and which remain opaque.
+
+## Output-by-reference kernels
+
+Some kernels return `void` and write results into parameters passed by
+reference or pointer.  Detect this by checking the return type in
+`kernel_signature` and by scanning `parameter_types` and `parameter_roles`
+for parameters marked `"output"` or `"inout"`.
+
+For these kernels:
+
+1. The spec lists each parameter's role (input | output | inout) in
+   `parameter_roles`, parallel to `parameter_types`.  Use that, not your own
+   inference.
+2. For each output parameter, declare a default-constructed Tracked instance
+   in the driver and pass it by reference.  Do NOT wrap output parameters
+   with `tracked::track()` — they have no input range and no initial value
+   to track:
+
+   ```cpp
+   tracked::Tracked<double> result;          // output: no track() call
+   auto x = tracked::track("x", x_sample);   // input
+   kernel(x, result);                        // void return, writes to result
+   ```
+
+3. Print `result.value()` on the first iteration just like a returned value,
+   so the per-iteration log line behaves identically to value-returning
+   kernels.
+
+4. Provenance flows through the output parameter automatically — the journal
+   records emitted inside the kernel carry the input provenance.
+
+5. For **complex output parameters**, default-construct
+   `tracked::Complex<double>` the same way:
+
+   ```cpp
+   tracked::Complex<double> z_out;
+   kernel(z_in, z_out);
+   ```
+
+6. For output **arrays** (e.g. `T result[2]`, `Kokkos::Array<T,2>&`),
+   default-construct the array of Tracked elements; do not call `track()`
+   on the elements.
+
+7. For **inout parameters** (role == "inout"): wrap with
+   `tracked::track(name, sample)` like an input — the kernel will update
+   in place.
+
+8. **const-qualified reference/pointer parameters** (`const T&`, `const T*`)
+   are always inputs regardless of any other heuristic.
 
 ## Critical rules
 
