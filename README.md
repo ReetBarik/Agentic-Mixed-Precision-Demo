@@ -10,15 +10,16 @@ The `langgraph-agents` branch implements **v2** of the system: a LangGraph orche
 
 ```mermaid
 %%{init: {'theme':'neutral', 'flowchart':{'curve':'basis'}, 'themeVariables':{'lineColor':'#888'}}}%%
-flowchart LR
+flowchart TB
     U([User])
 
     subgraph INPUTS[Inputs]
-        direction TB
+        direction LR
         K[/"Kernels + names + ranges"/]
         D[/"Whole-app driver"/]
         B[/"Build instructions"/]
-        F[/"Acceptance config"/]
+        F[/"Acceptance config<br/>(thresholds, metrics)"/]
+        BUD[/"Budget<br/>(time / iters / $)"/]
     end
 
     U --> INPUTS
@@ -34,27 +35,29 @@ flowchart LR
             CH3 -. compile fail .-> CH2
             CH3 --> CH4["4. Log parser<br/>per-op + per-line rollup,<br/>flag hotspots above threshold"]
             CH4 --> CH5["5. Symbolic overlay (LLM, optional)<br/>detect unstable idioms in source"]
-            CH5 --> CH6["6. Emit artifacts"]
         end
 
-        CHAR --> PROF[/"Sensitivity profile<br/>+ symbolic hints"/]
-        PROF --> STRAT["Strategy Agent (LLM)<br/>match catalog, rank by gain/risk"]
+        CH4 --> PROF[/"Sensitivity profile<br/>(measured)"/]
+        CH5 --> HINTS[/"Symbolic hints<br/>(inferred, optional)"/]
+        PROF --> STRAT["Strategy Agent (LLM)<br/>match catalog,<br/>rank by gain/risk"]
+        HINTS --> STRAT
         STRAT --> QUEUE[/"Strategy queue"/]
 
-        subgraph WALK["Strategy walk loop (Python)"]
-            direction LR
+        subgraph WALK["Strategy walk loop"]
+            direction TB
             LOOP{Queue empty<br/>or budget hit?}
             LOOP -->|No| PATCH["Patcher Agent (LLM)<br/>apply one strategy"]
             PATCH --> VAL["Validator Agent<br/>build whole app, run,<br/>compare vs FP128"]
-            VAL -->|accept| KEEP["Keep patch<br/>new baseline"]
+            VAL -->|accept| KEEP["Keep patch<br/>update baseline"]
             VAL -->|reject| FB["Revert<br/>structured failure feedback"]
-            KEEP --> LOOP
+            KEEP --> STATE[("Baseline store<br/>checkpoints + history")]
+            STATE --> LOOP
             FB --> LOOP
         end
 
         QUEUE --> WALK
-        FB -.-> STRAT
-        WALK --> OUT[/"Optimized kernel<br/>+ JSON report"/]
+        FB -. update priors .-> STRAT
+        WALK --> OUT[/"Optimized kernel(s)<br/>+ JSON report"/]
     end
 
     K --> CHAR
@@ -63,6 +66,8 @@ flowchart LR
     D --> VAL
     B --> VAL
     F --> VAL
+    F -.-> STRAT
+    BUD -.-> LOOP
 
     BR[("Build/Run Agent<br/>shared service")]
     CH3 -. micro-driver mode .-> BR
@@ -77,8 +82,8 @@ flowchart LR
     classDef actor fill:#faf5ff,stroke:#6b46c1,stroke-width:2px,color:#322659
     class CHAR,STRAT,PATCH,VAL agent
     class ORCH,WALK,LOOP,KEEP,FB plumbing
-    class K,D,B,F,PROF,QUEUE,OUT io
-    class BR shared
+    class K,D,B,F,BUD,PROF,HINTS,QUEUE,OUT io
+    class BR,STATE shared
     class U,Z actor
 ```
 
@@ -87,13 +92,16 @@ flowchart LR
 - Solid arrows = required data flow. Dotted arrows = optional / feedback / service calls.
 - Boxes tagged `(LLM)` make Anthropic API calls; everything else is deterministic Python.
 - The orchestrator and strategy-walk loop are LangGraph plumbing — no LLM, just routing and state.
+- The Characterizer emits two artifacts: the **sensitivity profile** (measured, always present) and **symbolic hints** (inferred via the optional LLM overlay). Both feed the Strategy Agent independently.
+- The **Baseline store** holds the accumulated patched source across iterations — each accepted patch updates it, the next strategy is tested on top.
+- Rejection feedback flows two ways: into the loop (so the queue advances) and back to the Strategy Agent (so subsequent rankings update their priors).
 - The Build/Run Agent is a shared service called by both the characterizer (micro-driver mode) and the validator (whole-app mode), not a pipeline stage.
 
 ---
 
 ## Inputs
 
-The pipeline takes six things from the user:
+The pipeline takes seven things from the user:
 
 | Input | Used by | Purpose |
 |-------|---------|---------|
@@ -102,7 +110,8 @@ The pipeline takes six things from the user:
 | Per-argument input ranges | Characterizer | Sampling intervals for each kernel argument |
 | Whole-app driver | Validator (primary), Characterizer (reference) | The real program that calls the kernels — used by the validator to test patches end-to-end and (lighter touch, planned) by the characterizer to mimic the real call convention |
 | Build instructions | Validator (primary), Characterizer (env extraction, planned) | cmake/script that builds the whole app — source of include paths, defs, link libs, flags |
-| Acceptance config | Validator | Metric (`min` / `p99` / `median` / `two-tier`), minimum digits, iteration budget, early-stop policy |
+| Acceptance config | Validator, Strategy (ranking) | Metric (`min` / `p99` / `median` / `two-tier`), minimum digits, early-stop policy. Also informs Strategy's gain/risk ranking. |
+| Budget | Strategy walk loop | Time, iteration, and/or cost ceiling that stops the walk loop independent of queue exhaustion. Default: 50 iterations. |
 
 ---
 
@@ -110,14 +119,15 @@ The pipeline takes six things from the user:
 
 ### 1. Characterizer Agent
 
-Builds a per-kernel sensitivity profile by instrumenting the kernel with `Tracked<T>`, running it on randomly sampled inputs, and rolling up the per-operation telemetry. Six internal steps:
+Builds a per-kernel sensitivity profile by instrumenting the kernel with `Tracked<T>`, running it on randomly sampled inputs, and rolling up the per-operation telemetry. Five internal steps:
 
 1. **Spec builder** (pure Python) — parses the kernel signature, classifies each parameter as input / output / inout, picks Tracked instantiation types (real scalar or complex).
 2. **Driver generator** (LLM) — Claude writes a self-contained micro-driver that includes the kernel verbatim, wraps inputs with `tracked::track()`, calls the kernel in a sampling loop, and flushes a journal. Handles interop shims, opaque wraps, and inline reimplementations for non-templatable framework math.
 3. **Build & run** — calls the shared Build/Run agent in micro-driver mode. On configure or build failure, feeds the error back to the driver generator (multi-turn `tool_result`) and retries up to `--max-driver-attempts`.
-4. **Log parser** — reads the JSONL journal, aggregates per-op and per-line, flags ops above the condition-number threshold.
-5. **Symbolic overlay** (LLM, optional, best-effort) — separate Claude call that inspects the kernel source for known unstable idioms (catastrophic cancellation, naive variance, log-sum-exp, large-magnitude sum, division by near-zero). Never gates the pipeline.
-6. **Emit** — writes `sensitivity_profile.json`, `interop_decisions.json`, `symbolic_hints.json`, plus per-attempt artifacts under `attempts/` and a `retry_log.json` summary.
+4. **Log parser** — reads the JSONL journal, aggregates per-op and per-line, flags ops above the condition-number threshold. Emits `sensitivity_profile.json` (always present) plus `interop_decisions.json` and per-attempt artifacts under `attempts/` with a `retry_log.json` summary.
+5. **Symbolic overlay** (LLM, optional, best-effort) — separate Claude call that inspects the kernel source for known unstable idioms (catastrophic cancellation, naive variance, log-sum-exp, large-magnitude sum, division by near-zero). Emits `symbolic_hints.json`. Never gates the pipeline.
+
+The sensitivity profile (measured) and symbolic hints (inferred, optional) are surfaced as two independent inputs to the Strategy Agent rather than a single merged artifact.
 
 ### 2. Strategy Agent (LLM)
 
@@ -163,13 +173,14 @@ Today it is a deterministic subprocess wrapper. Planned: LLM-driven framework de
 
 ### 6. Orchestrator (LangGraph wiring + shared TypedDict state)
 
-Top-level LangGraph graph. Holds the shared `PipelineState` TypedDict, routes data between agents, owns the strategy-walk loop (queue management, accept/revert bookkeeping, iteration budget, stop conditions). No LLM — predictable plumbing by design. Loop semantics:
+Top-level LangGraph graph. Holds the shared `PipelineState` TypedDict, routes data between agents, owns the strategy-walk loop (queue management, accept/revert bookkeeping, budget tracking, stop conditions). No LLM — predictable plumbing by design. Loop semantics:
 
-- **Sequential layering** — each accepted patch becomes part of the new baseline; the next strategy is tested on top of the accumulated state.
+- **Sequential layering** — each accepted patch becomes the new baseline in the **Baseline store**; the next strategy is tested on top of the accumulated state. The store also holds per-iteration checkpoints so a walk can be inspected or resumed.
 - **No combining strategies in v1** — one at a time, validate, keep or revert.
 - **Re-characterization between accepted patches deferred** — characterize once at the start, walk the queue.
+- **Rejection feedback is two-way** — a structured failure report advances the loop (so the next queued strategy runs) *and* flows back to the Strategy Agent so subsequent rankings update their priors on what has already failed.
 
-Stop conditions: queue exhausted, iteration budget reached (default 50), or optional early-stop after K consecutive failures.
+Stop conditions: queue exhausted, budget hit (iteration / time / cost; default 50 iterations), or optional early-stop after K consecutive failures.
 
 ---
 
