@@ -199,7 +199,7 @@ Status on `langgraph-agents` as of this README:
 | Validator agent | Stub |
 | Orchestrator | Wires characterizer end-to-end; downstream stages are pass-through |
 
-The characterizer's vertical slice is end-to-end functional: six calibration fixtures (cancellation, cancellation_out, naive_variance, log_sum_exp, kahan, cLn, Lnrat) run and produce sensitivity profiles that flag the expected hotspots. See `agents/characterizer/NEXT.md` for the remaining work on this slice and `agents/characterizer/PLAN_retry_loop.md` for the design of the recently-landed compile-retry loop.
+The characterizer's vertical slice is end-to-end functional: six calibration fixtures (cancellation, cancellation_out, naive_variance, log_sum_exp, kahan, cLn, Lnrat) run and produce sensitivity profiles that flag the expected hotspots. Historical slice-level plans live under `agents/characterizer/archive/` (see its `README.md` for what was implemented). The next-stage design for whole-app characterization (Range Discovery agent + tiered leaf/body profiling) is in [`PLAN_whole_app_characterization.md`](PLAN_whole_app_characterization.md).
 
 ---
 
@@ -274,7 +274,7 @@ pytest tests/agents/test_log_parser.py
 pytest tests/agents/test_driver_retry_loop.py
 ```
 
-Pure-unit tests today: log parser (13 cases) and the retry-loop control flow / tool_use_id threading / role classification. End-to-end and driver-gen snapshot tests are deferred — see `agents/characterizer/NEXT.md` §3.
+Pure-unit tests today: log parser (13 cases) and the retry-loop control flow / tool_use_id threading / role classification. End-to-end and driver-gen snapshot tests are deferred — see `agents/characterizer/archive/NEXT.md` §3.
 
 ---
 
@@ -298,9 +298,7 @@ Pure-unit tests today: log parser (13 cases) and the retry-loop control flow / t
 │   │   ├── spec.py                      # InstrumentationSpec dataclass
 │   │   ├── profile.py                   # SensitivityProfile, OpRecord, etc.
 │   │   ├── prompts/                     # driver_gen.txt, symbolic_overlay.txt
-│   │   ├── PLAN.md                      # original v1 slice plan
-│   │   ├── NEXT.md                      # remaining work
-│   │   └── PLAN_retry_loop.md           # compile-retry loop design
+│   │   └── archive/                      # historical slice plans (see archive/README.md)
 │   ├── strategy/                        # stub
 │   ├── patcher/                         # stub
 │   └── validator/                       # stub
@@ -312,7 +310,8 @@ Pure-unit tests today: log parser (13 cases) and the retry-loop control flow / t
 ├── src/                                 # example kernels (kokkosUtils.h)
 ├── scripts/                             # compare_results.py, build env helpers
 ├── requirements-langgraph.txt           # v2 deps
-└── PLAN.md                              # top-level v2 architecture plan
+├── PLAN.md                              # top-level v2 architecture plan
+└── PLAN_whole_app_characterization.md   # next-stage: Range Discovery + tiered profiling
 ```
 
 ---
