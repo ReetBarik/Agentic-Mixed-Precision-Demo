@@ -1,8 +1,10 @@
-# PLAN: Whole-app characterization of qcdloop integrals
+# PLAN: Implementation — whole-app characterization
 
-**Status:** Design discussed 2026-06-21. Not yet implemented.
+**Status:** Design discussed 2026-06-21. Implementation contracts locked 2026-06-28 (see §Implementation contracts at the bottom). Not yet implemented.
 
 **Repo:** `ReetBarik/Agentic-Mixed-Precision-Demo` (branch `langgraph-agents`), targeting `ReetBarik/qcdloop` as the first whole-app integration.
+
+> **Lower-level implementation plan.** Architectural context (agent decomposition, framework, catalog, loop semantics) is in [`PLAN_overview.md`](PLAN_overview.md).
 
 ---
 
@@ -194,18 +196,17 @@ Phase 1 and Phase 2 produce **different kinds of optimization signals**, and the
 
 ## Implementation order
 
-1. **Productionize `TrackedComplexDouble` + write `TrackedDouble`.** Clean rewrite from the prototype. Verify against vanilla on a few known test cases. Effort: ~1 day.
-2. **`ql::Constants` specializations + tracked overloads for `ql::*` math wrappers.** Effort: ~half-day each, mostly mechanical.
-3. **Hand-write `B13_tracked.h`** (Option A pattern, body-only Tracked, leaves as opaque). Validate that the build + Serial run produces sensible per-op rollups. Effort: ~1–2 hours.
-4. **Phase 0 prototype: hand-written logging wrappers** for the leaves B13 actually touches (`Lnrat`, `cLn`, `Li2omx2`, `xspence`, `ratgam`, `ratreal`, `spencer`). Compile-and-run on the existing test driver with batch_size=100k. Verify Parquet dump and per-leaf range aggregation. Effort: ~half-day.
-5. **Wire Phase 1** to consume Phase 0 outputs as Tier 1 ranges. Reuse existing characterizer. Run Tier 1 on each instrumented leaf. Effort: ~half-day (mostly orchestration).
-6. **Wire Phase 2** to inject Phase 1 leaf profiles into `B13_tracked.h` at the post-leaf re-entry points. Compare body-only vs body+leaf-injected loss estimates. Effort: ~half-day.
-7. **Validate end-to-end** on B13. Compare against vanilla output (correctness) and against the existing accumulation-only signal (precision delta). Effort: ~1 hour.
-8. **Generalize:** templated `Bxx_tracked.h` for the other 21 integrals. Once one is hand-written, this is partly mechanical, partly a research question (can the LLM generate the tracked variant from the vanilla source?). Effort: 1–2 days hand-written, open-ended if LLM-driven.
-9. **Build out the Range Discovery agent proper** (LLM-driven source parsing, wrapper generation, build/run integration) once the manual prototype validates the data flow. Effort: ~1 week.
-10. **Build out Tier 2 characterizer extensions** (spec-builder for `Kokkos::Array` inputs, driver-gen Kokkos batch template, log parser per-op CSV). Effort: ~1 week.
+1. ~~Productionize `TrackedComplexDouble` + write `TrackedDouble`.~~ **Already done.** Adopt `third_party/tracked/` (vendored from `ReetBarik/kokkos-extended-precision-demo@tracked`) as-is. Already integrated and exercised by Phase 1 characterizer. Effort: 0 days.
+2. **`ql::Constants` specializations + tracked overloads for `ql::*` math wrappers.** Tracked overloads already exist for the Phase 1 fixtures (see `runs/cln/src/micro_driver.cpp`); extend on demand when Phase 2 encounters a missing one. Effort: as needed, mostly mechanical.
+3. **Phase 0 prototype: hand-written logging wrappers** for the dependencies the first target kernel touches. Compile-and-run on a Serial driver with batch_size=100k. Verify Parquet dump and per-dependency range aggregation. Effort: ~half-day.
+4. **Wire Phase 1** to consume Phase 0 outputs as Tier 1 ranges. Reuse existing characterizer. Run Tier 1 on each instrumented dependency. Effort: ~half-day (mostly orchestration).
+5. **Wire Phase 2** to consume Phase 1 outputs (provenance attribution via `tracked::opaque_at`; conservative `cond=1` for v1, see §3). Compare body-only vs full-pipeline loss estimates. Effort: ~half-day.
+6. **Validate end-to-end** on the first target kernel. Per §6: schema validation (hard gate), tracking correctness (existing prototype tests), and hotspot recall against `symbolic_hints.json` annotations. Effort: ~1 hour beyond the prerequisites.
+7. **Generalize:** apply to additional target kernels in the app. Open research question whether tracked-variant generation can be LLM-driven. Effort: 1–2 days per kernel hand-written, open-ended if LLM-driven.
+8. **Build out the Range Discovery agent proper** (LLM-driven source parsing, wrapper generation, build/run integration) once the manual prototype validates the data flow. Effort: ~1 week.
+9. **Build out Tier 2 characterizer extensions** (spec-builder for `Kokkos::Array` inputs, driver-gen Kokkos batch template, log parser per-op CSV). Effort: ~1 week.
 
-Stop at any point if the signal isn't useful — steps 1–7 are the minimum viable proof of the architecture.
+Stop at any point if the signal isn't useful — steps 1–6 are the minimum viable proof of the architecture.
 
 ---
 
@@ -214,8 +215,8 @@ Stop at any point if the signal isn't useful — steps 1–7 are the minimum via
 - **Correlated leaf failures.** Phase 1+2 composition gives a conservative upper bound under independence assumption. The `wlog3mu`/`wlog4mu` correlation in B13 will be undercounted. Acceptable for v1; revisit if Strategy Agent's recommendations are visibly wrong.
 - **Branch-cut sensitivity in leaves.** Not caught by this architecture. Requires symbolic analysis or analytic bounds.
 - **LLM-generated `Bxx_tracked.h`?** Open research question. Hand-writing one per integral is acceptable for v1 but doesn't scale to other libraries. The translation is structurally regular (body-only Tracked promotion, leaf calls left intact) which makes it a reasonable LLM target.
-- **Whether Tier 2 needs per-op rollup or per-output rollup.** Per-op is richer but heavier on the log/parser. Per-output (just `res(i, 0..2)`) is what your prototype did and is much cheaper. Probably want both: per-op for the Characterizer's profile, per-output as the headline number.
 - **How to feed leaf-input regime info into Strategy Agent.** Body cancellation amplifying noisy-leaf-output is a *coupled* failure mode — needs joint profile artifact, not just two separate per-leaf and per-integral profiles. Schema TBD.
+- **Mermaid workflow diagram update tabled (2026-06-28)** — trying to make a self-contained diagram that captures the phase structure without becoming unreadable is a losing battle. Current single-pipeline view stays in `improvement-plan/mermaid.md`; this plan is the authoritative reference.
 
 ---
 
@@ -230,8 +231,180 @@ Stop at any point if the signal isn't useful — steps 1–7 are the minimum via
 
 ## Companion artifacts elsewhere
 
-- Diagram for the LangGraph wiring: `/Users/rbarik/.openclaw/workspace/diagrams/agentic-workflow-v3.mmd` (current v2 architecture; Range Discovery Agent would slot in as a node before the Characterizer)
+- Workflow diagram: `improvement-plan/mermaid.md` (single-pipeline view; update tabled per Open questions)
 - Existing characterizer slice: `agents/characterizer/` in the `langgraph-agents` branch
 - Build/Run agent (whole-app mode pending): `agents/build_run/`
-- Leaf source: `src/qcdloop/box/B*.h`, `src/qcdloop/kokkosUtils.h`, `src/qcdloop/kokkosMaths.h` in qcdloop
-- Whole-app driver: `examples/boxGPU_test.cc` in qcdloop
+- Tracked library: `third_party/tracked/` (vendored from `ReetBarik/kokkos-extended-precision-demo@tracked`)
+- qcdloop integration (first target app): external repo `ReetBarik/qcdloop`. Dependency source: `src/qcdloop/box/B*.h`, `src/qcdloop/kokkosUtils.h`, `src/qcdloop/kokkosMaths.h`. Whole-app driver: `examples/boxGPU_test.cc`.
+
+---
+
+## Implementation contracts (locked 2026-06-28)
+
+Outcome of a gap-by-gap audit on 2026-06-28. These decisions are the reference
+during implementation; revisit only with justification.
+
+### 1. Artifact schemas
+
+**Per-dependency profile** — adopt the existing characterizer schema as the contract:
+`runs/per_dependency/<dep>/sensitivity_profile.json` with fields `kernel`,
+`samples_run`, `per_op[]`, `per_line{}`, `per_variable{}`, `top_hotspots[]`,
+`opaque_coverage`. Companion `symbolic_hints.json` (separate file) carries
+LLM-derived idioms with `location` + `severity` + `suggested_rewrite`. No new
+fields invented.
+
+**Per-kernel profile** (Phase 2) — `kernel_profile.json` extends the
+per-dependency schema with:
+- `dependency_profile_refs: {<dep>: {path, sha256}}` — pinned references to
+  Phase 1 outputs consumed during tracking
+- `per_output: {<out>: {max_cond, max_rel_err}}` — rollup at kernel return points
+- `body_vs_dependency_decomposition: {body_max_cond, dependency_max_cond}` —
+  headline number distinguishing body cancellations from dependency-injected loss
+
+**Phase 0 outputs:**
+- `dependency_input_ranges.json` — per-dependency, per-dim stats (`min`, `max`,
+  `p01`, `p50`, `p99`, `n_nonfinite`, `n_negative`). For `complex<double>` dims:
+  `stats_real` + `stats_imag` sub-objects (the only place real/imag keying lives
+  in the schema; all other complex tracking decomposes at the op level).
+- `dependency_call_frequencies.json` — `per_kernel{<kernel>: {total_evaluations,
+  dependencies{}}}` and `per_dependency_totals{}`.
+- `<dep>_input_samples.parquet` — one file per dependency. Columns:
+  `kernel_id` (dictionary-encoded), `call_idx` (uint64), per-arg columns
+  (`arg_<i>` for real, `arg_<i>_re` + `arg_<i>_im` for complex). ZSTD,
+  row-group 64k.
+- `dependency_manifest.json` — index across all per-dependency files.
+
+All JSON artifacts carry `schema_version: 1`. Timestamps live only in
+`run_config.json` / `run_metadata.json`, never in primary artifacts (keeps diffs
+meaningful).
+
+### 2. Tracked types
+
+No new code. Adopt `tracked::Tracked<T>` and `tracked::Complex<T>` from
+`third_party/tracked/` (vendored from `ReetBarik/kokkos-extended-precision-demo@tracked`),
+already integrated and exercised by the Phase 1 characterizer.
+
+**Dependency re-entry pattern** (replaces all hand-wave injection snippets):
+```cpp
+auto wlogsmu_plain = ql::Lnrat<...>(sibar.value(), mu2.value());
+auto wlogsmu = tracked::opaque_at("Lnrat", wlogsmu_plain,
+                                  TRACKED_HERE, sibar, mu2);
+```
+The opaque barrier propagates `max(input_rel_errs) + u` with `cond=1`,
+unions provenance, and adds `fn_name` to the provenance set. Worked example:
+`runs/cln/src/micro_driver.cpp`.
+
+**Convention:** the dependency function name MUST be the first argument to
+`opaque` / `opaque_at` so provenance is greppable.
+
+**Interop shim taxonomy** (already established in `runs/cln/`):
+- `interop_shim`: dependency has a tracked-aware overload; delegate directly
+  (e.g. `ql::kLog` on a `Tracked<T>` forwards to `tracked::log`).
+- `opaque_wrap`: dependency is treated as a black box; call the native
+  implementation on unwrapped values, re-wrap with `tracked::opaque` to
+  preserve provenance.
+
+### 3. Dependency-loss handoff at re-entry
+
+v1: conservative `cond=1` from `tracked::opaque_at`. No lookup table; no
+Phase 1 → Phase 2 numerical handoff beyond provenance attribution.
+
+v2 (deferred): use `dependency_profile.max_cond` as a local cond override at
+the opaque barrier. Requires a one-line extension to the tracked API to accept
+an explicit `cond` argument. Add only if v1's conservative bound is provably
+too loose for Strategy Agent decisions.
+
+### 4. Determinism + seeding
+
+Scope: fair comparison between baseline and patched runs on the **same input
+set**. Not pursuing cross-machine or cross-compiler bit-reproducibility.
+
+Per run: persist (a) the seed used to generate inputs, (b) a snapshot of the
+generated input set. Both go in the run dir. Baseline and every candidate
+patch in that run consume the snapshot. Cross-session reruns reuse the
+snapshot, so PatchSet measurements are comparable across sessions.
+
+### 5. Failure modes — warn loudly, fail rarely
+
+Hard-fail only on:
+- Disk full / OOM
+- Tracked library can't be loaded
+
+Everything else degrades gracefully and surfaces as a flag in the artifact
+the Strategy Agent reads:
+
+| Phase | Condition | Response |
+|---|---|---|
+| 0 | LLM mis-parses a dependency call site | Retry N times with error fed back; on giveup, flag site and skip |
+| 0 | Wrapper patching breaks build | Same retry loop; surface patched-source diff |
+| 0 | Dependency produces zero samples | Mark as dead-leaf-for-this-workload in `dependency_call_frequencies.json` |
+| 1 | Dependency has no Phase 0 samples | Skip with warning; Phase 2 falls back to `opaque_at` default |
+| 1 | Tracked op emits non-finite cond/rel_err | Already handled by tracked lib (emits null); aggregator counts + reports |
+| 1 | Sample run exceeds timeout | Partial profile with `samples_run` reflecting completion; flag as partial |
+| 2 | Phase 1 profile missing for a dependency the kernel calls | Fall back to `cond=1`; log the gap |
+| 2 | Tracked body NaN-propagates | Record + continue; flag op as "tracking lost" |
+| 2 | Tracked kernel variant fails to compile | Retry loop (same pattern as Phase 1 driver gen, commit `9f91f34`) |
+| 2 | Op count explodes per sample | Truncate journal with warning; reduce samples-per-kernel instead of ops-per-sample |
+| cross | Tool / source SHA mismatch between phases | Warn (don't fail); cross-run profile reuse is legitimate |
+
+### 6. Validation — three layers
+
+**Tracking correctness:** prototype's existing test suite at
+`third_party/tracked/tests/` (cancellation, Kahan, log-sum-exp, naive variance,
+Smith division, complex log/sqrt). No additions needed for v1.
+
+**Schema correctness:** JSON Schema (draft-07) file per artifact type under
+`schemas/`. CI runs each phase on a fixture, validates outputs. Pass criterion:
+100% schema match. Hard gate.
+
+**End-to-end signal usefulness:** recall verifier on top of existing
+`sensitivity_profile.json` + `symbolic_hints.json`. For each validation
+fixture, recall = fraction of `symbolic_hints[*].location` covered by
+`top_hotspots[*].location`. Target: ≥80% on `high` severity, ≥50% on `medium`,
+unbounded precision (false positives acceptable). Surface as non-blocking
+status check.
+
+**Prerequisite for the recall verifier:** add `TRACKED_HERE` at use sites in
+`lnrat`, `cln`, `cancellation`, `kahan`, `naive_variance` fixtures (currently
+emit empty `location` fields, blocking match). Verify path relativization
+(commit `918738e`) actually fires on a fresh run.
+
+### 7. Repo layout
+
+```
+agents/
+  characterizer/             Phase 1 (per-dependency) — existing
+  range_discovery/           Phase 0 — new
+  kernel_characterizer/      Phase 2 (per-kernel body) — new
+  build_run/                 existing
+  shared/                    journal parsers, schema validators, interop helpers
+  orchestrator/              Phase 3 (PatchSet loop) — landing later
+
+runs/
+  per_dependency/<dep>/      current runs/<kernel>/ moves here
+  whole_app/<app>/<run_id>/
+    run_config.json
+    phase0/  dependency_input_ranges.json, dependency_call_frequencies.json,
+             dependency_manifest.json, samples/<dep>.parquet
+    phase1/  <dep>/sensitivity_profile.json, <dep>/symbolic_hints.json
+    phase2/  <kernel>/kernel_profile.json, <kernel>/journal.jsonl
+    phase3/  Strategy Agent outputs
+
+tests/
+  agents/fixtures/           existing unit-test fixtures
+  validation/                annotated kernels for recall verifier (see §6)
+
+third_party/tracked/         existing, vendored
+schemas/                     JSON Schema files for every artifact type
+```
+
+App source (e.g. qcdloop) stays **external** — `run_config.json` carries an
+`app_source_path` field, Phase 0's build step clones / references it. Keeps the
+workflow app-agnostic.
+
+### 8. Naming — workflow concepts vs qcdloop examples
+
+Schema field names stay generic: `kernel` (the unit being characterized),
+`dependencies` (functions a kernel calls and treats as opaque). qcdloop-
+specific nouns (`B13`, `Lnrat`, `cLn`, `wlogsmu`) appear only in worked
+examples, never as schema keys.

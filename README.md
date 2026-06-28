@@ -199,7 +199,7 @@ Status on `langgraph-agents` as of this README:
 | Validator agent | Stub |
 | Orchestrator | Wires characterizer end-to-end; downstream stages are pass-through |
 
-The characterizer's vertical slice is end-to-end functional: six calibration fixtures (cancellation, cancellation_out, naive_variance, log_sum_exp, kahan, cLn, Lnrat) run and produce sensitivity profiles that flag the expected hotspots. Historical slice-level plans live under `agents/characterizer/archive/` (see its `README.md` for what was implemented). The next-stage design for whole-app characterization (Range Discovery agent + tiered leaf/body profiling) is in [`PLAN_whole_app_characterization.md`](PLAN_whole_app_characterization.md).
+The characterizer's vertical slice is end-to-end functional: six calibration fixtures (cancellation, cancellation_out, naive_variance, log_sum_exp, kahan, cLn, Lnrat) run and produce sensitivity profiles that flag the expected hotspots. Historical slice-level plans live under `agents/characterizer/archive/` (see its `README.md` for what was implemented). The next-stage design for whole-app characterization (Range Discovery agent + tiered dependency/body profiling, with locked implementation contracts) is in [`PLAN_implementation.md`](PLAN_implementation.md).
 
 ---
 
@@ -310,8 +310,8 @@ Pure-unit tests today: log parser (13 cases) and the retry-loop control flow / t
 ├── src/                                 # example kernels (kokkosUtils.h)
 ├── scripts/                             # compare_results.py, build env helpers
 ├── requirements-langgraph.txt           # v2 deps
-├── PLAN.md                              # top-level v2 architecture plan
-└── PLAN_whole_app_characterization.md   # next-stage: Range Discovery + tiered profiling
+├── PLAN_overview.md                     # high-level architecture plan
+└── PLAN_implementation.md               # active extension: whole-app characterization + locked contracts
 ```
 
 ---

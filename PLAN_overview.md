@@ -1,14 +1,16 @@
-# Plan: Agentic Mixed-Precision Demo v2
+# Plan: Agentic Mixed-Precision Demo — Overview
 
 **Branch:** `langgraph-agents`
+
+> **High-level architecture of the agentic system.** For the current extension being implemented (whole-app characterization, Phase 0–2 + locked implementation contracts), see [`PLAN_implementation.md`](PLAN_implementation.md).
 
 ## Goal
 
 LLM agent system that takes a user's C++ kernel(s), per-argument input ranges, and build instructions; characterizes numerical sensitivity per variable; and applies validated mixed-precision optimizations from a fixed catalog.
 
-## Sibling dependency
+## Tracked library dependency
 
-New repo with a `Tracked<T>` C++ header-only library that overloads arithmetic ops to propagate condition number and accumulated error per variable. Used by the characterizer agent. Out of scope for this repo but blocks full integration.
+`Tracked<T>` C++ header-only library: overloads arithmetic ops to propagate condition number and accumulated relative error bound per variable, with per-op JSONL journaling and provenance tracking. Source of truth: `ReetBarik/kokkos-extended-precision-demo@tracked`. **Vendored** into this repo at `third_party/tracked/` and exercised end-to-end by the Phase 1 characterizer (`runs/cln/`, `runs/lnrat/`, etc.).
 
 ## Architecture
 
@@ -23,21 +25,31 @@ Owns the compilation environment: flags, framework detection (Kokkos / SYCL / Op
 
 Two modes:
 
-- **Whole-app mode** — user provides driver + build instructions; agent just executes.
+- **Whole-app mode** — executes a build + run against a (possibly Range-Discovery-patched) source tree. User provides driver + build instructions; agent executes them on the source it's pointed at (original or instrumented).
 - **Micro-driver mode** — agent wraps a single kernel given an *instrumentation spec* from the caller (which kernel, which input ranges, what telemetry to embed). Translates spec into actual driver source, compiles, runs, returns output.
 
 The build/run agent is intentionally dumb about *what* the run means — it just executes what it's told.
 
 ### 2. Characterizer agent
 
-For each target kernel:
+Two tiers (whole-app pipeline splits this; single-kernel path collapses to Tier 1 only):
 
-1. Builds an instrumentation spec: instantiate the kernel template with `Tracked<double>`, sample inputs from user-provided per-argument ranges.
-2. Invokes the build/run agent in micro-driver mode to produce a per-variable condition / accumulated-error log.
-3. Parses the log into a per-variable sensitivity profile.
-4. Cheap LLM symbolic overlay flags known unstable idioms (log-sum-exp, naive variance, catastrophic cancellation patterns) as hints — not load-bearing.
+**Tier 1 — per-dependency** (implemented; this is the v1 characterizer slice):
 
-Primary signal is the `Tracked<T>` instrumented run. Shadow execution (FP64 vs FP128) is reserved for the validator, not the characterizer.
+1. Builds an instrumentation spec: instantiate the kernel template with `Tracked<double>`, sample inputs from user-provided per-argument ranges (or from Phase 0 samples in whole-app mode).
+2. Invokes the build/run agent in micro-driver mode to produce a per-op condition / accumulated-error journal.
+3. Parses the journal into a per-op / per-line / per-variable sensitivity profile (`sensitivity_profile.json`).
+4. Cheap LLM symbolic overlay flags known unstable idioms (log-sum-exp, naive variance, catastrophic cancellation patterns) as `symbolic_hints.json` — diagnostic, not load-bearing.
+
+**Tier 2 — per-kernel body** (designed, not yet implemented):
+
+Body-only tracked variant of a top-level kernel; dependency calls remain opaque (handled via `tracked::opaque_at` with provenance attribution). Produces a `kernel_profile.json` with per-op body cancellation rollup + per-output condition + body-vs-dependency decomposition. Full design in [`PLAN_implementation.md`](PLAN_implementation.md).
+
+Primary signal in both tiers is the `Tracked<T>` instrumented run. Shadow execution (FP64 vs FP128) is reserved for the validator, not the characterizer.
+
+### 2a. Range Discovery agent (whole-app only, designed)
+
+New agent introduced by the whole-app pipeline. Patches dependency call sites in the user's app with logging wrappers, builds the instrumented binary, runs the user's whole-app driver under realistic parameter ranges, and dumps per-dependency input distributions + call frequencies (`dependency_input_ranges.json`, `dependency_call_frequencies.json`, per-dep Parquet samples). Feeds Tier 1 and Tier 2 with empirically-derived inputs. Design + contracts: [`PLAN_implementation.md`](PLAN_implementation.md).
 
 ### 3. Strategy agent
 
@@ -80,8 +92,9 @@ No free-form function-level rewrites in v1.
 
 ### 6. Orchestrator
 
-LangGraph top-level. Wires the loop:
+LangGraph top-level. Wires the loop.
 
+**Single-kernel path:**
 ```
 characterize once
   → walk strategy queue
@@ -89,6 +102,16 @@ characterize once
         patch → validate
           accept: keep, retest next on top of new baseline
           reject: revert, try next
+  → stop on queue exhaustion, iteration budget, or early-stop
+```
+
+**Whole-app path** (per [`PLAN_implementation.md`](PLAN_implementation.md)):
+```
+Phase 0: range discovery (once per app + param ranges)
+  → Phase 1: characterize each dependency (parallel by process)
+  → Phase 2: characterize each top-level kernel body (parallel by process)
+  → for each top-level kernel:
+      walk strategy queue (same loop as single-kernel path)
   → stop on queue exhaustion, iteration budget, or early-stop
 ```
 
@@ -133,21 +156,11 @@ CLI flags:
   - Sensitivity profile from characterization
   - Final accuracy distribution
 
-## Starting state
-
-Branch `langgraph-agents` from `main`. Drop `llm_agent/`. Keep:
-
-- `scripts/`
-- `src/` (example kernels)
-- `requirements*.txt`
-- `scripts/compare_results.py`
-
-New code under `agents/` (or similar).
-
-## Deferred to v2
+## Deferred to a later cut
 
 - Strategy combining (independence-class grouping using Tracked-type data flow).
 - Re-characterization between accepted patches.
 - Model-per-role assignment (cheap models for mechanical work).
 - Free-form function-level rewrites.
 - Additional secondary characterization strategies as overlays.
+- v2 dependency-loss handoff between Tier 1 and Tier 2 (override `cond=1` at the opaque barrier with empirically-measured per-dependency `max_cond`). See [`PLAN_implementation.md`](PLAN_implementation.md) §3.

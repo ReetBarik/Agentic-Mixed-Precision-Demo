@@ -9,7 +9,9 @@ Their content is reflected in code that has already landed on `langgraph-agents`
 | `PLAN_retry_loop.md` | Driver compile-retry loop design. Implemented and landed. |
 | `NEXT.md` | Follow-up "remaining work" notes (cLn, Lnrat, retry loop, relative paths, test expansion). Most items done; the framing ("done enough to start strategy agent work") is superseded by the whole-app plan below. |
 
-**Current authoritative plan:** [`PLAN_whole_app_characterization.md`](../../../PLAN_whole_app_characterization.md) at the repo root.
+**Current authoritative plans (at the repo root):**
+- [`PLAN_overview.md`](../../../PLAN_overview.md) — high-level architecture
+- [`PLAN_implementation.md`](../../../PLAN_implementation.md) — active extension (whole-app characterization) with locked implementation contracts
 
 Live, open work items that survived from `NEXT.md`:
 
