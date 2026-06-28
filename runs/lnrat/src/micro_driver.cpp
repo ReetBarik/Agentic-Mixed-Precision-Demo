@@ -34,14 +34,17 @@
 namespace ql {
 
 // Scalar Tracked overloads — direct delegation to tracked:: math.
+// TRACKED_HERE attributes each instrumented op to this driver line so the
+// journal carries per-line source locations (the kernel itself uses operator
+// overloads + these ql:: wrappers, neither of which can carry TRACKED_HERE).
 template <class T>
 inline tracked::Tracked<T> kAbs(const tracked::Tracked<T>& x) {
-    return tracked::abs(x);
+    return tracked::abs(x, TRACKED_HERE);
 }
 
 template <class T>
 inline tracked::Tracked<T> kLog(const tracked::Tracked<T>& x) {
-    return tracked::log(x);
+    return tracked::log(x, TRACKED_HERE);
 }
 
 // Complex overloads — opaque wrap around Kokkos::abs / Kokkos::log.
@@ -49,17 +52,18 @@ template <class T>
 inline tracked::Tracked<T> kAbs(const tracked::Complex<T>& z) {
     Kokkos::complex<T> raw{z.real().value(), z.imag().value()};
     T r = Kokkos::abs(raw);
-    return tracked::opaque<T>("Kokkos::abs", r, z.real(), z.imag());
+    return tracked::opaque_at<T>("Kokkos::abs", r, TRACKED_HERE,
+                                 z.real(), z.imag());
 }
 
 template <class T>
 inline tracked::Complex<T> kLog(const tracked::Complex<T>& z) {
     Kokkos::complex<T> raw{z.real().value(), z.imag().value()};
     Kokkos::complex<T> r = Kokkos::log(raw);
-    auto re = tracked::opaque<T>("Kokkos::log.re", r.real(),
-                                 z.real(), z.imag());
-    auto im = tracked::opaque<T>("Kokkos::log.im", r.imag(),
-                                 z.real(), z.imag());
+    auto re = tracked::opaque_at<T>("Kokkos::log.re", r.real(),
+                                    TRACKED_HERE, z.real(), z.imag());
+    auto im = tracked::opaque_at<T>("Kokkos::log.im", r.imag(),
+                                    TRACKED_HERE, z.real(), z.imag());
     return tracked::Complex<T>(re, im);
 }
 

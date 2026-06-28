@@ -1,36 +1,47 @@
 {
   "kernel": "naive_variance",
-  "samples_run": 2048,
+  "samples_run": 512,
   "per_op": [
     {
       "op": "sub",
-      "location": "",
+      "location": "/home/rbarik/Agentic-Mixed-Precision-Demo/tests/agents/fixtures/kernels/naive_variance.cpp:naive_variance:12",
       "max_cond": 9007199254740992.0,
       "max_rel_err": 4.0,
       "sample_count": 512,
       "provenance_union": [
         "sum_x",
-        "n",
-        "sum_x2"
+        "sum_x2",
+        "n"
       ],
       "flagged": true
     },
     {
       "op": "div",
-      "location": "",
+      "location": "/home/rbarik/Agentic-Mixed-Precision-Demo/tests/agents/fixtures/kernels/naive_variance.cpp:naive_variance:9",
       "max_cond": 1.0,
       "max_rel_err": 2.220446049250313e-16,
-      "sample_count": 1024,
+      "sample_count": 512,
       "provenance_union": [
         "sum_x",
-        "n",
-        "sum_x2"
+        "n"
+      ],
+      "flagged": false
+    },
+    {
+      "op": "div",
+      "location": "/home/rbarik/Agentic-Mixed-Precision-Demo/tests/agents/fixtures/kernels/naive_variance.cpp:naive_variance:10",
+      "max_cond": 1.0,
+      "max_rel_err": 2.220446049250313e-16,
+      "sample_count": 512,
+      "provenance_union": [
+        "sum_x2",
+        "n"
       ],
       "flagged": false
     },
     {
       "op": "mul",
-      "location": "",
+      "location": "/home/rbarik/Agentic-Mixed-Precision-Demo/tests/agents/fixtures/kernels/naive_variance.cpp:naive_variance:11",
       "max_cond": 1.0,
       "max_rel_err": 3.3306690738754696e-16,
       "sample_count": 512,
@@ -41,42 +52,103 @@
       "flagged": false
     }
   ],
-  "per_line": {},
-  "per_variable": {
-    "sum_x": 9007199254740992.0,
-    "n": 9007199254740992.0,
-    "sum_x2": 9007199254740992.0
-  },
-  "top_hotspots": [
-    {
+  "per_line": {
+    "/home/rbarik/Agentic-Mixed-Precision-Demo/tests/agents/fixtures/kernels/naive_variance.cpp:naive_variance:12": {
       "op": "sub",
-      "location": "",
+      "location": "/home/rbarik/Agentic-Mixed-Precision-Demo/tests/agents/fixtures/kernels/naive_variance.cpp:naive_variance:12",
       "max_cond": 9007199254740992.0,
       "max_rel_err": 4.0,
       "sample_count": 512,
       "provenance_union": [
         "sum_x",
-        "n",
-        "sum_x2"
+        "sum_x2",
+        "n"
+      ],
+      "flagged": true
+    },
+    "/home/rbarik/Agentic-Mixed-Precision-Demo/tests/agents/fixtures/kernels/naive_variance.cpp:naive_variance:9": {
+      "op": "div",
+      "location": "/home/rbarik/Agentic-Mixed-Precision-Demo/tests/agents/fixtures/kernels/naive_variance.cpp:naive_variance:9",
+      "max_cond": 1.0,
+      "max_rel_err": 2.220446049250313e-16,
+      "sample_count": 512,
+      "provenance_union": [
+        "sum_x",
+        "n"
+      ],
+      "flagged": false
+    },
+    "/home/rbarik/Agentic-Mixed-Precision-Demo/tests/agents/fixtures/kernels/naive_variance.cpp:naive_variance:10": {
+      "op": "div",
+      "location": "/home/rbarik/Agentic-Mixed-Precision-Demo/tests/agents/fixtures/kernels/naive_variance.cpp:naive_variance:10",
+      "max_cond": 1.0,
+      "max_rel_err": 2.220446049250313e-16,
+      "sample_count": 512,
+      "provenance_union": [
+        "sum_x2",
+        "n"
+      ],
+      "flagged": false
+    },
+    "/home/rbarik/Agentic-Mixed-Precision-Demo/tests/agents/fixtures/kernels/naive_variance.cpp:naive_variance:11": {
+      "op": "mul",
+      "location": "/home/rbarik/Agentic-Mixed-Precision-Demo/tests/agents/fixtures/kernels/naive_variance.cpp:naive_variance:11",
+      "max_cond": 1.0,
+      "max_rel_err": 3.3306690738754696e-16,
+      "sample_count": 512,
+      "provenance_union": [
+        "sum_x",
+        "n"
+      ],
+      "flagged": false
+    }
+  },
+  "per_variable": {
+    "sum_x": 9007199254740992.0,
+    "sum_x2": 9007199254740992.0,
+    "n": 9007199254740992.0
+  },
+  "top_hotspots": [
+    {
+      "op": "sub",
+      "location": "/home/rbarik/Agentic-Mixed-Precision-Demo/tests/agents/fixtures/kernels/naive_variance.cpp:naive_variance:12",
+      "max_cond": 9007199254740992.0,
+      "max_rel_err": 4.0,
+      "sample_count": 512,
+      "provenance_union": [
+        "sum_x",
+        "sum_x2",
+        "n"
       ],
       "flagged": true
     },
     {
       "op": "div",
-      "location": "",
+      "location": "/home/rbarik/Agentic-Mixed-Precision-Demo/tests/agents/fixtures/kernels/naive_variance.cpp:naive_variance:9",
       "max_cond": 1.0,
       "max_rel_err": 2.220446049250313e-16,
-      "sample_count": 1024,
+      "sample_count": 512,
       "provenance_union": [
         "sum_x",
-        "n",
-        "sum_x2"
+        "n"
+      ],
+      "flagged": false
+    },
+    {
+      "op": "div",
+      "location": "/home/rbarik/Agentic-Mixed-Precision-Demo/tests/agents/fixtures/kernels/naive_variance.cpp:naive_variance:10",
+      "max_cond": 1.0,
+      "max_rel_err": 2.220446049250313e-16,
+      "sample_count": 512,
+      "provenance_union": [
+        "sum_x2",
+        "n"
       ],
       "flagged": false
     },
     {
       "op": "mul",
-      "location": "",
+      "location": "/home/rbarik/Agentic-Mixed-Precision-Demo/tests/agents/fixtures/kernels/naive_variance.cpp:naive_variance:11",
       "max_cond": 1.0,
       "max_rel_err": 3.3306690738754696e-16,
       "sample_count": 512,

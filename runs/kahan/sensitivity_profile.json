@@ -4,10 +4,10 @@
   "per_op": [
     {
       "op": "sub",
-      "location": "",
+      "location": "/home/rbarik/Agentic-Mixed-Precision-Demo/tests/agents/fixtures/kernels/kahan.cpp:kahan_sum:22",
       "max_cond": 1.5993446277285508e+16,
-      "max_rel_err": 3.648226460506358e+22,
-      "sample_count": 3072,
+      "max_rel_err": 3.013502280973665e+19,
+      "sample_count": 512,
       "provenance_union": [
         "b",
         "c",
@@ -16,11 +16,84 @@
       "flagged": true
     },
     {
+      "op": "sub",
+      "location": "/home/rbarik/Agentic-Mixed-Precision-Demo/tests/agents/fixtures/kernels/kahan.cpp:kahan_sum:15",
+      "max_cond": 1.4740093968810188e+16,
+      "max_rel_err": 6.54591668372459,
+      "sample_count": 512,
+      "provenance_union": [
+        "b",
+        "a"
+      ],
+      "flagged": true
+    },
+    {
+      "op": "sub",
+      "location": "/home/rbarik/Agentic-Mixed-Precision-Demo/tests/agents/fixtures/kernels/kahan.cpp:kahan_sum:23",
+      "max_cond": 1240624.8613478472,
+      "max_rel_err": 3.648226460506358e+22,
+      "sample_count": 512,
+      "provenance_union": [
+        "b",
+        "c",
+        "a"
+      ],
+      "flagged": false
+    },
+    {
+      "op": "sub",
+      "location": "/home/rbarik/Agentic-Mixed-Precision-Demo/tests/agents/fixtures/kernels/kahan.cpp:kahan_sum:16",
+      "max_cond": 651886.5531772,
+      "max_rel_err": 38825.838971023244,
+      "sample_count": 512,
+      "provenance_union": [
+        "b",
+        "a"
+      ],
+      "flagged": false
+    },
+    {
+      "op": "sub",
+      "location": "/home/rbarik/Agentic-Mixed-Precision-Demo/tests/agents/fixtures/kernels/kahan.cpp:kahan_sum:20",
+      "max_cond": 7.224386992126476,
+      "max_rel_err": 38827.22360776874,
+      "sample_count": 512,
+      "provenance_union": [
+        "b",
+        "c",
+        "a"
+      ],
+      "flagged": false
+    },
+    {
+      "op": "sub",
+      "location": "/home/rbarik/Agentic-Mixed-Precision-Demo/tests/agents/fixtures/kernels/kahan.cpp:kahan_sum:13",
+      "max_cond": 1.0,
+      "max_rel_err": 2.220446049250313e-16,
+      "sample_count": 512,
+      "provenance_union": [
+        "b"
+      ],
+      "flagged": false
+    },
+    {
       "op": "add",
-      "location": "",
+      "location": "/home/rbarik/Agentic-Mixed-Precision-Demo/tests/agents/fixtures/kernels/kahan.cpp:kahan_sum:14",
+      "max_cond": 1.0,
+      "max_rel_err": 3.3306690738754696e-16,
+      "sample_count": 512,
+      "provenance_union": [
+        "b",
+        "a"
+      ],
+      "flagged": false
+    },
+    {
+      "op": "add",
+      "location": "/home/rbarik/Agentic-Mixed-Precision-Demo/tests/agents/fixtures/kernels/kahan.cpp:kahan_sum:21",
       "max_cond": 1.0,
       "max_rel_err": 38827.22360776874,
-      "sample_count": 1024,
+      "sample_count": 512,
       "provenance_union": [
         "b",
         "c",
@@ -29,19 +102,119 @@
       "flagged": false
     }
   ],
-  "per_line": {},
+  "per_line": {
+    "/home/rbarik/Agentic-Mixed-Precision-Demo/tests/agents/fixtures/kernels/kahan.cpp:kahan_sum:22": {
+      "op": "sub",
+      "location": "/home/rbarik/Agentic-Mixed-Precision-Demo/tests/agents/fixtures/kernels/kahan.cpp:kahan_sum:22",
+      "max_cond": 1.5993446277285508e+16,
+      "max_rel_err": 3.013502280973665e+19,
+      "sample_count": 512,
+      "provenance_union": [
+        "b",
+        "c",
+        "a"
+      ],
+      "flagged": true
+    },
+    "/home/rbarik/Agentic-Mixed-Precision-Demo/tests/agents/fixtures/kernels/kahan.cpp:kahan_sum:15": {
+      "op": "sub",
+      "location": "/home/rbarik/Agentic-Mixed-Precision-Demo/tests/agents/fixtures/kernels/kahan.cpp:kahan_sum:15",
+      "max_cond": 1.4740093968810188e+16,
+      "max_rel_err": 6.54591668372459,
+      "sample_count": 512,
+      "provenance_union": [
+        "b",
+        "a"
+      ],
+      "flagged": true
+    },
+    "/home/rbarik/Agentic-Mixed-Precision-Demo/tests/agents/fixtures/kernels/kahan.cpp:kahan_sum:23": {
+      "op": "sub",
+      "location": "/home/rbarik/Agentic-Mixed-Precision-Demo/tests/agents/fixtures/kernels/kahan.cpp:kahan_sum:23",
+      "max_cond": 1240624.8613478472,
+      "max_rel_err": 3.648226460506358e+22,
+      "sample_count": 512,
+      "provenance_union": [
+        "b",
+        "c",
+        "a"
+      ],
+      "flagged": false
+    },
+    "/home/rbarik/Agentic-Mixed-Precision-Demo/tests/agents/fixtures/kernels/kahan.cpp:kahan_sum:16": {
+      "op": "sub",
+      "location": "/home/rbarik/Agentic-Mixed-Precision-Demo/tests/agents/fixtures/kernels/kahan.cpp:kahan_sum:16",
+      "max_cond": 651886.5531772,
+      "max_rel_err": 38825.838971023244,
+      "sample_count": 512,
+      "provenance_union": [
+        "b",
+        "a"
+      ],
+      "flagged": false
+    },
+    "/home/rbarik/Agentic-Mixed-Precision-Demo/tests/agents/fixtures/kernels/kahan.cpp:kahan_sum:20": {
+      "op": "sub",
+      "location": "/home/rbarik/Agentic-Mixed-Precision-Demo/tests/agents/fixtures/kernels/kahan.cpp:kahan_sum:20",
+      "max_cond": 7.224386992126476,
+      "max_rel_err": 38827.22360776874,
+      "sample_count": 512,
+      "provenance_union": [
+        "b",
+        "c",
+        "a"
+      ],
+      "flagged": false
+    },
+    "/home/rbarik/Agentic-Mixed-Precision-Demo/tests/agents/fixtures/kernels/kahan.cpp:kahan_sum:13": {
+      "op": "sub",
+      "location": "/home/rbarik/Agentic-Mixed-Precision-Demo/tests/agents/fixtures/kernels/kahan.cpp:kahan_sum:13",
+      "max_cond": 1.0,
+      "max_rel_err": 2.220446049250313e-16,
+      "sample_count": 512,
+      "provenance_union": [
+        "b"
+      ],
+      "flagged": false
+    },
+    "/home/rbarik/Agentic-Mixed-Precision-Demo/tests/agents/fixtures/kernels/kahan.cpp:kahan_sum:14": {
+      "op": "add",
+      "location": "/home/rbarik/Agentic-Mixed-Precision-Demo/tests/agents/fixtures/kernels/kahan.cpp:kahan_sum:14",
+      "max_cond": 1.0,
+      "max_rel_err": 3.3306690738754696e-16,
+      "sample_count": 512,
+      "provenance_union": [
+        "b",
+        "a"
+      ],
+      "flagged": false
+    },
+    "/home/rbarik/Agentic-Mixed-Precision-Demo/tests/agents/fixtures/kernels/kahan.cpp:kahan_sum:21": {
+      "op": "add",
+      "location": "/home/rbarik/Agentic-Mixed-Precision-Demo/tests/agents/fixtures/kernels/kahan.cpp:kahan_sum:21",
+      "max_cond": 1.0,
+      "max_rel_err": 38827.22360776874,
+      "sample_count": 512,
+      "provenance_union": [
+        "b",
+        "c",
+        "a"
+      ],
+      "flagged": false
+    }
+  },
   "per_variable": {
-    "b": 1.5993446277285508e+16,
     "c": 1.5993446277285508e+16,
+    "b": 1.5993446277285508e+16,
     "a": 1.5993446277285508e+16
   },
   "top_hotspots": [
     {
       "op": "sub",
-      "location": "",
+      "location": "/home/rbarik/Agentic-Mixed-Precision-Demo/tests/agents/fixtures/kernels/kahan.cpp:kahan_sum:22",
       "max_cond": 1.5993446277285508e+16,
-      "max_rel_err": 3.648226460506358e+22,
-      "sample_count": 3072,
+      "max_rel_err": 3.013502280973665e+19,
+      "sample_count": 512,
       "provenance_union": [
         "b",
         "c",
@@ -50,11 +223,84 @@
       "flagged": true
     },
     {
+      "op": "sub",
+      "location": "/home/rbarik/Agentic-Mixed-Precision-Demo/tests/agents/fixtures/kernels/kahan.cpp:kahan_sum:15",
+      "max_cond": 1.4740093968810188e+16,
+      "max_rel_err": 6.54591668372459,
+      "sample_count": 512,
+      "provenance_union": [
+        "b",
+        "a"
+      ],
+      "flagged": true
+    },
+    {
+      "op": "sub",
+      "location": "/home/rbarik/Agentic-Mixed-Precision-Demo/tests/agents/fixtures/kernels/kahan.cpp:kahan_sum:23",
+      "max_cond": 1240624.8613478472,
+      "max_rel_err": 3.648226460506358e+22,
+      "sample_count": 512,
+      "provenance_union": [
+        "b",
+        "c",
+        "a"
+      ],
+      "flagged": false
+    },
+    {
+      "op": "sub",
+      "location": "/home/rbarik/Agentic-Mixed-Precision-Demo/tests/agents/fixtures/kernels/kahan.cpp:kahan_sum:16",
+      "max_cond": 651886.5531772,
+      "max_rel_err": 38825.838971023244,
+      "sample_count": 512,
+      "provenance_union": [
+        "b",
+        "a"
+      ],
+      "flagged": false
+    },
+    {
+      "op": "sub",
+      "location": "/home/rbarik/Agentic-Mixed-Precision-Demo/tests/agents/fixtures/kernels/kahan.cpp:kahan_sum:20",
+      "max_cond": 7.224386992126476,
+      "max_rel_err": 38827.22360776874,
+      "sample_count": 512,
+      "provenance_union": [
+        "b",
+        "c",
+        "a"
+      ],
+      "flagged": false
+    },
+    {
+      "op": "sub",
+      "location": "/home/rbarik/Agentic-Mixed-Precision-Demo/tests/agents/fixtures/kernels/kahan.cpp:kahan_sum:13",
+      "max_cond": 1.0,
+      "max_rel_err": 2.220446049250313e-16,
+      "sample_count": 512,
+      "provenance_union": [
+        "b"
+      ],
+      "flagged": false
+    },
+    {
       "op": "add",
-      "location": "",
+      "location": "/home/rbarik/Agentic-Mixed-Precision-Demo/tests/agents/fixtures/kernels/kahan.cpp:kahan_sum:14",
+      "max_cond": 1.0,
+      "max_rel_err": 3.3306690738754696e-16,
+      "sample_count": 512,
+      "provenance_union": [
+        "b",
+        "a"
+      ],
+      "flagged": false
+    },
+    {
+      "op": "add",
+      "location": "/home/rbarik/Agentic-Mixed-Precision-Demo/tests/agents/fixtures/kernels/kahan.cpp:kahan_sum:21",
       "max_cond": 1.0,
       "max_rel_err": 38827.22360776874,
-      "sample_count": 1024,
+      "sample_count": 512,
       "provenance_union": [
         "b",
         "c",

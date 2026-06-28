@@ -4,7 +4,7 @@
   "per_op": [
     {
       "op": "exp",
-      "location": "/home/rbarik/Agentic-Mixed-Precision-Demo/runs/log_sum_exp/src/micro_driver.cpp:exp:28",
+      "location": "src/micro_driver.cpp:exp:28",
       "max_cond": 199.93535021611603,
       "max_rel_err": 4.439456584928526e-14,
       "sample_count": 1024,
@@ -28,7 +28,7 @@
     },
     {
       "op": "log",
-      "location": "/home/rbarik/Agentic-Mixed-Precision-Demo/runs/log_sum_exp/src/micro_driver.cpp:log:25",
+      "location": "src/micro_driver.cpp:log:25",
       "max_cond": 0.009994798940629428,
       "max_rel_err": 2.242638961071085e-16,
       "sample_count": 512,
@@ -40,9 +40,9 @@
     }
   ],
   "per_line": {
-    "/home/rbarik/Agentic-Mixed-Precision-Demo/runs/log_sum_exp/src/micro_driver.cpp:exp:28": {
+    "src/micro_driver.cpp:exp:28": {
       "op": "exp",
-      "location": "/home/rbarik/Agentic-Mixed-Precision-Demo/runs/log_sum_exp/src/micro_driver.cpp:exp:28",
+      "location": "src/micro_driver.cpp:exp:28",
       "max_cond": 199.93535021611603,
       "max_rel_err": 4.439456584928526e-14,
       "sample_count": 1024,
@@ -52,9 +52,9 @@
       ],
       "flagged": false
     },
-    "/home/rbarik/Agentic-Mixed-Precision-Demo/runs/log_sum_exp/src/micro_driver.cpp:log:25": {
+    "src/micro_driver.cpp:log:25": {
       "op": "log",
-      "location": "/home/rbarik/Agentic-Mixed-Precision-Demo/runs/log_sum_exp/src/micro_driver.cpp:log:25",
+      "location": "src/micro_driver.cpp:log:25",
       "max_cond": 0.009994798940629428,
       "max_rel_err": 2.242638961071085e-16,
       "sample_count": 512,
@@ -72,7 +72,7 @@
   "top_hotspots": [
     {
       "op": "exp",
-      "location": "/home/rbarik/Agentic-Mixed-Precision-Demo/runs/log_sum_exp/src/micro_driver.cpp:exp:28",
+      "location": "src/micro_driver.cpp:exp:28",
       "max_cond": 199.93535021611603,
       "max_rel_err": 4.439456584928526e-14,
       "sample_count": 1024,
@@ -96,7 +96,7 @@
     },
     {
       "op": "log",
-      "location": "/home/rbarik/Agentic-Mixed-Precision-Demo/runs/log_sum_exp/src/micro_driver.cpp:log:25",
+      "location": "src/micro_driver.cpp:log:25",
       "max_cond": 0.009994798940629428,
       "max_rel_err": 2.242638961071085e-16,
       "sample_count": 512,

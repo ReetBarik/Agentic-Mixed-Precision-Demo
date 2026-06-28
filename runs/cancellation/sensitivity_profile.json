@@ -1,10 +1,10 @@
 {
   "kernel": "cancellation_check",
-  "samples_run": 1024,
+  "samples_run": 512,
   "per_op": [
     {
       "op": "sub",
-      "location": "",
+      "location": "/home/rbarik/Agentic-Mixed-Precision-Demo/tests/agents/fixtures/kernels/cancellation.cpp:cancellation_check:10",
       "max_cond": 37687026170465.41,
       "max_rel_err": 0.01255230125523046,
       "sample_count": 512,
@@ -16,7 +16,7 @@
     },
     {
       "op": "add",
-      "location": "",
+      "location": "/home/rbarik/Agentic-Mixed-Precision-Demo/tests/agents/fixtures/kernels/cancellation.cpp:cancellation_check:9",
       "max_cond": 1.0,
       "max_rel_err": 2.220446049250313e-16,
       "sample_count": 512,
@@ -27,7 +27,32 @@
       "flagged": false
     }
   ],
-  "per_line": {},
+  "per_line": {
+    "/home/rbarik/Agentic-Mixed-Precision-Demo/tests/agents/fixtures/kernels/cancellation.cpp:cancellation_check:10": {
+      "op": "sub",
+      "location": "/home/rbarik/Agentic-Mixed-Precision-Demo/tests/agents/fixtures/kernels/cancellation.cpp:cancellation_check:10",
+      "max_cond": 37687026170465.41,
+      "max_rel_err": 0.01255230125523046,
+      "sample_count": 512,
+      "provenance_union": [
+        "b",
+        "a"
+      ],
+      "flagged": true
+    },
+    "/home/rbarik/Agentic-Mixed-Precision-Demo/tests/agents/fixtures/kernels/cancellation.cpp:cancellation_check:9": {
+      "op": "add",
+      "location": "/home/rbarik/Agentic-Mixed-Precision-Demo/tests/agents/fixtures/kernels/cancellation.cpp:cancellation_check:9",
+      "max_cond": 1.0,
+      "max_rel_err": 2.220446049250313e-16,
+      "sample_count": 512,
+      "provenance_union": [
+        "b",
+        "a"
+      ],
+      "flagged": false
+    }
+  },
   "per_variable": {
     "b": 37687026170465.41,
     "a": 37687026170465.41
@@ -35,7 +60,7 @@
   "top_hotspots": [
     {
       "op": "sub",
-      "location": "",
+      "location": "/home/rbarik/Agentic-Mixed-Precision-Demo/tests/agents/fixtures/kernels/cancellation.cpp:cancellation_check:10",
       "max_cond": 37687026170465.41,
       "max_rel_err": 0.01255230125523046,
       "sample_count": 512,
@@ -47,7 +72,7 @@
     },
     {
       "op": "add",
-      "location": "",
+      "location": "/home/rbarik/Agentic-Mixed-Precision-Demo/tests/agents/fixtures/kernels/cancellation.cpp:cancellation_check:9",
       "max_cond": 1.0,
       "max_rel_err": 2.220446049250313e-16,
       "sample_count": 512,

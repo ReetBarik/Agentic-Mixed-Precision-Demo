@@ -52,20 +52,59 @@
     },
     {
       "op": "opaque",
-      "location": "",
+      "location": "src/micro_driver.cpp:kLog:64",
       "max_cond": 1.0,
       "max_rel_err": 6.687609496356502e-14,
-      "sample_count": 512,
+      "sample_count": 256,
       "provenance_union": [
-        "Kokkos::log.im",
         "x",
         "Kokkos::log.re",
         "y"
       ],
       "flagged": false
+    },
+    {
+      "op": "opaque",
+      "location": "src/micro_driver.cpp:kLog:66",
+      "max_cond": 1.0,
+      "max_rel_err": 6.687609496356502e-14,
+      "sample_count": 256,
+      "provenance_union": [
+        "x",
+        "Kokkos::log.im",
+        "y"
+      ],
+      "flagged": false
     }
   ],
-  "per_line": {},
+  "per_line": {
+    "src/micro_driver.cpp:kLog:64": {
+      "op": "opaque",
+      "location": "src/micro_driver.cpp:kLog:64",
+      "max_cond": 1.0,
+      "max_rel_err": 6.687609496356502e-14,
+      "sample_count": 256,
+      "provenance_union": [
+        "x",
+        "Kokkos::log.re",
+        "y"
+      ],
+      "flagged": false
+    },
+    "src/micro_driver.cpp:kLog:66": {
+      "op": "opaque",
+      "location": "src/micro_driver.cpp:kLog:66",
+      "max_cond": 1.0,
+      "max_rel_err": 6.687609496356502e-14,
+      "sample_count": 256,
+      "provenance_union": [
+        "x",
+        "Kokkos::log.im",
+        "y"
+      ],
+      "flagged": false
+    }
+  },
   "per_variable": {
     "x": 150.09157817895266,
     "y": 150.09157817895266,
@@ -123,19 +162,31 @@
     },
     {
       "op": "opaque",
-      "location": "",
+      "location": "src/micro_driver.cpp:kLog:64",
       "max_cond": 1.0,
       "max_rel_err": 6.687609496356502e-14,
-      "sample_count": 512,
+      "sample_count": 256,
       "provenance_union": [
-        "Kokkos::log.im",
         "x",
         "Kokkos::log.re",
         "y"
       ],
       "flagged": false
+    },
+    {
+      "op": "opaque",
+      "location": "src/micro_driver.cpp:kLog:66",
+      "max_cond": 1.0,
+      "max_rel_err": 6.687609496356502e-14,
+      "sample_count": 256,
+      "provenance_union": [
+        "x",
+        "Kokkos::log.im",
+        "y"
+      ],
+      "flagged": false
     }
   ],
-  "opaque_coverage": 0.2,
+  "opaque_coverage": 0.3333333333333333,
   "notes": []
 }
