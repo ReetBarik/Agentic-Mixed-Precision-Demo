@@ -4,51 +4,29 @@
   "per_op": [
     {
       "op": "opaque",
-      "location": "src/micro_driver.cpp:kLog:71",
+      "location": "/home/rbarik/Agentic-Mixed-Precision-Demo/tests/agents/fixtures/kernels/cln_kernel.hpp:cLn:55",
       "max_cond": 1.0,
       "max_rel_err": 2.220446049250313e-16,
-      "sample_count": 256,
+      "sample_count": 512,
       "provenance_union": [
         "z",
-        "Kokkos::log.re"
-      ],
-      "flagged": false
-    },
-    {
-      "op": "opaque",
-      "location": "src/micro_driver.cpp:kLog:73",
-      "max_cond": 1.0,
-      "max_rel_err": 2.220446049250313e-16,
-      "sample_count": 256,
-      "provenance_union": [
-        "Kokkos::log.im",
-        "z"
+        "Kokkos::log.re",
+        "Kokkos::log.im"
       ],
       "flagged": false
     }
   ],
   "per_line": {
-    "src/micro_driver.cpp:kLog:71": {
+    "/home/rbarik/Agentic-Mixed-Precision-Demo/tests/agents/fixtures/kernels/cln_kernel.hpp:cLn:55": {
       "op": "opaque",
-      "location": "src/micro_driver.cpp:kLog:71",
+      "location": "/home/rbarik/Agentic-Mixed-Precision-Demo/tests/agents/fixtures/kernels/cln_kernel.hpp:cLn:55",
       "max_cond": 1.0,
       "max_rel_err": 2.220446049250313e-16,
-      "sample_count": 256,
+      "sample_count": 512,
       "provenance_union": [
         "z",
-        "Kokkos::log.re"
-      ],
-      "flagged": false
-    },
-    "src/micro_driver.cpp:kLog:73": {
-      "op": "opaque",
-      "location": "src/micro_driver.cpp:kLog:73",
-      "max_cond": 1.0,
-      "max_rel_err": 2.220446049250313e-16,
-      "sample_count": 256,
-      "provenance_union": [
-        "Kokkos::log.im",
-        "z"
+        "Kokkos::log.re",
+        "Kokkos::log.im"
       ],
       "flagged": false
     }
@@ -61,25 +39,14 @@
   "top_hotspots": [
     {
       "op": "opaque",
-      "location": "src/micro_driver.cpp:kLog:71",
+      "location": "/home/rbarik/Agentic-Mixed-Precision-Demo/tests/agents/fixtures/kernels/cln_kernel.hpp:cLn:55",
       "max_cond": 1.0,
       "max_rel_err": 2.220446049250313e-16,
-      "sample_count": 256,
+      "sample_count": 512,
       "provenance_union": [
         "z",
-        "Kokkos::log.re"
-      ],
-      "flagged": false
-    },
-    {
-      "op": "opaque",
-      "location": "src/micro_driver.cpp:kLog:73",
-      "max_cond": 1.0,
-      "max_rel_err": 2.220446049250313e-16,
-      "sample_count": 256,
-      "provenance_union": [
-        "Kokkos::log.im",
-        "z"
+        "Kokkos::log.re",
+        "Kokkos::log.im"
       ],
       "flagged": false
     }

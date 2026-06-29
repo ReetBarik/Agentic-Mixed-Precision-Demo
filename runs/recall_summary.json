@@ -4,7 +4,7 @@
     "high": 0.8,
     "medium": 0.5
   },
-  "overall_pass": false,
+  "overall_pass": true,
   "fixtures": [
     {
       "fixture": "cancellation",
@@ -41,28 +41,23 @@
         "recall": null
       },
       "medium": {
-        "matched": 0,
+        "matched": 2,
         "total": 2,
-        "recall": 0.0
+        "recall": 1.0
       },
       "low": {
-        "matched": 0,
+        "matched": 1,
         "total": 1,
-        "recall": 0.0
+        "recall": 1.0
       },
-      "pass": false,
-      "findings": [
-        "unmatched medium hint location 'Lnrat:complex_overload' (idiom='division_by_near_zero'); top_hotspots locations=['src/micro_driver.cpp:kLog:64', 'src/micro_driver.cpp:kLog:66']",
-        "unmatched medium hint location 'Lnrat:real_overload' (idiom='division_by_near_zero'); top_hotspots locations=['src/micro_driver.cpp:kLog:64', 'src/micro_driver.cpp:kLog:66']",
-        "unmatched low hint location 'Lnrat:complex_overload' (idiom='catastrophic_cancellation'); top_hotspots locations=['src/micro_driver.cpp:kLog:64', 'src/micro_driver.cpp:kLog:66']"
-      ]
+      "pass": true
     },
     {
       "fixture": "log_sum_exp",
       "high": {
-        "matched": 0,
+        "matched": 1,
         "total": 1,
-        "recall": 0.0
+        "recall": 1.0
       },
       "medium": {
         "matched": 0,
@@ -74,10 +69,7 @@
         "total": 0,
         "recall": null
       },
-      "pass": false,
-      "findings": [
-        "unmatched high hint location 'file:log_sum_exp_naive:11-13' (idiom='log_sum_exp_naive'); top_hotspots locations=['src/micro_driver.cpp:exp:28', 'src/micro_driver.cpp:log:25']"
-      ]
+      "pass": true
     },
     {
       "fixture": "naive_variance",
