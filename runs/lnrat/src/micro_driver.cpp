@@ -34,36 +34,38 @@
 namespace ql {
 
 // Scalar Tracked overloads — direct delegation to tracked:: math.
-// TRACKED_HERE attributes each instrumented op to this driver line so the
-// journal carries per-line source locations (the kernel itself uses operator
-// overloads + these ql:: wrappers, neither of which can carry TRACKED_HERE).
+// Each shim accepts the call-site location (forwarded from the kernel via
+// TRACKED_HERE) and threads it into the instrumented op, so the journal
+// attributes the op to the *kernel* function (Lnrat), not to these shims.
+// The default {} is declared on the forward decls in the kernel header, so it
+// is omitted here.
 template <class T>
-inline tracked::Tracked<T> kAbs(const tracked::Tracked<T>& x) {
-    return tracked::abs(x, TRACKED_HERE);
+inline tracked::Tracked<T> kAbs(const tracked::Tracked<T>& x, tracked::SourceLocation loc) {
+    return tracked::abs(x, loc);
 }
 
 template <class T>
-inline tracked::Tracked<T> kLog(const tracked::Tracked<T>& x) {
-    return tracked::log(x, TRACKED_HERE);
+inline tracked::Tracked<T> kLog(const tracked::Tracked<T>& x, tracked::SourceLocation loc) {
+    return tracked::log(x, loc);
 }
 
 // Complex overloads — opaque wrap around Kokkos::abs / Kokkos::log.
 template <class T>
-inline tracked::Tracked<T> kAbs(const tracked::Complex<T>& z) {
+inline tracked::Tracked<T> kAbs(const tracked::Complex<T>& z, tracked::SourceLocation loc) {
     Kokkos::complex<T> raw{z.real().value(), z.imag().value()};
     T r = Kokkos::abs(raw);
-    return tracked::opaque_at<T>("Kokkos::abs", r, TRACKED_HERE,
+    return tracked::opaque_at<T>("Kokkos::abs", r, loc,
                                  z.real(), z.imag());
 }
 
 template <class T>
-inline tracked::Complex<T> kLog(const tracked::Complex<T>& z) {
+inline tracked::Complex<T> kLog(const tracked::Complex<T>& z, tracked::SourceLocation loc) {
     Kokkos::complex<T> raw{z.real().value(), z.imag().value()};
     Kokkos::complex<T> r = Kokkos::log(raw);
     auto re = tracked::opaque_at<T>("Kokkos::log.re", r.real(),
-                                    TRACKED_HERE, z.real(), z.imag());
+                                    loc, z.real(), z.imag());
     auto im = tracked::opaque_at<T>("Kokkos::log.im", r.imag(),
-                                    TRACKED_HERE, z.real(), z.imag());
+                                    loc, z.real(), z.imag());
     return tracked::Complex<T>(re, im);
 }
 

@@ -10,24 +10,36 @@ unbounded** (false positives acceptable). Surfaced as a non-blocking `pass`
 status; the script never exits non-zero on a threshold miss (only on
 structural errors — missing files, malformed JSON).
 
-## How the artifacts get `location` strings
+## How attribution works (resolved via the hybrid — Track 1)
 
 `location` originates from the `TRACKED_HERE` macro
 (`::tracked::SourceLocation{__FILE__, __func__, __LINE__}`) attached to a
-tracked op. Two attribution patterns exist across the fixtures:
+tracked op. The key question is *where `TRACKED_HERE` is lexically expanded*,
+because that fixes `__func__` and `__FILE__`. As of Track 1, **every fixture
+attributes ops to the kernel function**, via one of two mechanisms:
 
-| Pattern | `TRACKED_HERE` lives in | `__func__` is | Example profile location |
+| Mechanism | `TRACKED_HERE` lives in | `__func__` is | Example profile location |
 |---|---|---|---|
-| **kernel-direct** (`cancellation`, `kahan`, `naive_variance`) | the kernel `.hpp` (named `tracked::add/sub/...` calls) | the kernel function | `…/cancellation.cpp:cancellation_check:10` |
-| **driver-shim** (`log_sum_exp`, `lnrat`, `cln`) | the micro-driver's interop shims (kernel uses operator overloads / `std::`/`ql::` wrappers that can't carry `TRACKED_HERE`) | the *shim* function (`exp`, `log`, `kLog`, `kAbs`) | `src/micro_driver.cpp:exp:28` |
+| **kernel-direct** (`cancellation`, `kahan`, `naive_variance`) | the kernel `.hpp`, in named `tracked::add/sub/...` calls | the kernel function | `…/cancellation.cpp:cancellation_check:10` |
+| **call-site forwarding** (`log_sum_exp`, `lnrat`, `cln`) | the kernel `.hpp`/`.cpp`, passed *into* a shim call (`ql::kLog(z, TRACKED_HERE)`, `std::exp(a, TRACKED_HERE)`); the driver shim forwards it to the instrumented op | the kernel function | `…/lnrat_kernel.hpp:Lnrat:69` |
+
+The earlier (pre-Track-1) state attributed the second group to the *shim*
+function (`src/micro_driver.cpp:exp:28`, `:kLog:64`), which is what broke
+recall — see "Before/after" below.
+
+**Mechanics of call-site forwarding.** The shim takes a trailing
+`tracked::SourceLocation loc = {}` and threads it into the `_at` op
+(`tracked::opaque_at(fn, v, loc, …)`, `tracked::log(x, loc)`). The kernel
+declares the dispatcher with the `= {}` default (so the default appears exactly
+once) and passes `TRACKED_HERE` at the call site. The driver definitions omit
+the default. See `agents/characterizer/prompts/driver_gen.txt` rule 9, and the
+worked shims in `runs/{lnrat,cln,log_sum_exp}/src/micro_driver.cpp`.
 
 Path relativization (commit `918738e`) makes the file part relative to the run
-dir **when the file is inside the run dir**. Driver-shim locations relativize
-(`src/micro_driver.cpp:…`); kernel-direct locations point at
-`tests/agents/fixtures/kernels/*.{hpp,cpp}`, which is *outside* the run dir, so
-they stay absolute (the parser's documented fallback). This is expected and
-fine for matching — the verifier matches on the function-name token, not the
-path.
+dir **when the file is inside the run dir**. Kernel files live under
+`tests/agents/fixtures/kernels/*.{hpp,cpp}`, *outside* the run dir, so kernel
+locations stay absolute (the parser's documented fallback). Matching is on the
+function-name token, not the path, so this is fine.
 
 ## The matcher (v1)
 
@@ -37,9 +49,13 @@ Hint and hotspot locations use different formats:
 hint    cancellation_check:2-4        (func:line-range)
 hint    file:log_sum_exp_naive:11-13  (literal-"file":func:line-range)
 hint    Lnrat:complex_overload        (kernel:logical-overload, no line)
-hotspot src/micro_driver.cpp:exp:28                       (relpath:func:line)
+hotspot /abs/.../lnrat_kernel.hpp:Lnrat:69         (abs-path:func:line)
 hotspot /abs/.../cancellation.cpp:cancellation_check:10
 ```
+
+(Hotspots now always carry the *kernel* function name — see "How attribution
+works" — so rule (b) below matches the hint's function token even though the
+formats otherwise differ.)
 
 A hint matches a hotspot location if **either**:
 
@@ -53,61 +69,65 @@ Rule (b) is what lets kernel-direct hints match (shared function-name token,
 e.g. `cancellation_check`). Precision is unbounded by spec, so this leniency is
 acceptable. The matcher is intentionally simple and lives in `match_hint()`.
 
-## Finding: driver-shim attribution does not align with kernel-level hints
+## Resolved (Track 1): call-site location forwarding — the hybrid option
 
-This is the real, expected mismatch (anticipated in the task brief):
+The earlier writeup recorded a real attribution mismatch: hints named the
+*kernel* (`log_sum_exp_naive`, `Lnrat:complex_overload`) but ops were attributed
+to *driver-shim* functions (`exp`, `log`, `kLog`, `kAbs`), so they couldn't
+match. Three fixes were on the table — (A) tighten the `symbolic_hints` schema
+to `file:func:line`, (B) add a logical-name → location alias table the verifier
+consults, or (C) the **hybrid**: emit `TRACKED_HERE` at the kernel call site so
+`__func__` resolves to the kernel function.
 
-- **`log_sum_exp`** — hint location `file:log_sum_exp_naive:11-13` names the
-  *kernel* function. The hotspots are attributed to the driver shims `exp` /
-  `log` (`src/micro_driver.cpp:exp:28`, `:log:25`). No shared token →
-  **no match**, despite the characterizer correctly flagging the right ops.
-- **`lnrat`** — hints name `Lnrat:complex_overload` / `Lnrat:real_overload`
-  (kernel + a *logical* overload label that exists in neither artifact as a
-  symbol). Hotspots are attributed to shims `kLog` / `kAbs`. No shared token →
-  **no match**.
-- **`cln`** — no annotations (`symbolic_hints.json == []`), so no recall to
-  compute regardless.
+**Track 1 implemented (C), the hybrid.** Option A could not fix it alone (the
+hint emitter only sees kernel source and can't know ops land on shim functions),
+and Option B pushes app-specific aliases into the verifier; the hybrid removes
+the mismatch at the source instead of papering over it. Concretely:
 
-So the verifier passes on the kernel-direct fixtures (`cancellation`,
-`naive_variance`) and *correctly surfaces* the shim/kernel attribution gap on
-the driver-shim fixtures as `findings` rather than silently scoring them 0 with
-no explanation.
+- shims take a trailing `tracked::SourceLocation loc = {}` and forward it via the
+  `_at` ops (`opaque_at`, `log(x, loc)`, …);
+- kernels pass `TRACKED_HERE` at each shim call site
+  (`ql::kLog(z, TRACKED_HERE)`, `std::exp(a, TRACKED_HERE)`);
+- `driver_gen.txt` rule 9 instructs the generator to emit location-forwarding
+  shims for future kernels.
 
-### Two ways to close the gap (for human review — not decided here)
+### Before / after recall
 
-**Option A — tighten the `symbolic_hints` schema to require `file:func:line`.**
-Force the LLM hint emitter (`symbolic_overlay`) to produce attributable
-locations in the same `path:func:line` space the profile uses.
+Measured by `agents.shared.recall_verifier` on a full rebuild+rerun+reparse
+(`scripts/regen_recall.sh`):
 
-- *Pros:* one location grammar everywhere; matcher collapses to exact/substring;
-  hints become directly clickable; removes logical-name ambiguity
-  (`complex_overload`).
-- *Cons:* the LLM only sees kernel source, so it can only name the *kernel*
-  function + line — it cannot know that ops get attributed to *driver-shim*
-  functions (`exp`, `kLog`). So this alone does **not** fix `log_sum_exp` /
-  `lnrat`: the shim/kernel boundary remains. It would need to be paired with
-  either (i) carrying `TRACKED_HERE` at the kernel call site rather than inside
-  the shim, or (ii) Option B.
+| fixture | before (shim-attributed) | after (kernel-attributed) |
+|---|---|---|
+| `cancellation` | high 1/1 (100%) PASS | high 1/1 (100%) PASS *(unchanged)* |
+| `naive_variance` | high 1/1 (100%) PASS | high 1/1 (100%) PASS *(unchanged)* |
+| `log_sum_exp` | high 0/1 (0%) **FAIL** | **high 1/1 (100%) PASS** |
+| `lnrat` | medium 0/2, low 0/1 **FAIL** | **medium 2/2 (100%), low 1/1 (100%) PASS** |
+| `cln` | no annotations | no annotations *(unchanged)* |
+| `kahan` | no annotations | no annotations *(unchanged)* |
+| **overall** | **FAIL** | **PASS** |
 
-**Option B — add a logical-name → `file:func:line` mapping the verifier
-consults.** Maintain a small per-fixture (or per-app) alias table mapping
-hint-side names (`Lnrat:complex_overload`, `log_sum_exp_naive`) to the
-shim/op locations the profile actually emits.
+Post-fix locations: `…/log_sum_exp.cpp:log_sum_exp_naive:14`,
+`…/lnrat_kernel.hpp:Lnrat:69`, `…/cln_kernel.hpp:cLn:55`. The two `lnrat` hints
+(`Lnrat:complex_overload`, `Lnrat:real_overload`) both match on the shared
+`Lnrat` token — only the complex overload runs in the micro-driver, but both
+overloads share `__func__ == "Lnrat"`, so the token covers both (a benign
+false-positive; precision is unbounded by spec).
 
-- *Pros:* no schema change; tolerates the shim/kernel boundary that is
-  *inherent* to the operator-overload + interop-shim design; keeps hints
-  human-readable (`Lnrat:complex_overload`).
-- *Cons:* another artifact to maintain and keep in sync; pushes app-specific
-  knowledge into the verifier; risks masking genuine misses behind a
-  too-generous alias.
+### Known limitation — `log_sum_exp` `std::` interop
 
-**Tradeoff in one line:** A makes the *data* uniform but can't see across the
-shim boundary on its own; B leaves the data as-is and absorbs the boundary in
-the *matcher* at the cost of a maintained mapping. A third hybrid — emit
-`TRACKED_HERE` at the kernel call site (so `__func__` is the kernel function,
-not the shim) — would make driver-shim locations carry the kernel function name
-and let plain substring matching work without an alias table; it changes the
-`driver_gen` prompt/codegen and is out of scope for this task.
+`lnrat`/`cln` retrofit cleanly: `ql::kLog`/`kAbs` are project dispatchers that
+naturally accept a `SourceLocation`. `log_sum_exp` is uglier: the kernel calls
+`std::exp(a, TRACKED_HERE)` / `std::log(…, TRACKED_HERE)`, which resolve to a
+**2-argument overload injected into `namespace std`** by the driver. This works
+(and is consistent with the already-UB std-injection the fixture relies on), but
+no real-world kernel would write `std::exp(x, TRACKED_HERE)`. It is acceptable
+for a fixture whose purpose is to exercise the `std::` interop path, but it is
+**not** a pattern to recommend to users. For genuine user kernels that call
+`std::` math directly and cannot be edited, call-site forwarding is not
+available and ops remain shim-attributed — recall against kernel-named hints
+would miss, and Option A or B would be the fallback. (Open for the human:
+whether to keep `log_sum_exp` as-is or revert it to shim-attribution and
+document it as an inherent `std::`-interop limitation.)
 
 ## Reproducing
 

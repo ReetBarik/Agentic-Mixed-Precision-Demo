@@ -43,10 +43,15 @@ inline bool iszero(const TScale& x) {
 }
 
 // Forward declarations — driver provides definitions.
-template <class T> tracked::Tracked<T> kAbs(const tracked::Complex<T>& z);
-template <class T> tracked::Tracked<T> kAbs(const tracked::Tracked<T>& x);
-template <class T> tracked::Complex<T> kLog(const tracked::Complex<T>& z);
-template <class T> tracked::Tracked<T> kLog(const tracked::Tracked<T>& x);
+// Each takes a trailing tracked::SourceLocation (default {}) so the kernel can
+// pass TRACKED_HERE at the call site; the driver shim forwards it into the
+// instrumented op, attributing the op to *this* kernel function (Lnrat) rather
+// than to the shim.  The default lives here (declaration) only — the driver
+// definitions must omit it (a default may be specified only once).
+template <class T> tracked::Tracked<T> kAbs(const tracked::Complex<T>& z, tracked::SourceLocation loc = {});
+template <class T> tracked::Tracked<T> kAbs(const tracked::Tracked<T>& x, tracked::SourceLocation loc = {});
+template <class T> tracked::Complex<T> kLog(const tracked::Complex<T>& z, tracked::SourceLocation loc = {});
+template <class T> tracked::Tracked<T> kLog(const tracked::Tracked<T>& x, tracked::SourceLocation loc = {});
 
 } // namespace ql
 
@@ -57,18 +62,18 @@ template <class TOutput, class TMass, class TScale>
 KOKKOS_INLINE_FUNCTION TOutput Lnrat(TOutput const& x, TOutput const& y) {
     const TOutput r = x / y;
     if (ql::iszero<TOutput, TMass, TScale>(ql::Imag(r))) {
-        return TOutput(ql::kLog(ql::kAbs(r)))
+        return TOutput(ql::kLog(ql::kAbs(r, TRACKED_HERE), TRACKED_HERE))
                - ql::Constants<TScale>::template _ipio2<TOutput, TMass, TScale>()
                * TOutput(ql::Sign(-ql::Real(x)) - ql::Sign(-ql::Real(y)));
     } else {
-        return ql::kLog(r);
+        return ql::kLog(r, TRACKED_HERE);
     }
 }
 
 // Real scalar overload: x and y are TScale.
 template <class TOutput, class TMass, class TScale>
 KOKKOS_INLINE_FUNCTION TOutput Lnrat(TScale const& x, TScale const& y) {
-    return TOutput(ql::kLog(ql::kAbs(x / y)))
+    return TOutput(ql::kLog(ql::kAbs(x / y, TRACKED_HERE), TRACKED_HERE))
            - (ql::Constants<TScale>::template _ipio2<TOutput, TMass, TScale>()
               * TOutput(ql::Sign(-x) - ql::Sign(-y)));
 }

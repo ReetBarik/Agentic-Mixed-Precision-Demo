@@ -2,6 +2,15 @@
 
 Sends the InstrumentationSpec to Claude via the Argo proxy and receives a
 DriverGenOutput (structured JSON via tool use).
+
+All driver C++ (interop shims, opaque wrappers, sampling loop) is emitted by
+the model — there is no hand-written C++ codegen in this module — so generation
+conventions are carried entirely by ``prompts/driver_gen.txt``.  Notably, the
+shim *location-forwarding* convention (rule 9: shims accept a trailing
+``tracked::SourceLocation loc = {}`` and forward it via the ``*_at`` ops so a
+kernel passing ``TRACKED_HERE`` at the call site attributes ops to the kernel,
+not the shim) is specified there.  Change the prompt, not this file, to adjust
+emitted-driver shape.
 """
 
 from __future__ import annotations

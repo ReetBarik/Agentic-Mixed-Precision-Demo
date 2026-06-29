@@ -12,20 +12,23 @@
 // ---------------------------------------------------------------------------
 // Interop shims for std:: math on Tracked<double>.
 //
-// The kernel calls std::log and std::exp directly.  We inject overloads into
-// namespace std that delegate to tracked::log / tracked::exp with
-// TRACKED_HERE so per-line attribution attaches to *this* driver file (the
-// kernel itself cannot carry TRACKED_HERE).
+// The kernel calls std::log and std::exp directly.  We inject location-
+// forwarding overloads into namespace std: each takes a trailing
+// tracked::SourceLocation (default {}) and threads it into tracked::log /
+// tracked::exp.  The kernel passes TRACKED_HERE at the call site, so the op is
+// attributed to the *kernel* function (log_sum_exp_naive), not to this shim.
 //
 // Namespace-injection into std is technically UB but works on all major
 // compilers and is the standard interop approach for the Tracked library.
 // ---------------------------------------------------------------------------
 namespace std {
-    inline ::tracked::Tracked<double> log(const ::tracked::Tracked<double>& x) {
-        return ::tracked::log(x, TRACKED_HERE);
+    inline ::tracked::Tracked<double> log(const ::tracked::Tracked<double>& x,
+                                          ::tracked::SourceLocation loc = {}) {
+        return ::tracked::log(x, loc);
     }
-    inline ::tracked::Tracked<double> exp(const ::tracked::Tracked<double>& x) {
-        return ::tracked::exp(x, TRACKED_HERE);
+    inline ::tracked::Tracked<double> exp(const ::tracked::Tracked<double>& x,
+                                          ::tracked::SourceLocation loc = {}) {
+        return ::tracked::exp(x, loc);
     }
 }
 

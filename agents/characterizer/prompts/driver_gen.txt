@@ -160,12 +160,15 @@ Produce the following in a single response:
      `tracked::log(x, TRACKED_HERE)` over `tracked::log(x)`
      `tracked::mul(x, y, TRACKED_HERE)` over `x * y`
 
-   Example inside an interop shim into a framework namespace:
+   Example inside an interop shim into a framework namespace (note: prefer the
+   location-forwarding form from rule 9 — accept the call-site location instead
+   of hardcoding the shim's own TRACKED_HERE):
 
      ```cpp
      namespace std {
-         inline tracked::Tracked<double> log(const tracked::Tracked<double>& x) {
-             return tracked::log(x, TRACKED_HERE);   // propagates location
+         inline tracked::Tracked<double> log(const tracked::Tracked<double>& x,
+                                             tracked::SourceLocation loc = {}) {
+             return tracked::log(x, loc);            // forwards call-site location
          }
      }
      ```
@@ -183,8 +186,33 @@ Produce the following in a single response:
    attribution.
 
    **Limitation:** you can NOT add `TRACKED_HERE` inside the user's kernel
-   body — it's their code, we must `#include` it verbatim.  Driver-side ops
-   are the only place to add location capture.
+   body — it's their code, we must `#include` it verbatim.  When the shim's own
+   `TRACKED_HERE` is used, ops are attributed to the *shim* (`__func__` = the
+   shim name, e.g. `kLog`/`exp`).  If the kernel already passes a location into
+   its dispatcher/shim calls (see rule 9), forward that instead so attribution
+   lands on the kernel function.
+
+9. **Forward call-site source locations through shims.**  When the kernel calls
+   a project-defined dispatcher (one of `detected_dispatchers`, e.g. `ql::kLog`,
+   `ql::kAbs`) or a `std::` math function you shim, give that shim a trailing
+   `tracked::SourceLocation loc = {}` parameter and thread `loc` into the
+   instrumented op — use the `_at` variants:
+
+     `tracked::opaque_at(fn, value, loc, inputs...)`   (not `tracked::opaque`)
+     `tracked::log(x, loc)`  `tracked::abs(x, loc)`  `tracked::sqrt(x, loc)`
+
+   Then, *if the kernel source you `#include` already passes a location at the
+   call site* (e.g. `ql::kLog(z, TRACKED_HERE)`), the op is attributed to the
+   kernel function (`__func__` = the kernel, the file = the kernel header)
+   rather than to the shim.  Kernels written for this pipeline (and the
+   validation fixtures) do exactly this; the `= {}` default keeps shims callable
+   from kernels that do not.  You still must NOT edit the kernel — you only make
+   the shim *able* to receive and forward the location.
+
+   If a forward declaration of the dispatcher already carries the `= {}` default
+   (kernel headers declare `ql::kLog`/`kAbs` this way), DO NOT repeat the
+   default on your definition — C++ allows a default argument only once per
+   parameter across all declarations in a scope.
 
 ## Complex elementary functions: decompose, don't opaque
 
@@ -195,19 +223,24 @@ whole call, so all interior sensitivity is lost.  When the function has a closed
 real form, REIMPLEMENT it with named tracked real ops (each carrying
 `TRACKED_HERE`) so the interior is measured:
 
-- **complex logarithm**: `log(z) = log(|z|) + i * atan2(Im z, Re z)`
+- **complex logarithm**: `log(z) = log(|z|) + i * atan2(Im z, Re z)`.  Accept a
+  trailing `loc` (rule 9) and forward it into every op so the call-site location
+  (kernel-supplied) propagates; default it to `{}` for callers that omit it:
   ```cpp
   template <class T>
-  tracked::Complex<T> complex_log(const tracked::Complex<T>& z) {
+  tracked::Complex<T> complex_log(const tracked::Complex<T>& z,
+                                  tracked::SourceLocation loc = {}) {
       auto re = z.real();
       auto im = z.imag();
-      auto mod2 = tracked::add(tracked::mul(re, re, TRACKED_HERE),
-                               tracked::mul(im, im, TRACKED_HERE), TRACKED_HERE);
-      auto logmod = tracked::log(tracked::sqrt(mod2, TRACKED_HERE), TRACKED_HERE);
-      auto arg    = tracked::atan2(im, re, TRACKED_HERE);
+      auto mod2 = tracked::add(tracked::mul(re, re, loc),
+                               tracked::mul(im, im, loc), loc);
+      auto logmod = tracked::log(tracked::sqrt(mod2, loc), loc);
+      auto arg    = tracked::atan2(im, re, loc);
       return tracked::Complex<T>(logmod, arg);
   }
   ```
+  (When this shim's *forward declaration* already gives `loc` a `= {}` default,
+  omit the default on the definition — see rule 9.)
 - **complex modulus**: `|z| = sqrt(Re z * Re z + Im z * Im z)` via the same
   tracked ops.
 

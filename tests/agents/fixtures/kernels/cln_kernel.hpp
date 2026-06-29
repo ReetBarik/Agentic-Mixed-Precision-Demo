@@ -28,10 +28,15 @@ template <class T>
 inline int Sign(const T& x) { return (T(0) < x) - (x < T(0)); }
 
 // Forward declarations — driver provides definitions.
-template <class T> tracked::Tracked<T> kAbs(const tracked::Complex<T>& z);
-template <class T> tracked::Tracked<T> kAbs(const tracked::Tracked<T>& x);
-template <class T> tracked::Complex<T> kLog(const tracked::Complex<T>& z);
-template <class T> tracked::Tracked<T> kLog(const tracked::Tracked<T>& x);
+// Each takes a trailing tracked::SourceLocation (default {}) so the kernel can
+// pass TRACKED_HERE at the call site; the driver shim forwards it into the
+// instrumented op, attributing the op to *this* kernel function (cLn) rather
+// than to the shim.  The default lives here (declaration) only — the driver
+// definitions must omit it (a default may be specified only once).
+template <class T> tracked::Tracked<T> kAbs(const tracked::Complex<T>& z, tracked::SourceLocation loc = {});
+template <class T> tracked::Tracked<T> kAbs(const tracked::Tracked<T>& x, tracked::SourceLocation loc = {});
+template <class T> tracked::Complex<T> kLog(const tracked::Complex<T>& z, tracked::SourceLocation loc = {});
+template <class T> tracked::Tracked<T> kLog(const tracked::Tracked<T>& x, tracked::SourceLocation loc = {});
 
 } // namespace ql
 
@@ -45,9 +50,9 @@ KOKKOS_INLINE_FUNCTION TOutput cLn(TOutput const& z, TScale const& isig) {
         ql::Real(z) <= ql::Constants<TScale>::_zero()) {
         TOutput temp(ql::Constants<TScale>::_zero(),
                      ql::Constants<TScale>::_pi() * TScale(ql::Sign(isig)));
-        cln = ql::kLog(-z) + temp;
+        cln = ql::kLog(-z, TRACKED_HERE) + temp;
     } else {
-        cln = ql::kLog(z);
+        cln = ql::kLog(z, TRACKED_HERE);
     }
     return cln;
 }
