@@ -9,9 +9,9 @@
       "max_rel_err": 3.013502280973665e+19,
       "sample_count": 512,
       "provenance_union": [
+        "a",
         "b",
-        "c",
-        "a"
+        "c"
       ],
       "flagged": true
     },
@@ -22,8 +22,8 @@
       "max_rel_err": 6.54591668372459,
       "sample_count": 512,
       "provenance_union": [
-        "b",
-        "a"
+        "a",
+        "b"
       ],
       "flagged": true
     },
@@ -34,9 +34,9 @@
       "max_rel_err": 3.648226460506358e+22,
       "sample_count": 512,
       "provenance_union": [
+        "a",
         "b",
-        "c",
-        "a"
+        "c"
       ],
       "flagged": false
     },
@@ -47,8 +47,8 @@
       "max_rel_err": 38825.838971023244,
       "sample_count": 512,
       "provenance_union": [
-        "b",
-        "a"
+        "a",
+        "b"
       ],
       "flagged": false
     },
@@ -59,9 +59,9 @@
       "max_rel_err": 38827.22360776874,
       "sample_count": 512,
       "provenance_union": [
+        "a",
         "b",
-        "c",
-        "a"
+        "c"
       ],
       "flagged": false
     },
@@ -83,8 +83,8 @@
       "max_rel_err": 3.3306690738754696e-16,
       "sample_count": 512,
       "provenance_union": [
-        "b",
-        "a"
+        "a",
+        "b"
       ],
       "flagged": false
     },
@@ -95,9 +95,9 @@
       "max_rel_err": 38827.22360776874,
       "sample_count": 512,
       "provenance_union": [
+        "a",
         "b",
-        "c",
-        "a"
+        "c"
       ],
       "flagged": false
     }
@@ -110,9 +110,9 @@
       "max_rel_err": 3.013502280973665e+19,
       "sample_count": 512,
       "provenance_union": [
+        "a",
         "b",
-        "c",
-        "a"
+        "c"
       ],
       "flagged": true
     },
@@ -123,8 +123,8 @@
       "max_rel_err": 6.54591668372459,
       "sample_count": 512,
       "provenance_union": [
-        "b",
-        "a"
+        "a",
+        "b"
       ],
       "flagged": true
     },
@@ -135,9 +135,9 @@
       "max_rel_err": 3.648226460506358e+22,
       "sample_count": 512,
       "provenance_union": [
+        "a",
         "b",
-        "c",
-        "a"
+        "c"
       ],
       "flagged": false
     },
@@ -148,8 +148,8 @@
       "max_rel_err": 38825.838971023244,
       "sample_count": 512,
       "provenance_union": [
-        "b",
-        "a"
+        "a",
+        "b"
       ],
       "flagged": false
     },
@@ -160,9 +160,9 @@
       "max_rel_err": 38827.22360776874,
       "sample_count": 512,
       "provenance_union": [
+        "a",
         "b",
-        "c",
-        "a"
+        "c"
       ],
       "flagged": false
     },
@@ -184,8 +184,8 @@
       "max_rel_err": 3.3306690738754696e-16,
       "sample_count": 512,
       "provenance_union": [
-        "b",
-        "a"
+        "a",
+        "b"
       ],
       "flagged": false
     },
@@ -196,17 +196,17 @@
       "max_rel_err": 38827.22360776874,
       "sample_count": 512,
       "provenance_union": [
+        "a",
         "b",
-        "c",
-        "a"
+        "c"
       ],
       "flagged": false
     }
   },
   "per_variable": {
-    "c": 1.5993446277285508e+16,
+    "a": 1.5993446277285508e+16,
     "b": 1.5993446277285508e+16,
-    "a": 1.5993446277285508e+16
+    "c": 1.5993446277285508e+16
   },
   "top_hotspots": [
     {
@@ -216,9 +216,9 @@
       "max_rel_err": 3.013502280973665e+19,
       "sample_count": 512,
       "provenance_union": [
+        "a",
         "b",
-        "c",
-        "a"
+        "c"
       ],
       "flagged": true
     },
@@ -229,8 +229,8 @@
       "max_rel_err": 6.54591668372459,
       "sample_count": 512,
       "provenance_union": [
-        "b",
-        "a"
+        "a",
+        "b"
       ],
       "flagged": true
     },
@@ -241,9 +241,9 @@
       "max_rel_err": 3.648226460506358e+22,
       "sample_count": 512,
       "provenance_union": [
+        "a",
         "b",
-        "c",
-        "a"
+        "c"
       ],
       "flagged": false
     },
@@ -254,8 +254,8 @@
       "max_rel_err": 38825.838971023244,
       "sample_count": 512,
       "provenance_union": [
-        "b",
-        "a"
+        "a",
+        "b"
       ],
       "flagged": false
     },
@@ -266,9 +266,9 @@
       "max_rel_err": 38827.22360776874,
       "sample_count": 512,
       "provenance_union": [
+        "a",
         "b",
-        "c",
-        "a"
+        "c"
       ],
       "flagged": false
     },
@@ -290,8 +290,8 @@
       "max_rel_err": 3.3306690738754696e-16,
       "sample_count": 512,
       "provenance_union": [
-        "b",
-        "a"
+        "a",
+        "b"
       ],
       "flagged": false
     },
@@ -302,9 +302,9 @@
       "max_rel_err": 38827.22360776874,
       "sample_count": 512,
       "provenance_union": [
+        "a",
         "b",
-        "c",
-        "a"
+        "c"
       ],
       "flagged": false
     }

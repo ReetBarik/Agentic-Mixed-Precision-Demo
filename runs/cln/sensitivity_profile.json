@@ -9,9 +9,9 @@
       "max_rel_err": 2.220446049250313e-16,
       "sample_count": 512,
       "provenance_union": [
-        "z",
+        "Kokkos::log.im",
         "Kokkos::log.re",
-        "Kokkos::log.im"
+        "z"
       ],
       "flagged": false
     }
@@ -24,17 +24,17 @@
       "max_rel_err": 2.220446049250313e-16,
       "sample_count": 512,
       "provenance_union": [
-        "z",
+        "Kokkos::log.im",
         "Kokkos::log.re",
-        "Kokkos::log.im"
+        "z"
       ],
       "flagged": false
     }
   },
   "per_variable": {
-    "z": 1.0,
+    "Kokkos::log.im": 1.0,
     "Kokkos::log.re": 1.0,
-    "Kokkos::log.im": 1.0
+    "z": 1.0
   },
   "top_hotspots": [
     {
@@ -44,9 +44,9 @@
       "max_rel_err": 2.220446049250313e-16,
       "sample_count": 512,
       "provenance_union": [
-        "z",
+        "Kokkos::log.im",
         "Kokkos::log.re",
-        "Kokkos::log.im"
+        "z"
       ],
       "flagged": false
     }

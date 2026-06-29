@@ -9,8 +9,8 @@
       "max_rel_err": 0.01255230125523046,
       "sample_count": 512,
       "provenance_union": [
-        "b",
-        "a"
+        "a",
+        "b"
       ],
       "flagged": true
     },
@@ -21,8 +21,8 @@
       "max_rel_err": 2.220446049250313e-16,
       "sample_count": 512,
       "provenance_union": [
-        "b",
-        "a"
+        "a",
+        "b"
       ],
       "flagged": false
     }
@@ -35,8 +35,8 @@
       "max_rel_err": 0.01255230125523046,
       "sample_count": 512,
       "provenance_union": [
-        "b",
-        "a"
+        "a",
+        "b"
       ],
       "flagged": true
     },
@@ -47,15 +47,15 @@
       "max_rel_err": 2.220446049250313e-16,
       "sample_count": 512,
       "provenance_union": [
-        "b",
-        "a"
+        "a",
+        "b"
       ],
       "flagged": false
     }
   },
   "per_variable": {
-    "b": 37687026170465.41,
-    "a": 37687026170465.41
+    "a": 37687026170465.41,
+    "b": 37687026170465.41
   },
   "top_hotspots": [
     {
@@ -65,8 +65,8 @@
       "max_rel_err": 0.01255230125523046,
       "sample_count": 512,
       "provenance_union": [
-        "b",
-        "a"
+        "a",
+        "b"
       ],
       "flagged": true
     },
@@ -77,8 +77,8 @@
       "max_rel_err": 2.220446049250313e-16,
       "sample_count": 512,
       "provenance_union": [
-        "b",
-        "a"
+        "a",
+        "b"
       ],
       "flagged": false
     }

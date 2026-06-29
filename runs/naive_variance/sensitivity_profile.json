@@ -9,9 +9,9 @@
       "max_rel_err": 4.0,
       "sample_count": 512,
       "provenance_union": [
+        "n",
         "sum_x",
-        "sum_x2",
-        "n"
+        "sum_x2"
       ],
       "flagged": true
     },
@@ -22,8 +22,8 @@
       "max_rel_err": 2.220446049250313e-16,
       "sample_count": 512,
       "provenance_union": [
-        "sum_x",
-        "n"
+        "n",
+        "sum_x"
       ],
       "flagged": false
     },
@@ -34,8 +34,8 @@
       "max_rel_err": 2.220446049250313e-16,
       "sample_count": 512,
       "provenance_union": [
-        "sum_x2",
-        "n"
+        "n",
+        "sum_x2"
       ],
       "flagged": false
     },
@@ -46,8 +46,8 @@
       "max_rel_err": 3.3306690738754696e-16,
       "sample_count": 512,
       "provenance_union": [
-        "sum_x",
-        "n"
+        "n",
+        "sum_x"
       ],
       "flagged": false
     }
@@ -60,9 +60,9 @@
       "max_rel_err": 4.0,
       "sample_count": 512,
       "provenance_union": [
+        "n",
         "sum_x",
-        "sum_x2",
-        "n"
+        "sum_x2"
       ],
       "flagged": true
     },
@@ -73,8 +73,8 @@
       "max_rel_err": 2.220446049250313e-16,
       "sample_count": 512,
       "provenance_union": [
-        "sum_x",
-        "n"
+        "n",
+        "sum_x"
       ],
       "flagged": false
     },
@@ -85,8 +85,8 @@
       "max_rel_err": 2.220446049250313e-16,
       "sample_count": 512,
       "provenance_union": [
-        "sum_x2",
-        "n"
+        "n",
+        "sum_x2"
       ],
       "flagged": false
     },
@@ -97,16 +97,16 @@
       "max_rel_err": 3.3306690738754696e-16,
       "sample_count": 512,
       "provenance_union": [
-        "sum_x",
-        "n"
+        "n",
+        "sum_x"
       ],
       "flagged": false
     }
   },
   "per_variable": {
+    "n": 9007199254740992.0,
     "sum_x": 9007199254740992.0,
-    "sum_x2": 9007199254740992.0,
-    "n": 9007199254740992.0
+    "sum_x2": 9007199254740992.0
   },
   "top_hotspots": [
     {
@@ -116,9 +116,9 @@
       "max_rel_err": 4.0,
       "sample_count": 512,
       "provenance_union": [
+        "n",
         "sum_x",
-        "sum_x2",
-        "n"
+        "sum_x2"
       ],
       "flagged": true
     },
@@ -129,8 +129,8 @@
       "max_rel_err": 2.220446049250313e-16,
       "sample_count": 512,
       "provenance_union": [
-        "sum_x",
-        "n"
+        "n",
+        "sum_x"
       ],
       "flagged": false
     },
@@ -141,8 +141,8 @@
       "max_rel_err": 2.220446049250313e-16,
       "sample_count": 512,
       "provenance_union": [
-        "sum_x2",
-        "n"
+        "n",
+        "sum_x2"
       ],
       "flagged": false
     },
@@ -153,8 +153,8 @@
       "max_rel_err": 3.3306690738754696e-16,
       "sample_count": 512,
       "provenance_union": [
-        "sum_x",
-        "n"
+        "n",
+        "sum_x"
       ],
       "flagged": false
     }
