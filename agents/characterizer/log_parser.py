@@ -81,11 +81,14 @@ def parse(
         if loc not in per_line or rec.max_cond > per_line[loc].max_cond:
             per_line[loc] = rec
 
-    # per_variable rollup: variable → max cond it appeared in
+    # per_variable rollup: variable → max cond it appeared in.
+    # Sort keys for deterministic JSON: provenance is a set, so insertion order
+    # (and thus serialized key order) is otherwise hash-randomized per process.
     per_variable: dict[str, float] = {}
     for rec in op_records:
         for var in rec.provenance_union:
             per_variable[var] = max(per_variable.get(var, 0.0), rec.max_cond)
+    per_variable = dict(sorted(per_variable.items()))
 
     total = len(op_records)
     opaque_count = sum(1 for r in op_records if r.op == "opaque")

@@ -32,18 +32,20 @@ _SAMPLE_RE = re.compile(r"sample_count\s*=\s*(\d+)")
 
 
 def _profile_to_dict(p) -> dict:
-    """Serialize a SensitivityProfile, converting provenance sets to lists.
+    """Serialize a SensitivityProfile, converting provenance sets to sorted lists.
 
     Mirrors ``agents.characterizer.agent._profile_to_dict`` so re-parsed
-    profiles are byte-compatible with pipeline-emitted ones.
+    profiles are byte-compatible with pipeline-emitted ones.  ``sorted`` (not
+    ``list``) keeps the JSON stable run-over-run — set iteration order is
+    hash-randomized across processes.
     """
     d = dataclasses.asdict(p)
     for rec in d.get("per_op", []):
-        rec["provenance_union"] = list(rec.get("provenance_union", []))
+        rec["provenance_union"] = sorted(rec.get("provenance_union", []))
     for rec in d.get("per_line", {}).values():
-        rec["provenance_union"] = list(rec.get("provenance_union", []))
+        rec["provenance_union"] = sorted(rec.get("provenance_union", []))
     for rec in d.get("top_hotspots", []):
-        rec["provenance_union"] = list(rec.get("provenance_union", []))
+        rec["provenance_union"] = sorted(rec.get("provenance_union", []))
     return d
 
 

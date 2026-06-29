@@ -315,12 +315,12 @@ def _profile_to_dict(p) -> dict:
     d = dataclasses.asdict(p)
     # set[str] isn't JSON-serialisable
     for rec in d.get("per_op", []):
-        rec["provenance_union"] = list(rec.get("provenance_union", []))
+        rec["provenance_union"] = sorted(rec.get("provenance_union", []))
     for rec in d.get("per_line", {}).values():
-        rec["provenance_union"] = list(rec.get("provenance_union", []))
+        rec["provenance_union"] = sorted(rec.get("provenance_union", []))
     if "top_hotspots" in d:
         for rec in d["top_hotspots"]:
-            rec["provenance_union"] = list(rec.get("provenance_union", []))
+            rec["provenance_union"] = sorted(rec.get("provenance_union", []))
     return d
 
 
