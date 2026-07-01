@@ -1,0 +1,6 @@
+# build directories (top-level and nested, e.g. examples/*/build/)
+/build/
+build/
+
+# generated journal output from the example drivers
+*.jsonl
