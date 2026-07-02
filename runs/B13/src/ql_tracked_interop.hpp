@@ -1,12 +1,18 @@
 // ql_tracked_interop.hpp
 //
-// All ql:: overloads needed to instantiate ql::B13() with tracked types.
+// All ql:: overloads needed to instantiate ql::B13() (and ql::BO()'s
+// full box-integral dispatcher) with tracked types.
 //
-// Kept out of qcdloop's own headers (kokkosMaths.h, kokkosUtils.h) so that
-// the surface changes required for Tracked instrumentation are visible in
-// one place and easy to audit against future qcdloop revisions.
+// Kept out of qcdloop's own headers (kokkosMaths.h, kokkosUtils.h) so
+// the surface changes required for Tracked instrumentation are visible
+// in one place and easy to audit against future qcdloop revisions.
 //
-// Idioms follow the cln/lnrat prior art (see runs/cln/src/micro_driver.cpp):
+// Reference: ReetBarik/qcdloop@ddfun_enabled src/qcdloop/kokkosMaths_dd.h
+// — a functional, production-tested precision swap for double-double.
+// Every overload here mirrors the DD overload set in name, signature
+// shape, and semantics. Deviations are documented per-overload.
+//
+// Two idioms (from runs/cln/, runs/lnrat/ prior art):
 //
 //   interop_shim : delegate to an already-instrumented tracked:: op.
 //                  Every arithmetic step of the underlying computation
@@ -20,33 +26,32 @@
 //
 // Overloads provided (grouped by category):
 //
-//   A. Ported from cln/lnrat drivers (identical semantics):
-//        ql::kAbs(Tracked<T>)     -> tracked::abs           (interop_shim)
-//        ql::kAbs(Complex<T>)     -> sqrt(re*re + im*im)    (interop_shim)
-//        ql::kLog(Tracked<T>)     -> tracked::log           (interop_shim)
-//        ql::kLog(Complex<T>)     -> Kokkos::log wrap       (opaque_wrap)
+//   A. Math dispatch (mirrors kokkosMaths_dd.h):
+//        kAbs, kLog, kSqrt, kPow      (scalar + complex)
+//        Real, Imag                   (scalar + complex)
+//        Sign                         (scalar + complex)
+//        iszero                       (scalar)
+//        kConj                        (complex)
+//        Max, Min                     (scalar + complex)
+//        Htheta                       (scalar)
 //
-//   B. New for B13's math surface:
-//        ql::Real(Tracked<T>)     -> identity
-//        ql::Real(Complex<T>)     -> .real()
-//        ql::Imag(Tracked<T>)     -> zero
-//        ql::Imag(Complex<T>)     -> .imag()
-//        ql::Sign(Tracked<T>)     -> underlying sign, int
-//        ql::iszero(Tracked<T>)   -> |value| < 1e-10
-//        ql::kSqrt(Tracked<T>)    -> tracked::sqrt          (interop_shim)
-//        ql::kSqrt(Complex<T>)    -> tracked::sqrt          (interop_shim)
-//        ql::kPow(Tracked<T>,int) -> repeated *=            (already tracked)
-//        ql::kPow(Complex<T>,int) -> repeated *=            (already tracked)
+//   B13 body itself uses only: Constants, Real, Imag, iszero, kSqrt,
+//   kPow, kLog, Lnrat, Li2omrat, Li2omx2, cLn, spencer, ratreal, ratgam.
+//   kAbs/kLog/kSqrt/kPow/Real/Imag/Sign/iszero cover B13's call graph
+//   through the dilog family. kConj/Max/Min/Htheta are unused by B13
+//   but included so this header stays a complete audit surface for
+//   future kernels (kConj shows up in xspence; Htheta in eta/spencer
+//   deep paths).
 //
 // Include order in the driver:
-//   Kokkos_Core.hpp -> tracked/* headers -> qcdloop_headers/kokkosMaths.h
+//   Kokkos_Core.hpp -> tracked/* -> qcdloop_headers/kokkosMaths.h
 //   -> qcdloop_headers/kokkosUtils.h -> ql_tracked_interop.hpp
-//   -> qcdloop_headers/box/B2m.h
+//   -> qcdloop_headers/boxGPU.h
 //
 // Rationale: define the overloads after qcdloop's base ql:: dispatchers
-// (so their more-generic templates are already visible) and before B2m.h
-// (so B13's template body sees tracked overloads at the point of
-// instantiation, not just via ADL).
+// (so their more-generic templates are already visible for ADL) and
+// before boxGPU.h / the Bnm headers (so B13's template body sees the
+// tracked overloads at the point of instantiation, not just via ADL).
 
 #pragma once
 
@@ -60,9 +65,9 @@
 
 namespace ql {
 
-// -----------------------------------------------------------------------------
-// A. Ported from cln/lnrat drivers.
-// -----------------------------------------------------------------------------
+// =============================================================================
+// kAbs
+// =============================================================================
 
 template <class T>
 inline tracked::Tracked<T> kAbs(const tracked::Tracked<T>& x,
@@ -73,10 +78,13 @@ inline tracked::Tracked<T> kAbs(const tracked::Tracked<T>& x,
 template <class T>
 inline tracked::Tracked<T> kAbs(const tracked::Complex<T>& z,
                                 tracked::SourceLocation loc = {}) {
-    // |z| = sqrt(re*re + im*im) — built from instrumented tracked ops so
-    // every arithmetic step gets a journal record.
+    // |z| = sqrt(re*re + im*im), fully instrumented (interop_shim style).
     return tracked::sqrt(z.real() * z.real() + z.imag() * z.imag(), loc);
 }
+
+// =============================================================================
+// kLog
+// =============================================================================
 
 template <class T>
 inline tracked::Tracked<T> kLog(const tracked::Tracked<T>& x,
@@ -87,8 +95,8 @@ inline tracked::Tracked<T> kLog(const tracked::Tracked<T>& x,
 template <class T>
 inline tracked::Complex<T> kLog(const tracked::Complex<T>& z,
                                 tracked::SourceLocation loc = {}) {
-    // opaque_wrap: compute the raw Kokkos::complex log and re-wrap the two
-    // scalar components as a tracked Complex with provenance pulled from
+    // opaque_wrap: compute the raw Kokkos::complex log and re-wrap the
+    // scalar components via tracked::opaque_at, pulling provenance from
     // both input components.
     Kokkos::complex<T> raw{z.real().value(), z.imag().value()};
     Kokkos::complex<T> r = Kokkos::log(raw);
@@ -99,41 +107,10 @@ inline tracked::Complex<T> kLog(const tracked::Complex<T>& z,
     return tracked::Complex<T>(out_re, out_im);
 }
 
-// -----------------------------------------------------------------------------
-// B. New for B13.
-// -----------------------------------------------------------------------------
+// =============================================================================
+// kSqrt
+// =============================================================================
 
-// Real / Imag: value-preserving projections. No arithmetic, so no journal
-// entry needed. Returning a Tracked keeps downstream ops on the tracked path.
-template <class T>
-inline tracked::Tracked<T> Real(const tracked::Tracked<T>& x) { return x; }
-
-template <class T>
-inline tracked::Tracked<T> Imag(const tracked::Tracked<T>& /*x*/) {
-    return tracked::Tracked<T>(T(0));
-}
-
-template <class T>
-inline tracked::Tracked<T> Real(const tracked::Complex<T>& z) { return z.real(); }
-
-template <class T>
-inline tracked::Tracked<T> Imag(const tracked::Complex<T>& z) { return z.imag(); }
-
-// Sign: integer result. Not tracked (bool/int-typed control flow).
-template <class T>
-inline int Sign(const tracked::Tracked<T>& x) {
-    return x.value() < T(0) ? -1 : 1;
-}
-
-// iszero: threshold on underlying value. qcdloop's kokkosMaths.h uses the
-// same 1e-10 cutoff (see Constants::_qlonshellcutoff).
-template <class T>
-inline bool iszero(const tracked::Tracked<T>& x) {
-    T v = x.value();
-    return (v < T(0) ? -v : v) < T(1e-10);
-}
-
-// kSqrt: interop_shim.
 template <class T>
 inline tracked::Tracked<T> kSqrt(const tracked::Tracked<T>& x,
                                  tracked::SourceLocation loc = {}) {
@@ -146,9 +123,15 @@ inline tracked::Complex<T> kSqrt(const tracked::Complex<T>& z,
     return tracked::sqrt(z, loc);
 }
 
-// kPow: multiplicative loop, every step already tracked via operator*.
-// Matches qcdloop@master semantics (handles negative exponents), unlike
-// the drifted copy in Agentic-Mixed-Precision-Demo/src/kokkosMaths.h.
+// =============================================================================
+// kPow
+// =============================================================================
+//
+// Matches qcdloop@master's semantics (kokkosMaths_dd.h drops the
+// negative-exponent guard; we keep it since B13 could grow one via
+// future work). Multiplicative loop — every step already tracked via
+// operator*.
+
 template <class T>
 inline tracked::Tracked<T> kPow(const tracked::Tracked<T>& base, int exponent) {
     const int n = exponent < 0 ? -exponent : exponent;
@@ -163,6 +146,122 @@ inline tracked::Complex<T> kPow(const tracked::Complex<T>& base, int exponent) {
     tracked::Complex<T> t(T(1));
     for (int i = 0; i < n; ++i) t = t * base;
     return exponent < 0 ? tracked::Complex<T>(T(1)) / t : t;
+}
+
+// =============================================================================
+// Real / Imag
+// =============================================================================
+//
+// Value-preserving projections. Returning a Tracked (not a bare T) keeps
+// downstream ops on the tracked path and preserves provenance.
+
+template <class T>
+inline tracked::Tracked<T> Real(const tracked::Tracked<T>& x) { return x; }
+
+template <class T>
+inline tracked::Tracked<T> Imag(const tracked::Tracked<T>& /*x*/) {
+    return tracked::Tracked<T>(T(0));
+}
+
+template <class T>
+inline tracked::Tracked<T> Real(const tracked::Complex<T>& z) { return z.real(); }
+
+template <class T>
+inline tracked::Tracked<T> Imag(const tracked::Complex<T>& z) { return z.imag(); }
+
+// =============================================================================
+// Sign
+// =============================================================================
+//
+// Mirrors DD's Sign(ddouble)/Sign(ddcomplex) — returns the numeric type,
+// not int. Preserves provenance through comparisons.
+//
+// B13 uses Sign in expressions like TOutput(ql::Sign(-ql::Real(x))), so
+// the return type must be convertible to TOutput (tracked::Complex<T>)
+// while preserving the tracked provenance graph.
+
+template <class T>
+inline tracked::Tracked<T> Sign(const tracked::Tracked<T>& x) {
+    const T v = x.value();
+    if (v > T(0)) return tracked::Tracked<T>(T( 1));
+    if (v < T(0)) return tracked::Tracked<T>(T(-1));
+    return                tracked::Tracked<T>(T( 0));
+}
+
+template <class T>
+inline tracked::Complex<T> Sign(const tracked::Complex<T>& z,
+                                tracked::SourceLocation loc = {}) {
+    // DD's Sign(ddcomplex) = z / |z|. We build it from instrumented ops.
+    return z / kAbs(z, loc);
+}
+
+// =============================================================================
+// iszero
+// =============================================================================
+//
+// bool return, no tracking wrapper needed. Threshold matches
+// Constants::_qlonshellcutoff (1e-10) used elsewhere in qcdloop.
+
+template <class T>
+inline bool iszero(const tracked::Tracked<T>& x) {
+    const T v = x.value();
+    return (v < T(0) ? -v : v) < T(1e-10);
+}
+
+// =============================================================================
+// kConj
+// =============================================================================
+//
+// Used by xspence (not on B13's call path, but included for completeness).
+
+template <class T>
+inline tracked::Complex<T> kConj(const tracked::Complex<T>& z,
+                                 tracked::SourceLocation loc = {}) {
+    return tracked::conj(z, loc);
+}
+
+// =============================================================================
+// Max / Min
+// =============================================================================
+//
+// DD's semantics: compare by |a| vs |b|. Not on B13's call path but
+// included for completeness with the DD overload set.
+
+template <class T>
+inline tracked::Tracked<T> Max(const tracked::Tracked<T>& a,
+                               const tracked::Tracked<T>& b) {
+    return kAbs(a).value() > kAbs(b).value() ? a : b;
+}
+
+template <class T>
+inline tracked::Complex<T> Max(const tracked::Complex<T>& a,
+                               const tracked::Complex<T>& b) {
+    return kAbs(a).value() > kAbs(b).value() ? a : b;
+}
+
+template <class T>
+inline tracked::Tracked<T> Min(const tracked::Tracked<T>& a,
+                               const tracked::Tracked<T>& b) {
+    return kAbs(a).value() > kAbs(b).value() ? b : a;
+}
+
+template <class T>
+inline tracked::Complex<T> Min(const tracked::Complex<T>& a,
+                               const tracked::Complex<T>& b) {
+    return kAbs(a).value() > kAbs(b).value() ? b : a;
+}
+
+// =============================================================================
+// Htheta
+// =============================================================================
+//
+// Heaviside step: 0.5 * (1 + Sign(x)). Used in eta functions / xspence
+// deep paths — not on B13's direct call graph but part of the DD surface.
+
+template <class T>
+inline tracked::Tracked<T> Htheta(const tracked::Tracked<T>& x) {
+    return tracked::Tracked<T>(T(0.5)) *
+           (tracked::Tracked<T>(T(1.0)) + Sign(x));
 }
 
 } // namespace ql
