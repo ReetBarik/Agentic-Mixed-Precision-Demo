@@ -243,7 +243,12 @@ namespace ql
 
         template<typename TOutput, typename TMass, typename TScale>
         KOKKOS_INLINE_FUNCTION static TOutput _ieps50() {
-            return TOutput{Constants<TScale>::_zero(), 1e-50};
+            // NOTE(B13 spike): master shipped a bare `1e-50` here, which only
+            // compiles when TScale is implicitly constructible from double.
+            // tracked::Tracked<double> has an *explicit* ctor, so wrap it as
+            // TScale(1e-50) — this matches the ddfun_enabled reference
+            // (reference/kokkosMaths_dd.h::_ieps50) exactly.
+            return TOutput{Constants<TScale>::_zero(), TScale(1e-50)};
         }
     };
 

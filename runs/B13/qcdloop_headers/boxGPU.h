@@ -17,14 +17,22 @@
 
 #pragma once
 
+// B13 spike: B3m/B4m removed — see runs/B13/README.md for rationale.
+// B13's kinematics (m1=m2=0, m3²=m32, m4²=m42) is a 2-internal-mass
+// configuration, so BO() always dispatches to B2m (massive == 2). B3m
+// (3 masses) and B4m (4 masses) are dead code for this kernel, but they
+// still force template instantiation on Tracked and hit int<->Tracked
+// conversions Tracked deliberately lacks. Pruned here so the spike can
+// compile and run; restore both for kernels that reach those branches.
+
 // Suppress individual pruned BO() definitions from group headers
 #define QCDLOOP_BOX_FULL_DISPATCH
 
 #include "box/B0m.h"
 #include "box/B1m.h"
 #include "box/B2m.h"
-#include "box/B3m.h"
-#include "box/B4m.h"
+// #include "box/B3m.h"   // B13 spike: pruned (dead code, see note above)
+// #include "box/B4m.h"   // B13 spike: pruned (dead code, see note above)
 
 
 namespace ql
@@ -117,11 +125,16 @@ namespace ql
             ql::B1m<TOutput, TMass, TScale>(res, xpi, musq, i);
         } else if (massive == 2) {
             ql::B2m<TOutput, TMass, TScale>(res, xpi, musq, i);
-        } else if (massive == 3) {
-            ql::B3m<TOutput, TMass, TScale>(res, xpi, musq, i);
-        } else if (massive == 4) {
-            ql::B4m<TOutput, TMass, TScale>(res, xpi, i);
         }
+        // B13 spike: massive == 3 / == 4 branches pruned (B3m/B4m removed).
+        // B13 is a 2-mass config so these are unreachable here. Restore
+        // alongside the box/B3m.h + box/B4m.h includes above for kernels
+        // that need 3- or 4-internal-mass boxes.
+        // else if (massive == 3) {
+        //     ql::B3m<TOutput, TMass, TScale>(res, xpi, musq, i);
+        // } else if (massive == 4) {
+        //     ql::B4m<TOutput, TMass, TScale>(res, xpi, i);
+        // }
         
         // Normalize results
         const TScale scalefac2 = scalefac * scalefac;

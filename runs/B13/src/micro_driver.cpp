@@ -36,13 +36,18 @@
 #include <string>
 
 // qcdloop headers vendored at runs/B13/qcdloop_headers/. Include order
-// matters: kokkosMaths.h -> kokkosUtils.h -> ql_tracked_interop.hpp
-// -> boxGPU.h (which pulls in B0m..B4m). Tracked overloads must be
-// visible before the box headers so B13's template body sees them at
-// the point of instantiation.
+// matters, and ql_tracked_interop.hpp must come FIRST: qcdloop's own
+// template bodies (kokkosMaths.h::iszero, all of kokkosUtils.h, box/*.h)
+// call ql::Real/Imag/Sign/kAbs/kLog on tracked types via *qualified*
+// names (ql::Foo). For a qualified call, ADL does not apply, so the
+// tracked overloads must be visible at each template's *definition*
+// point, not merely before instantiation. Putting the interop first
+// makes every tracked overload a candidate at every qcdloop call site;
+// overload resolution then prefers the more-specialized tracked overload
+// over kokkosMaths.h's generic kAbs<T>(T)/kLog<T>(T) templates.
+#include "ql_tracked_interop.hpp"
 #include "kokkosMaths.h"
 #include "kokkosUtils.h"
-#include "ql_tracked_interop.hpp"
 #include "boxGPU.h"
 
 using T       = double;

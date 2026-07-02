@@ -63,6 +63,25 @@
 #include <tracked/complex.hpp>
 #include <tracked/ops.hpp>
 
+// =============================================================================
+// tracked:: numeric-affordance shims
+// =============================================================================
+//
+// qcdloop's box bodies (e.g. B13 in box/B2m.h:299-306) write expressions like
+//   TOutput(+p3sq + m3sq - m4sq)
+// i.e. a *unary plus* on a TMass. This works for the double-double reference
+// type (ddouble has unary+) but tracked::Tracked deliberately ships only the
+// binary arithmetic operators. Unary plus is the numeric identity, so we add
+// it here as a free function in namespace tracked (found by ADL for `+x`),
+// keeping the shim in this single audit-surface header rather than editing the
+// vendored tracked library. No journal record: identity introduces no rounding.
+namespace tracked {
+
+template <class T>
+inline Tracked<T> operator+(const Tracked<T>& x) { return x; }
+
+} // namespace tracked
+
 namespace ql {
 
 // =============================================================================
