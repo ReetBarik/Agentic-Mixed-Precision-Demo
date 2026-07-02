@@ -10,7 +10,7 @@ LLM agent system that takes a user's C++ kernel(s), per-argument input ranges, a
 
 ## Tracked library dependency
 
-`Tracked<T>` C++ header-only library: overloads arithmetic ops to propagate condition number and accumulated relative error bound per variable, with per-op JSONL journaling and provenance tracking. Source of truth: `ReetBarik/kokkos-extended-precision-demo@tracked`. **Vendored** into this repo at `third_party/tracked/` and exercised end-to-end by the Phase 1 characterizer (`runs/cln/`, `runs/lnrat/`, etc.).
+`Tracked<T>` C++ header-only library: overloads arithmetic ops to propagate condition number and accumulated relative error bound per variable, with per-op JSONL journaling and provenance tracking. Source of truth: `ReetBarik/Tracked-Error-Propagation-Datatype-Demo@main`. **Vendored as a git subtree** into this repo at `third_party/tracked/` and exercised end-to-end by the Phase 1 characterizer (`runs/cln/`, `runs/lnrat/`, etc.).
 
 ## Architecture
 

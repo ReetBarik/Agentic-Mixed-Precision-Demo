@@ -196,7 +196,7 @@ Phase 1 and Phase 2 produce **different kinds of optimization signals**, and the
 
 ## Implementation order
 
-1. ~~Productionize `TrackedComplexDouble` + write `TrackedDouble`.~~ **Already done.** Adopt `third_party/tracked/` (vendored from `ReetBarik/kokkos-extended-precision-demo@tracked`) as-is. Already integrated and exercised by Phase 1 characterizer. Effort: 0 days.
+1. ~~Productionize `TrackedComplexDouble` + write `TrackedDouble`.~~ **Already done.** Adopt `third_party/tracked/` (vendored as a git subtree from `ReetBarik/Tracked-Error-Propagation-Datatype-Demo@main`) as-is. Already integrated and exercised by Phase 1 characterizer. Effort: 0 days.
 2. **`ql::Constants` specializations + tracked overloads for `ql::*` math wrappers.** Tracked overloads already exist for the Phase 1 fixtures (see `runs/cln/src/micro_driver.cpp`); extend on demand when Phase 2 encounters a missing one. Effort: as needed, mostly mechanical.
 3. **Phase 0 prototype: hand-written logging wrappers** for the dependencies the first target kernel touches. Compile-and-run on a Serial driver with batch_size=100k. Verify Parquet dump and per-dependency range aggregation. Effort: ~half-day.
 4. **Wire Phase 1** to consume Phase 0 outputs as Tier 1 ranges. Reuse existing characterizer. Run Tier 1 on each instrumented dependency. Effort: ~half-day (mostly orchestration).
@@ -234,7 +234,7 @@ Stop at any point if the signal isn't useful — steps 1–6 are the minimum via
 - Workflow diagram: `improvement-plan/mermaid.md` (single-pipeline view; update tabled per Open questions)
 - Existing characterizer slice: `agents/characterizer/` in the `langgraph-agents` branch
 - Build/Run agent (whole-app mode pending): `agents/build_run/`
-- Tracked library: `third_party/tracked/` (vendored from `ReetBarik/kokkos-extended-precision-demo@tracked`)
+- Tracked library: `third_party/tracked/` (vendored as a git subtree from `ReetBarik/Tracked-Error-Propagation-Datatype-Demo@main`)
 - qcdloop integration (first target app): external repo `ReetBarik/qcdloop`. Dependency source: `src/qcdloop/box/B*.h`, `src/qcdloop/kokkosUtils.h`, `src/qcdloop/kokkosMaths.h`. Whole-app driver: `examples/boxGPU_test.cc`.
 
 ---
@@ -281,7 +281,8 @@ meaningful).
 ### 2. Tracked types
 
 No new code. Adopt `tracked::Tracked<T>` and `tracked::Complex<T>` from
-`third_party/tracked/` (vendored from `ReetBarik/kokkos-extended-precision-demo@tracked`),
+`third_party/tracked/` (vendored as a git subtree from
+`ReetBarik/Tracked-Error-Propagation-Datatype-Demo@main`),
 already integrated and exercised by the Phase 1 characterizer.
 
 **Dependency re-entry pattern** (replaces all hand-wave injection snippets):

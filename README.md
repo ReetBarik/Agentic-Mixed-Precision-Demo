@@ -206,7 +206,7 @@ The characterizer's vertical slice is end-to-end functional: six calibration fix
 ## Prerequisites
 
 - Python 3.12. Install deps: `pip install -r requirements-langgraph.txt`
-- Tracked submodule: `git submodule update --init --recursive` (clones `kokkos-extended-precision-demo` @ `tracked` into `third_party/tracked/`)
+- Tracked library: vendored as a git subtree at `third_party/tracked/` (source: `ReetBarik/Tracked-Error-Propagation-Datatype-Demo@main`). A plain clone includes it — no submodule init required. Upstream sync: `git subtree pull --prefix=third_party/tracked https://github.com/ReetBarik/Tracked-Error-Propagation-Datatype-Demo.git main --squash`
 - CMake ≥ 3.18 on PATH
 - For Kokkos-backed kernels: a Serial-only Kokkos install. The Tracked repo ships `examples/cln_micro/build_kokkos_serial.sh` to produce one at `$HOME/kokkos-install`
 - Argo proxy running (same `run-argo.sh` from the v1 workflow); the characterizer's `driver_gen` and `symbolic_overlay` nodes hit it for Claude Opus 4.7
