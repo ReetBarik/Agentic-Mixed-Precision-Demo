@@ -37,21 +37,27 @@ TEST_CASE("kahan: swamping is invisible to Tracked<T>") {
     REQUIRE(r.value_ == 1e16);
 }
 
-TEST_CASE("kahan: compensation step has cond >> 1 — intentional cancellation") {
-    // Kahan update for s=1e16, y=1.0:
-    //   t   = s + y   = 1e16   (y swamped)
-    //   err = t - s   = 0      cond = 1/u ≈ 9e15 — deliberately high
+TEST_CASE("kahan: fully-swamped compensation step is exact — cond == 1") {
+    // Kahan update for s=1e16, y=1.0. y is entirely swamped (1.0 < ULP(1e16)=2):
+    //   t   = s + y   = 1e16   (== s, bit-identical; the swamping add has cond ≈ 1)
+    //   err = t - s   = 0      bit-identical operands → EXACT cancellation, cond = 1
     //   c   = err - y = -1.0   cond ≈ 1
-    // The high cond on (t - s) is correct: Kahan deliberately cancels to
-    // expose the rounding error.  This shows cond is a signal, not a verdict.
+    // The information in y was destroyed by swamping in the *addition* — a
+    // documented blind spot of the first-order model (see the swamping test
+    // above). The subtraction t - s itself recovers nothing and loses nothing,
+    // so its cond is correctly 1, NOT the old spurious 1/u ≈ 9e15 sentinel that
+    // this fix removes. (A *partially*-swamped step, where t ≠ s, is a genuine
+    // near-cancellation and still reports high cond — see test_cancellation.cpp.)
     auto s   = track("s", 1e16);
     auto y   = track("y", 1.0);
     auto t   = s + y;
     auto err = t - s;
     auto c   = err - y;
 
-    REQUIRE(err.max_cond_seen_ > 1e8);   // high cond on the compensation step
-    REQUIRE(c.max_cond_seen_   > 1e8);   // carries forward through the chain
+    REQUIRE(t.value_ == s.value_);              // y fully swamped: t is bit-identical to s
+    REQUIRE(err.value_ == 0.0);
+    REQUIRE(err.max_cond_seen_ == Approx(1.0)); // exact cancellation → no false alarm
+    REQUIRE(c.max_cond_seen_   == Approx(1.0)); // stays low through the chain
 }
 
 TEST_CASE("kahan: well-conditioned chain certified safe by Tracked<T>") {

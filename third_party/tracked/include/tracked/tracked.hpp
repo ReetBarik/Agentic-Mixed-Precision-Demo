@@ -191,8 +191,20 @@ Tracked<T> add(const Tracked<T>& a, const Tracked<T>& b, SourceLocation loc) {
     T res     = a.value_ + b.value_;
     T abs_res = std::abs(res);
     T abs_sum = std::abs(a.value_) + std::abs(b.value_);
-    T cond    = (abs_res > T(0)) ? abs_sum / abs_res
-              : (abs_sum == T(0)) ? T(1) : T(1) / unit_roundoff<T>();
+    T cond;
+    if (a.value_ == -b.value_ && a.value_ != T(0)) {
+        // Exact cancellation of x + (-x); result is exactly 0, no precision lost.
+        // (The a != 0 guard is required because IEEE has 0 == -0: without it we
+        // would conflate 0 + (-0) with meaningful cancellation.)
+        cond = T(1);
+    } else if (abs_res > T(0)) {
+        cond = abs_sum / abs_res;
+    } else {
+        // abs_res == 0 and not an exact x + (-x) cancellation. abs_sum == 0 iff
+        // both operands are zero (0 + 0, 0 + -0) — no precision lost, cond = 1.
+        // Otherwise abs_res underflowed to 0 from unequal inputs — genuine loss.
+        cond = (abs_sum == T(0)) ? T(1) : T(1) / unit_roundoff<T>();
+    }
     T max_in_err = std::max(a.rel_err_bound_, b.rel_err_bound_);
     T new_err    = cond * (max_in_err + unit_roundoff<T>());
     T new_cond   = std::max({a.max_cond_seen_, b.max_cond_seen_, cond});
@@ -208,8 +220,17 @@ Tracked<T> sub(const Tracked<T>& a, const Tracked<T>& b, SourceLocation loc) {
     T res     = a.value_ - b.value_;
     T abs_res = std::abs(res);
     T abs_sum = std::abs(a.value_) + std::abs(b.value_);
-    T cond    = (abs_res > T(0)) ? abs_sum / abs_res
-              : (abs_sum == T(0)) ? T(1) : T(1) / unit_roundoff<T>();
+    T cond;
+    if (a.value_ == b.value_) {
+        // Exact cancellation: result is exactly 0, no precision lost.
+        // (Also covers 0 - 0 and 0 - -0, previously handled by abs_sum == 0.)
+        cond = T(1);
+    } else if (abs_res > T(0)) {
+        cond = abs_sum / abs_res;
+    } else {
+        // abs_res == 0 but a != b (e.g., subnormal underflow) — genuine loss.
+        cond = T(1) / unit_roundoff<T>();
+    }
     T max_in_err = std::max(a.rel_err_bound_, b.rel_err_bound_);
     T new_err    = cond * (max_in_err + unit_roundoff<T>());
     T new_cond   = std::max({a.max_cond_seen_, b.max_cond_seen_, cond});
