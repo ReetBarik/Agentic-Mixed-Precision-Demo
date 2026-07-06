@@ -3,6 +3,11 @@
 
 #include <tracked/tracked.hpp>
 
+#include <cmath>
+#if defined(__x86_64__) || defined(__i386__)
+#include <xmmintrin.h>   // FTZ control, to force a genuine underflow-to-zero
+#endif
+
 using Catch::Approx;
 using tracked::track;
 
@@ -52,4 +57,105 @@ TEST_CASE("cancellation: two cancellations in sequence compound the error") {
     REQUIRE(r3.max_cond_seen_ > 1e8);
     // rel_err_bound has grown dramatically from fresh u ≈ 1.1e-16
     REQUIRE(r3.rel_err_bound_ > 1e-8);
+}
+
+// ---- Exact cancellation: cond == 1, not the 1/u catastrophe sentinel --------
+//
+// When a - b (or a + (-b)) cancels *exactly*, the result is exactly 0 and no
+// precision is lost — this is deterministic cancellation of identical values,
+// not near-cancellation. Previously these reported cond = 1/u ≈ 9e15, polluting
+// hotspot tails with spurious "no significant digits left" records.
+
+TEST_CASE("sub: exact cancellation of identical values is cond == 1") {
+    // Distinct provenance ids, identical value: x - x2 with both = 3.14.
+    auto x  = track("x",  3.14);
+    auto x2 = track("x2", 3.14);
+    auto r  = x - x2;
+
+    double u = tracked::unit_roundoff<double>();
+    REQUIRE(r.value_ == 0.0);
+    REQUIRE(r.max_cond_seen_ == Approx(1.0));
+    // rel_err = cond * (max_in_err + u) = 1 * (u + u) = 2u. Bounded by ~2u.
+    REQUIRE(r.rel_err_bound_ == Approx(2.0 * u));
+}
+
+TEST_CASE("sub: exact cancellation of zeros is cond == 1 (regression)") {
+    // Previously handled by the abs_sum == 0 branch; now by the a == b branch.
+    auto z1 = track("z1", 0.0);
+    auto z2 = track("z2", 0.0);
+    auto r  = z1 - z2;
+
+    REQUIRE(r.value_ == 0.0);
+    REQUIRE(r.max_cond_seen_ == Approx(1.0));
+}
+
+TEST_CASE("sub: near-cancellation (one ULP apart) still reports cond ~ 1/u") {
+    // Guards against over-broadening the fix: values that differ by a single
+    // ULP are NOT equal, so genuine cancellation must still surface.
+    double av = 1.0;
+    double bv = std::nextafter(1.0, 2.0);   // 1 ULP above 1.0
+    auto a = track("a", av);
+    auto b = track("b", bv);
+    auto r = a - b;
+
+    REQUIRE(r.value_ != 0.0);
+    REQUIRE(r.max_cond_seen_ > 1e15);        // ~ 1/u ≈ 9e15
+}
+
+TEST_CASE("add: exact negation x + (-x) for nonzero x is cond == 1") {
+    auto x    = track("x",    2.5);
+    auto negx = track("negx", -2.5);
+    auto r    = x + negx;
+
+    REQUIRE(r.value_ == 0.0);
+    REQUIRE(r.max_cond_seen_ == Approx(1.0));
+}
+
+TEST_CASE("add: 0 + (-0) is cond == 1 (the a != 0 guard)") {
+    // IEEE has 0 == -0; the != 0 guard must keep this out of the exact-negation
+    // branch and let it resolve to cond = 1 via the both-zero case, NOT 1/u.
+    auto z  = track("z",  0.0);
+    auto nz = track("nz", -0.0);
+    auto r  = z + nz;
+
+    REQUIRE(r.value_ == 0.0);
+    REQUIRE(r.max_cond_seen_ == Approx(1.0));
+}
+
+TEST_CASE("sub: genuine subnormal underflow to 0 (a != b) reports cond ~ 1/u") {
+    // Proves the abs_res == 0 fallback survives the exact-equality shortcut.
+    //
+    // Under IEEE round-to-nearest with gradual underflow, fl(a - b) == 0 for
+    // finite doubles happens ONLY when a == b — a distinct pair cannot subtract
+    // to exactly zero. To exercise the fallback with unequal inputs we must
+    // enable hardware flush-to-zero so a subnormal difference collapses to 0.
+    double u = tracked::unit_roundoff<double>();
+
+#if defined(__x86_64__) || defined(__i386__)
+    unsigned old_mode = _MM_GET_FLUSH_ZERO_MODE();
+    _MM_SET_FLUSH_ZERO_MODE(_MM_FLUSH_ZERO_ON);
+    double av = 0x1.8p-1022;   // 1.5 * 2^-1022  (normal)
+    double bv = 0x1.0p-1022;   // 2^-1022, smallest normal
+    auto a = track("a", av);
+    auto b = track("b", bv);
+    auto r = a - b;            // exact diff 2^-1023 (subnormal) -> FTZ -> 0.0
+    _MM_SET_FLUSH_ZERO_MODE(old_mode);
+
+    REQUIRE(av != bv);
+    REQUIRE(r.value_ == 0.0);
+    REQUIRE(r.max_cond_seen_ == Approx(1.0 / u));
+#else
+    // Portable fallback: no reliable FTZ control. Exercise the adjacent regime
+    // — two distinct near-equal subnormals whose difference stays nonzero must
+    // still report a large cond via the normal branch, not be swallowed as
+    // exact cancellation.
+    double av = 0x1.8p-1022;
+    double bv = 0x1.0p-1022;
+    auto a = track("a", av);
+    auto b = track("b", bv);
+    auto r = a - b;
+
+    REQUIRE(r.value_ != 0.0);
+    REQUIRE(r.max_cond_seen_ > 1e15);
+#endif
 }
