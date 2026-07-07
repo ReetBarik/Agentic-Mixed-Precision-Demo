@@ -7,6 +7,8 @@ replace this with the same interface.
 
 from __future__ import annotations
 
+import os
+import shlex
 import shutil
 import subprocess
 import tempfile
@@ -15,6 +17,48 @@ from pathlib import Path
 from typing import Literal
 
 from agents.config import PipelineConfig
+
+# TODO(build-run-agent): these are HPC-cluster-specific plumbing values.
+# When build_and_run becomes LLM-driven, environment/toolchain detection
+# should be part of the agent's responsibility, not hardcoded here.
+DEFAULT_CLUSTER_MODULES = ["gcc/13.3.0", "cmake/3.28.3"]
+DEFAULT_MODULE_USE_PATH = "/soft/modulefiles"
+
+
+def _module_settings() -> tuple[list[str], str]:
+    """Resolve the module list + `module use` path, honoring env overrides.
+
+    ``PIPELINE_MODULE_LIST`` is colon-separated (e.g. "gcc/13.3.0:cmake/3.28.3").
+    Setting it to the empty string disables module loading entirely (useful for
+    CI / non-cluster hosts where ``module`` isn't defined).
+    """
+    raw = os.environ.get("PIPELINE_MODULE_LIST")
+    if raw is None:
+        modules = list(DEFAULT_CLUSTER_MODULES)
+    else:
+        modules = [m for m in raw.split(":") if m]
+    use_path = os.environ.get("PIPELINE_MODULE_USE_PATH", DEFAULT_MODULE_USE_PATH)
+    return modules, use_path
+
+
+def _run_build_step(cmd: list[str], cwd: str) -> subprocess.CompletedProcess:
+    """Run one build/run subprocess with the HPC module chain sourced.
+
+    Every cmake/make/ctest (and the built binary) is wrapped in
+    ``bash -lc 'module use <path> && module load <m...> && <cmd>'`` so the
+    toolchain and its runtime libraries are on PATH/LD_LIBRARY_PATH.  The module
+    state lives only in the subprocess — it is never exported into this Python
+    process.  When no modules are configured (``PIPELINE_MODULE_LIST=""``) the
+    command runs directly, unwrapped.
+    """
+    modules, use_path = _module_settings()
+    if not modules:
+        return subprocess.run(cmd, cwd=cwd, capture_output=True, text=True)
+
+    inner = " ".join(shlex.quote(part) for part in cmd)
+    prelude = f"module use {shlex.quote(use_path)} && module load {' '.join(shlex.quote(m) for m in modules)}"
+    wrapped = ["bash", "-lc", f"{prelude} && {inner}"]
+    return subprocess.run(wrapped, cwd=cwd, capture_output=True, text=True)
 
 
 @dataclass
@@ -97,12 +141,7 @@ def build_and_run(
     if framework == "kokkos-serial" and cfg.kokkos_root:
         configure_cmd.append(f"-DCMAKE_PREFIX_PATH={cfg.kokkos_root}")
 
-    configure_result = subprocess.run(
-        configure_cmd,
-        cwd=str(build_dir),
-        capture_output=True,
-        text=True,
-    )
+    configure_result = _run_build_step(configure_cmd, cwd=str(build_dir))
     if configure_result.returncode != 0:
         return RunResult(
             returncode=configure_result.returncode,
@@ -114,12 +153,7 @@ def build_and_run(
         )
 
     # --- Build ---
-    build_result = subprocess.run(
-        ["cmake", "--build", ".", "-j"],
-        cwd=str(build_dir),
-        capture_output=True,
-        text=True,
-    )
+    build_result = _run_build_step(["cmake", "--build", ".", "-j"], cwd=str(build_dir))
     if build_result.returncode != 0:
         combined_stderr = configure_result.stderr + "\n" + build_result.stderr
         return RunResult(
@@ -132,13 +166,10 @@ def build_and_run(
         )
 
     # --- Run ---
+    # Wrapped in the module chain too: the binary is linked against the module
+    # gcc's libstdc++, so it needs that lib on LD_LIBRARY_PATH at runtime.
     exe = build_dir / "micro_driver"
-    run_result = subprocess.run(
-        [str(exe)],
-        cwd=str(work_dir),
-        capture_output=True,
-        text=True,
-    )
+    run_result = _run_build_step([str(exe)], cwd=str(work_dir))
 
     # Tracked flushes a JSONL whose name is passed via journal::flush("<name>.jsonl").
     # The driver is generated to write to work_dir/journal.jsonl.
