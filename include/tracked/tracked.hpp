@@ -3,26 +3,37 @@
 // accumulated relative error bounds, and provenance alongside the value,
 // and emits a structured JSONL log of every op.
 //
+// v0.3: every value carries a stable TrackedId. Source variables and named
+// constants are two distinct categories (track() vs constant()); derived values
+// get a generated id "<op>@<file>:<line>#<callsite_counter>[@<scope>]".
+// See docs/PROVENANCE.md.
+//
 // Usage:
 //   #include <tracked/tracked.hpp>
 //   #include <tracked/ops.hpp>     // for sqrt, exp, log, abs
 //
-//   auto a = tracked::track("a", 1.0);
-//   auto b = tracked::track("b", 1e8);
-//   auto r = a - b;                          // operator, no source location
-//   auto r = sub(a, b, TRACKED_HERE);        // named fn, captures file:func:line
+//   auto a = tracked::track("a", 1.0);       // source variable  -> prov_vars
+//   auto k = tracked::constant("two", 2.0);  // named constant    -> prov_consts
+//   auto r = a - k;                          // operator, no source location
+//   auto r = sub(a, k, TRACKED_HERE);        // named fn, captures file:func:line
 //
 //   tracked::journal::flush("out.jsonl");
 
 #include <tracked/journal.hpp>
 #include <algorithm>
 #include <cmath>
+#include <cstdint>
 #include <limits>
 #include <set>
 #include <string>
 #include <string_view>
+#include <vector>
 
 namespace tracked {
+
+// A stable identity for a tracked value: a source/constant name, or a generated
+// id for a derived value.
+using TrackedId = std::string;
 
 // ---- Numeric constants ------------------------------------------------------
 
@@ -36,17 +47,62 @@ constexpr T unit_roundoff() {
 namespace detail {
 
 inline std::set<std::string> prov_union(const std::set<std::string>& a,
-                                         const std::set<std::string>& b) {
+                                        const std::set<std::string>& b) {
     std::set<std::string> r = a;
     r.insert(b.begin(), b.end());
     return r;
 }
 
-inline std::string primary_id(const std::set<std::string>& p) {
-    return p.empty() ? "_" : *p.begin();
+// ---- Value-id generation ----------------------------------------------------
+//
+// The callsite counter lives in tracked::journal::detail so journal::clear()
+// can reset it alongside the record buffer.  The scope stack is lexical (owned
+// by the RAII scope class) and deliberately NOT reset by clear().
+
+inline thread_local std::vector<std::string> scope_stack;
+
+// Join the scope stack with '/', prefixed with '@'.  Empty when no scope.
+inline std::string current_scope_suffix() {
+    if (scope_stack.empty()) return "";
+    std::string s = "@";
+    for (std::size_t i = 0; i < scope_stack.size(); ++i) {
+        if (i) s += '/';
+        s += scope_stack[i];
+    }
+    return s;
+}
+
+// Build a stable id for a derived value produced by `op` at `loc`.
+//   with location:    "<op>@<file>:<line>#<n>[@<scope>]"
+//   without location: "<op>@?#<n>[@<scope>]"   (operator-form calls, loc.line==0)
+// The counter is keyed on (file, line, op) and is thread-local; run-to-run it
+// reproduces the same ids for the same call sequence (see PROVENANCE.md).
+inline TrackedId make_id(std::string_view op, const SourceLocation& loc) {
+    if (loc.line == 0) {
+        std::uint64_t n = ++journal::detail::anon_counter;
+        return std::string(op) + "@?#" + std::to_string(n) + current_scope_suffix();
+    }
+    journal::detail::CallsiteKey k{loc.file, loc.line, op};
+    std::uint64_t n = ++journal::detail::callsite_counters[k];
+    return std::string(op) + '@' + std::string(loc.file) + ':' + std::to_string(loc.line)
+         + '#' + std::to_string(n) + current_scope_suffix();
 }
 
 } // namespace detail
+
+// ---- RAII scope helper ------------------------------------------------------
+//
+// Pushes a context string onto a thread-local stack; the joined stack is
+// appended to every generated id as "@<scope>".  Nested scopes join with '/':
+//   tracked::scope run("run=A");
+//   { tracked::scope s("s=1"); ... }   // ids get "@run=A/s=1"
+class scope {
+public:
+    explicit scope(std::string ctx) { detail::scope_stack.push_back(std::move(ctx)); }
+    ~scope() { detail::scope_stack.pop_back(); }
+    scope(const scope&)            = delete;
+    scope& operator=(const scope&) = delete;
+};
 
 // ---- Forward declarations (definitions after the class) ---------------------
 
@@ -69,21 +125,29 @@ public:
     T                     value_;
     T                     rel_err_bound_;  // accumulated relative error bound
     T                     max_cond_seen_;  // max local condition on any op producing this
-    std::set<std::string> provenance_;     // contributing source-variable ids
+    TrackedId             id_;             // stable identity of this value
+    std::set<std::string> prov_vars_;      // contributing source-variable ids
+    std::set<std::string> prov_consts_;    // contributing named-constant ids
 
     Tracked() : value_(T(0)), rel_err_bound_(T(0)), max_cond_seen_(T(0)) {}
 
+    // Unnamed literal (e.g. Tracked<T>(0.5) inside a kernel). No provenance and
+    // an empty id — prefer track()/constant() for anything you want attributed.
     explicit Tracked(T v)
         : value_(v), rel_err_bound_(unit_roundoff<T>()), max_cond_seen_(T(0)) {}
 
-    Tracked(T v, T err, T cond, std::set<std::string> prov)
+    Tracked(T v, T err, T cond, TrackedId id,
+            std::set<std::string> pv, std::set<std::string> pc)
         : value_(v), rel_err_bound_(err), max_cond_seen_(cond)
-        , provenance_(std::move(prov)) {}
+        , id_(std::move(id))
+        , prov_vars_(std::move(pv)), prov_consts_(std::move(pc)) {}
 
     T value()    const { return value_; }
     T rel_err()  const { return rel_err_bound_; }
     T max_cond() const { return max_cond_seen_; }
-    const std::set<std::string>& provenance() const { return provenance_; }
+    const TrackedId&             id()          const { return id_; }
+    const std::set<std::string>& prov_vars()   const { return prov_vars_; }
+    const std::set<std::string>& prov_consts() const { return prov_consts_; }
 
     // Operators — call named free functions with empty source location.
     Tracked operator+(const Tracked& b) const { return tracked::add(*this, b); }
@@ -108,11 +172,23 @@ public:
 
 // ---- Factory functions ------------------------------------------------------
 
-// Tag a fresh input with a source-variable id.
+// Tag a fresh *source variable* — an attribution root. Its id is its name and
+// it seeds prov_vars.
 template <class T>
-Tracked<T> track(std::string id, T value) {
+Tracked<T> track(std::string name, T value) {
     Tracked<T> r(value);
-    r.provenance_ = {std::move(id)};
+    r.id_        = name;
+    r.prov_vars_ = {std::move(name)};
+    return r;
+}
+
+// Tag a fresh *named constant* — participates in provenance for audit but is not
+// an attribution root. Its id is its name and it seeds prov_consts.
+template <class T>
+Tracked<T> constant(std::string name, T value) {
+    Tracked<T> r(value);
+    r.id_          = name;
+    r.prov_consts_ = {std::move(name)};
     return r;
 }
 
@@ -120,33 +196,39 @@ Tracked<T> track(std::string id, T value) {
 //
 // Semantics: pass-through.  cond = 1 (we have no insight into what the opaque
 // function does, so the conservative null hypothesis is that input errors flow
-// through unchanged).  rel_err = max(input_rel_errs) + u (one extra roundoff
-// for the boundary crossing).  Provenance = union(input_provs) U {fn_name}
-// (preserve the upstream attribution chain, add a marker that the value
-// crossed an opaque boundary).
+// through unchanged).  rel_err = max(input_rel_errs) + u (one extra roundoff for
+// the boundary crossing).
+//
+// The record's `in` is [fn_name, input_ids...]: the boundary marker followed by
+// the forwarded operand ids so the value graph stays traversable through the
+// barrier.  fn_name is a *marker*, not a source variable or constant, so it is
+// deliberately kept out of prov_vars / prov_consts (retiring v0.2's behavior of
+// folding it into provenance).  A first-class prov_opaque category is a possible
+// follow-up (see docs/PROVENANCE.md, "Opaque markers").
 //
 // Two forms:
-//   opaque(fn_name, value)                  -- no tracked inputs (e.g., raw
-//                                              return from an external call
-//                                              with no tracked args).  cond=1,
-//                                              rel_err=u, prov={fn_name}.
+//   opaque(fn_name, value)                  -- no tracked inputs.  cond=1,
+//                                              rel_err=u, empty provenance.
 //   opaque(fn_name, value, in1, in2, ...)   -- preserves error + provenance
-//                                              from the tracked inputs that
-//                                              were stripped to .value() before
-//                                              the external call.
+//                                              from the tracked inputs that were
+//                                              stripped to .value() before the
+//                                              external call.
 
 namespace detail {
 
-// Fold tracked inputs into (max_rel_err, union_prov).  Empty pack => (0, {}).
-template <class T>
-inline void opaque_fold(T& /*max_err*/, std::set<std::string>& /*prov*/) {}
+// Fold tracked inputs into (max_rel_err, union prov_vars/prov_consts, ids).
+inline void opaque_fold(double& /*max_err*/, std::set<std::string>& /*pv*/,
+                        std::set<std::string>& /*pc*/, std::vector<std::string>& /*ids*/) {}
 
 template <class T, class... Rest>
-inline void opaque_fold(T& max_err, std::set<std::string>& prov,
+inline void opaque_fold(double& max_err, std::set<std::string>& pv,
+                        std::set<std::string>& pc, std::vector<std::string>& ids,
                         const Tracked<T>& head, const Rest&... rest) {
-    if (head.rel_err_bound_ > max_err) max_err = head.rel_err_bound_;
-    prov.insert(head.provenance_.begin(), head.provenance_.end());
-    opaque_fold(max_err, prov, rest...);
+    if ((double)head.rel_err_bound_ > max_err) max_err = (double)head.rel_err_bound_;
+    pv.insert(head.prov_vars_.begin(),   head.prov_vars_.end());
+    pc.insert(head.prov_consts_.begin(), head.prov_consts_.end());
+    ids.push_back(head.id_);
+    opaque_fold(max_err, pv, pc, ids, rest...);
 }
 
 } // namespace detail
@@ -157,27 +239,28 @@ Tracked<T> opaque(std::string_view fn_name, T value,
     return opaque_at<T, Inputs...>(fn_name, value, SourceLocation{}, inputs...);
 }
 
-// Same, but with an explicit source location.  Use this form when calling
-// from a wrapper that wants TRACKED_HERE attribution.
+// Same, but with an explicit source location.  Use this form when calling from a
+// wrapper that wants TRACKED_HERE attribution.
 template <class T, class... Inputs>
 Tracked<T> opaque_at(std::string_view fn_name, T value, SourceLocation loc,
                      const Inputs&... inputs) {
-    T max_in_err = T(0);
-    std::set<std::string> prov;
-    detail::opaque_fold(max_in_err, prov, inputs...);
-    prov.insert(std::string(fn_name));
+    double max_in_err = 0.0;
+    std::set<std::string> pv, pc;
+    std::vector<std::string> in_ids;
+    in_ids.push_back(std::string(fn_name));  // boundary marker leads `in`
+    detail::opaque_fold(max_in_err, pv, pc, in_ids, inputs...);
 
     T cond    = T(1);
-    T new_err = cond * (max_in_err + unit_roundoff<T>());
+    T new_err = cond * (T(max_in_err) + unit_roundoff<T>());
 
-    journal::emit("opaque", loc,
-        {std::string(fn_name)},
-        (double)value, (double)cond, (double)new_err, prov);
+    TrackedId id = detail::make_id("opaque", loc);
+    journal::emit("opaque", loc, id, in_ids,
+                  (double)value, (double)cond, (double)new_err, pv, pc);
 
-    return Tracked<T>(value, new_err, cond, std::move(prov));
+    return Tracked<T>(value, new_err, cond, std::move(id), std::move(pv), std::move(pc));
 }
 
-// ---- Named free functions (M1–M3): include source location ------------------
+// ---- Named free functions: include source location --------------------------
 //
 // Operators above delegate to these with loc={} (no location).
 // For location capture, call directly:
@@ -185,6 +268,7 @@ Tracked<T> opaque_at(std::string_view fn_name, T value, SourceLocation loc,
 //
 // Error bound: new_err = local_cond * (max(input_rel_errs) + unit_roundoff<T>())
 // This is the standard first-order model: fl(a op b) = (a op b)(1 + delta), |delta| <= u.
+// `in` carries the direct-operand ids verbatim — no primary_id heuristic.
 
 template <class T>
 Tracked<T> add(const Tracked<T>& a, const Tracked<T>& b, SourceLocation loc) {
@@ -208,11 +292,12 @@ Tracked<T> add(const Tracked<T>& a, const Tracked<T>& b, SourceLocation loc) {
     T max_in_err = std::max(a.rel_err_bound_, b.rel_err_bound_);
     T new_err    = cond * (max_in_err + unit_roundoff<T>());
     T new_cond   = std::max({a.max_cond_seen_, b.max_cond_seen_, cond});
-    auto prov    = detail::prov_union(a.provenance_, b.provenance_);
-    journal::emit("add", loc,
-        {detail::primary_id(a.provenance_), detail::primary_id(b.provenance_)},
-        (double)res, (double)cond, (double)new_err, prov);
-    return Tracked<T>(res, new_err, new_cond, std::move(prov));
+    TrackedId id = detail::make_id("add", loc);
+    auto pv      = detail::prov_union(a.prov_vars_,   b.prov_vars_);
+    auto pc      = detail::prov_union(a.prov_consts_, b.prov_consts_);
+    journal::emit("add", loc, id, {a.id_, b.id_},
+        (double)res, (double)cond, (double)new_err, pv, pc);
+    return Tracked<T>(res, new_err, new_cond, std::move(id), std::move(pv), std::move(pc));
 }
 
 template <class T>
@@ -234,11 +319,12 @@ Tracked<T> sub(const Tracked<T>& a, const Tracked<T>& b, SourceLocation loc) {
     T max_in_err = std::max(a.rel_err_bound_, b.rel_err_bound_);
     T new_err    = cond * (max_in_err + unit_roundoff<T>());
     T new_cond   = std::max({a.max_cond_seen_, b.max_cond_seen_, cond});
-    auto prov    = detail::prov_union(a.provenance_, b.provenance_);
-    journal::emit("sub", loc,
-        {detail::primary_id(a.provenance_), detail::primary_id(b.provenance_)},
-        (double)res, (double)cond, (double)new_err, prov);
-    return Tracked<T>(res, new_err, new_cond, std::move(prov));
+    TrackedId id = detail::make_id("sub", loc);
+    auto pv      = detail::prov_union(a.prov_vars_,   b.prov_vars_);
+    auto pc      = detail::prov_union(a.prov_consts_, b.prov_consts_);
+    journal::emit("sub", loc, id, {a.id_, b.id_},
+        (double)res, (double)cond, (double)new_err, pv, pc);
+    return Tracked<T>(res, new_err, new_cond, std::move(id), std::move(pv), std::move(pc));
 }
 
 template <class T>
@@ -248,11 +334,12 @@ Tracked<T> mul(const Tracked<T>& a, const Tracked<T>& b, SourceLocation loc) {
     T max_in_err = std::max(a.rel_err_bound_, b.rel_err_bound_);
     T new_err    = cond * (max_in_err + unit_roundoff<T>());
     T new_cond   = std::max({a.max_cond_seen_, b.max_cond_seen_, cond});
-    auto prov    = detail::prov_union(a.provenance_, b.provenance_);
-    journal::emit("mul", loc,
-        {detail::primary_id(a.provenance_), detail::primary_id(b.provenance_)},
-        (double)res, (double)cond, (double)new_err, prov);
-    return Tracked<T>(res, new_err, new_cond, std::move(prov));
+    TrackedId id = detail::make_id("mul", loc);
+    auto pv      = detail::prov_union(a.prov_vars_,   b.prov_vars_);
+    auto pc      = detail::prov_union(a.prov_consts_, b.prov_consts_);
+    journal::emit("mul", loc, id, {a.id_, b.id_},
+        (double)res, (double)cond, (double)new_err, pv, pc);
+    return Tracked<T>(res, new_err, new_cond, std::move(id), std::move(pv), std::move(pc));
 }
 
 template <class T>
@@ -262,11 +349,12 @@ Tracked<T> div(const Tracked<T>& a, const Tracked<T>& b, SourceLocation loc) {
     T max_in_err = std::max(a.rel_err_bound_, b.rel_err_bound_);
     T new_err    = cond * (max_in_err + unit_roundoff<T>());
     T new_cond   = std::max({a.max_cond_seen_, b.max_cond_seen_, cond});
-    auto prov    = detail::prov_union(a.provenance_, b.provenance_);
-    journal::emit("div", loc,
-        {detail::primary_id(a.provenance_), detail::primary_id(b.provenance_)},
-        (double)res, (double)cond, (double)new_err, prov);
-    return Tracked<T>(res, new_err, new_cond, std::move(prov));
+    TrackedId id = detail::make_id("div", loc);
+    auto pv      = detail::prov_union(a.prov_vars_,   b.prov_vars_);
+    auto pc      = detail::prov_union(a.prov_consts_, b.prov_consts_);
+    journal::emit("div", loc, id, {a.id_, b.id_},
+        (double)res, (double)cond, (double)new_err, pv, pc);
+    return Tracked<T>(res, new_err, new_cond, std::move(id), std::move(pv), std::move(pc));
 }
 
 template <class T>
@@ -275,11 +363,12 @@ Tracked<T> neg(const Tracked<T>& a, SourceLocation loc) {
     T cond     = T(1);
     T new_err  = cond * (a.rel_err_bound_ + unit_roundoff<T>());
     T new_cond = std::max(a.max_cond_seen_, cond);
-    auto prov  = a.provenance_;
-    journal::emit("neg", loc,
-        {detail::primary_id(a.provenance_)},
-        (double)res, (double)cond, (double)new_err, prov);
-    return Tracked<T>(res, new_err, new_cond, std::move(prov));
+    TrackedId id = detail::make_id("neg", loc);
+    auto pv    = a.prov_vars_;
+    auto pc    = a.prov_consts_;
+    journal::emit("neg", loc, id, {a.id_},
+        (double)res, (double)cond, (double)new_err, pv, pc);
+    return Tracked<T>(res, new_err, new_cond, std::move(id), std::move(pv), std::move(pc));
 }
 
 } // namespace tracked

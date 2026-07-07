@@ -1,10 +1,13 @@
 #pragma once
-// Math function overloads for Tracked<T>: sqrt, exp, log, abs.
+// Math function overloads for Tracked<T>: sqrt, exp, log, abs, sin, cos, atan2.
 // Condition numbers are closed-form per-op values from numerical analysis.
 //
 // Found via ADL: write sqrt(x), exp(x), etc. for x of type Tracked<T>.
 // For source location capture, pass TRACKED_HERE explicitly:
 //   auto y = tracked::sqrt(x, TRACKED_HERE);
+//
+// v0.3: each op generates its own value id, propagates prov_vars / prov_consts
+// separately, and emits with the id + direct-operand-ids signature.
 
 #include <tracked/tracked.hpp>
 #include <cmath>
@@ -19,10 +22,12 @@ Tracked<T> sqrt(const Tracked<T>& a, SourceLocation loc = {}) {
     T cond     = T(0.5);
     T new_err  = cond * (a.rel_err_bound_ + unit_roundoff<T>());
     T new_cond = std::max(a.max_cond_seen_, cond);
-    auto prov  = a.provenance_;
-    journal::emit("sqrt", loc, {detail::primary_id(a.provenance_)},
-        (double)res, (double)cond, (double)new_err, prov);
-    return Tracked<T>(res, new_err, new_cond, std::move(prov));
+    TrackedId id = detail::make_id("sqrt", loc);
+    auto pv = a.prov_vars_;
+    auto pc = a.prov_consts_;
+    journal::emit("sqrt", loc, id, {a.id_},
+        (double)res, (double)cond, (double)new_err, pv, pc);
+    return Tracked<T>(res, new_err, new_cond, std::move(id), std::move(pv), std::move(pc));
 }
 
 // exp(x): cond = |x|  (large |x| amplifies input error)
@@ -33,10 +38,12 @@ Tracked<T> exp(const Tracked<T>& a, SourceLocation loc = {}) {
     T cond     = std::abs(a.value_);
     T new_err  = cond * (a.rel_err_bound_ + unit_roundoff<T>());
     T new_cond = std::max(a.max_cond_seen_, cond);
-    auto prov  = a.provenance_;
-    journal::emit("exp", loc, {detail::primary_id(a.provenance_)},
-        (double)res, (double)cond, (double)new_err, prov);
-    return Tracked<T>(res, new_err, new_cond, std::move(prov));
+    TrackedId id = detail::make_id("exp", loc);
+    auto pv = a.prov_vars_;
+    auto pc = a.prov_consts_;
+    journal::emit("exp", loc, id, {a.id_},
+        (double)res, (double)cond, (double)new_err, pv, pc);
+    return Tracked<T>(res, new_err, new_cond, std::move(id), std::move(pv), std::move(pc));
 }
 
 // log(x): cond = 1/|log(x)|  (blows up near x=1 where log(x)→0)
@@ -49,10 +56,12 @@ Tracked<T> log(const Tracked<T>& a, SourceLocation loc = {}) {
     T cond    = (ln_abs > unit_roundoff<T>()) ? T(1) / ln_abs : T(1) / unit_roundoff<T>();
     T new_err  = cond * (a.rel_err_bound_ + unit_roundoff<T>());
     T new_cond = std::max(a.max_cond_seen_, cond);
-    auto prov  = a.provenance_;
-    journal::emit("log", loc, {detail::primary_id(a.provenance_)},
-        (double)res, (double)cond, (double)new_err, prov);
-    return Tracked<T>(res, new_err, new_cond, std::move(prov));
+    TrackedId id = detail::make_id("log", loc);
+    auto pv = a.prov_vars_;
+    auto pc = a.prov_consts_;
+    journal::emit("log", loc, id, {a.id_},
+        (double)res, (double)cond, (double)new_err, pv, pc);
+    return Tracked<T>(res, new_err, new_cond, std::move(id), std::move(pv), std::move(pc));
 }
 
 // abs(x): cond = 1  (no amplification)
@@ -63,10 +72,12 @@ Tracked<T> abs(const Tracked<T>& a, SourceLocation loc = {}) {
     T cond     = T(1);
     T new_err  = cond * (a.rel_err_bound_ + unit_roundoff<T>());
     T new_cond = std::max(a.max_cond_seen_, cond);
-    auto prov  = a.provenance_;
-    journal::emit("abs", loc, {detail::primary_id(a.provenance_)},
-        (double)res, (double)cond, (double)new_err, prov);
-    return Tracked<T>(res, new_err, new_cond, std::move(prov));
+    TrackedId id = detail::make_id("abs", loc);
+    auto pv = a.prov_vars_;
+    auto pc = a.prov_consts_;
+    journal::emit("abs", loc, id, {a.id_},
+        (double)res, (double)cond, (double)new_err, pv, pc);
+    return Tracked<T>(res, new_err, new_cond, std::move(id), std::move(pv), std::move(pc));
 }
 
 // sin(x): cond = |x·cos(x)/sin(x)| = |x·cot(x)|
@@ -83,10 +94,12 @@ Tracked<T> sin(const Tracked<T>& a, SourceLocation loc = {}) {
              : T(1) / u;
     T new_err  = cond * (a.rel_err_bound_ + u);
     T new_cond = std::max(a.max_cond_seen_, cond);
-    auto prov  = a.provenance_;
-    journal::emit("sin", loc, {detail::primary_id(a.provenance_)},
-        (double)res, (double)cond, (double)new_err, prov);
-    return Tracked<T>(res, new_err, new_cond, std::move(prov));
+    TrackedId id = detail::make_id("sin", loc);
+    auto pv = a.prov_vars_;
+    auto pc = a.prov_consts_;
+    journal::emit("sin", loc, id, {a.id_},
+        (double)res, (double)cond, (double)new_err, pv, pc);
+    return Tracked<T>(res, new_err, new_cond, std::move(id), std::move(pv), std::move(pc));
 }
 
 // cos(x): cond = |x·sin(x)/cos(x)| = |x·tan(x)|
@@ -103,10 +116,12 @@ Tracked<T> cos(const Tracked<T>& a, SourceLocation loc = {}) {
              : T(1) / u;
     T new_err  = cond * (a.rel_err_bound_ + u);
     T new_cond = std::max(a.max_cond_seen_, cond);
-    auto prov  = a.provenance_;
-    journal::emit("cos", loc, {detail::primary_id(a.provenance_)},
-        (double)res, (double)cond, (double)new_err, prov);
-    return Tracked<T>(res, new_err, new_cond, std::move(prov));
+    TrackedId id = detail::make_id("cos", loc);
+    auto pv = a.prov_vars_;
+    auto pc = a.prov_consts_;
+    journal::emit("cos", loc, id, {a.id_},
+        (double)res, (double)cond, (double)new_err, pv, pc);
+    return Tracked<T>(res, new_err, new_cond, std::move(id), std::move(pv), std::move(pc));
 }
 
 // atan2(y, x): cond = 2·|x·y| / ((x²+y²)·|atan2(y,x)|)
@@ -123,12 +138,13 @@ Tracked<T> atan2(const Tracked<T>& y, const Tracked<T>& x, SourceLocation loc = 
     T cond     = (abs_res >= u) ? numer / denom : T(1) / u;
     T max_in_err = std::max(y.rel_err_bound_, x.rel_err_bound_);
     T new_err    = cond * (max_in_err + u);
-    auto prov    = detail::prov_union(y.provenance_, x.provenance_);
     T new_cond   = std::max({y.max_cond_seen_, x.max_cond_seen_, cond});
-    journal::emit("atan2", loc,
-        {detail::primary_id(y.provenance_), detail::primary_id(x.provenance_)},
-        (double)res, (double)cond, (double)new_err, prov);
-    return Tracked<T>(res, new_err, new_cond, std::move(prov));
+    TrackedId id = detail::make_id("atan2", loc);
+    auto pv      = detail::prov_union(y.prov_vars_,   x.prov_vars_);
+    auto pc      = detail::prov_union(y.prov_consts_, x.prov_consts_);
+    journal::emit("atan2", loc, id, {y.id_, x.id_},
+        (double)res, (double)cond, (double)new_err, pv, pc);
+    return Tracked<T>(res, new_err, new_cond, std::move(id), std::move(pv), std::move(pc));
 }
 
 } // namespace tracked

@@ -43,7 +43,8 @@ foreach(test_name
     test_complex_basic
     test_complex_sqrt
     test_complex_log
-    test_complex_div)
+    test_complex_div
+    test_provenance_v03)
   add_executable(${test_name} tests/tracked/${test_name}.cpp)
   target_link_libraries(${test_name} PRIVATE tracked::tracked Catch2::Catch2WithMain)
   catch_discover_tests(${test_name})

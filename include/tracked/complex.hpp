@@ -71,8 +71,8 @@ public:
 // For (re, 0i), call track("z", 1.0, 0.0) explicitly.
 template <class T>
 Complex<T> track(std::string id, T re, T im) {
-    Tracked<T> re_t(re);  re_t.provenance_ = {id};
-    Tracked<T> im_t(im);  im_t.provenance_ = {id};
+    Tracked<T> re_t(re);  re_t.id_ = id;  re_t.prov_vars_ = {id};
+    Tracked<T> im_t(im);  im_t.id_ = id;  im_t.prov_vars_ = {id};
     return Complex<T>(re_t, im_t);
 }
 

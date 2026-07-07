@@ -46,8 +46,10 @@ TEST_CASE("Complex: explicit construct from single Tracked (im=0)") {
 
 TEST_CASE("Complex: track() factory — both components share provenance id") {
     auto z = tracked::track("z", 1.0, 2.0);
-    REQUIRE(z.real().provenance_ == std::set<std::string>{"z"});
-    REQUIRE(z.imag().provenance_ == std::set<std::string>{"z"});
+    REQUIRE(z.real().prov_vars_ == std::set<std::string>{"z"});
+    REQUIRE(z.imag().prov_vars_ == std::set<std::string>{"z"});
+    REQUIRE(z.real().id_ == "z");
+    REQUIRE(z.imag().id_ == "z");
 }
 
 TEST_CASE("Complex: track() factory with explicit im=0") {
@@ -181,8 +183,8 @@ TEST_CASE("Complex: add — result provenance is union of both inputs") {
     auto a = tracked::track("a", 1.0, 0.0);
     auto b = tracked::track("b", 0.0, 1.0);
     auto r = a + b;
-    auto prov_re = r.real().provenance_;
-    auto prov_im = r.imag().provenance_;
+    auto prov_re = r.real().prov_vars_;
+    auto prov_im = r.imag().prov_vars_;
     REQUIRE(prov_re == (std::set<std::string>{"a", "b"}));
     REQUIRE(prov_im == (std::set<std::string>{"a", "b"}));
 }
@@ -191,8 +193,8 @@ TEST_CASE("Complex: mul — result provenance is union of both inputs") {
     auto a = tracked::track("a", 1.0, 2.0);
     auto b = tracked::track("b", 3.0, 4.0);
     auto r = a * b;
-    REQUIRE(r.real().provenance_ == (std::set<std::string>{"a", "b"}));
-    REQUIRE(r.imag().provenance_ == (std::set<std::string>{"a", "b"}));
+    REQUIRE(r.real().prov_vars_ == (std::set<std::string>{"a", "b"}));
+    REQUIRE(r.imag().prov_vars_ == (std::set<std::string>{"a", "b"}));
 }
 
 // ============================================================
@@ -239,10 +241,14 @@ TEST_CASE("opaque(Complex): both records carry fn_name in 'in' field") {
     REQUIRE(records()[1].in == std::vector<std::string>{"my_fn"});
 }
 
-TEST_CASE("opaque(Complex): result carries fn_name as provenance") {
+TEST_CASE("opaque(Complex): fn_name is a marker, not provenance") {
+    // v0.3: fn_name lives in the `in` marker slot (checked above), not in the
+    // prov_vars/prov_consts sets. With no tracked inputs both are empty.
     auto z = tracked::opaque<double>("ext", 3.0, 4.0);
-    REQUIRE(z.real().provenance_ == std::set<std::string>{"ext"});
-    REQUIRE(z.imag().provenance_ == std::set<std::string>{"ext"});
+    REQUIRE(z.real().prov_vars_.empty());
+    REQUIRE(z.imag().prov_vars_.empty());
+    REQUIRE(z.real().prov_consts_.empty());
+    REQUIRE(z.imag().prov_consts_.empty());
 }
 
 TEST_CASE("opaque(Complex): values are passed through") {
