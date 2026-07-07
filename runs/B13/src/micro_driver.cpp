@@ -133,6 +133,12 @@ int main(int argc, char* argv[]) {
         // Host loop, NOT Kokkos::parallel_for: tracked ops are host-only.
         int printed = 0;
         for (int i = 0; i < sample_count; ++i) {
+            // v0.3 scope: every derived id produced inside ql::BO for this
+            // sample gets an "@sample=<i>" suffix, so hot records self-document
+            // which sample produced them and downstream queries can filter by
+            // sample without cross-referencing. Input track() ids (m1[i], p2[i],
+            // …) keep their bare names — scope only affects generated ids.
+            tracked::scope sample_scope("sample=" + std::to_string(i));
             ql::BO<TOutput, TMass, TScale>(res, mu2, m, p, i);
 
             if (printed < 3) {
