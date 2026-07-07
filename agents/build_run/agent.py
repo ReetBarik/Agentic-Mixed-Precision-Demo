@@ -36,12 +36,25 @@ def build_and_run(
     cfg: PipelineConfig,
     work_dir: Path | None = None,
     clean_build: bool = True,
+    use_tracked: bool = False,
+    target_library_headers: Path | None = None,
+    existing_shim: Path | None = None,
 ) -> RunResult:
     """Write driver_source to a temp directory, cmake-build, and execute.
 
     When ``clean_build`` is True (the default), ``work_dir/build/`` is wiped
     before configuring so a stale ``CMakeCache.txt`` from a prior attempt can't
     poison the next configure.  The retry loop relies on this.
+
+    When ``use_tracked`` is True and ``target_library_headers`` is provided, the
+    tracked-integrator shared service runs first: it (re)generates the
+    ``<app>_interop.hpp`` interop shim that makes the target library callable
+    with ``Tracked<T>``, unless an up-to-date shim already exists (SOURCE_HASH
+    match).  This keeps the "does this target need Tracked?" decision in one
+    place — any caller that opts in benefits automatically (task revision #2,
+    option (a)).  With ``use_tracked`` False (the default) the flow is exactly
+    the pre-existing compile/run path, so current characterizer callers are
+    unaffected.
     """
 
     if work_dir is None:
@@ -53,6 +66,20 @@ def build_and_run(
 
     driver_cpp = src_dir / "micro_driver.cpp"
     driver_cpp.write_text(driver_source, encoding="utf-8")
+
+    # Prerequisite: ensure a Tracked interop shim exists for the target library
+    # before compiling.  Imported locally so build_run stays import-light (the
+    # integrator pulls in the LLM client in Part 2) and to avoid any cycle.
+    if use_tracked and target_library_headers is not None:
+        from agents.tracked_integrator import agent as tracked_integrator
+
+        tracked_integrator.integrate(
+            target_library_headers=target_library_headers,
+            driver_source_path=driver_cpp,
+            tracked_repo_path=cfg.tracked_root,
+            existing_shim=existing_shim,
+            cfg=cfg,
+        )
 
     cmake_content = _render_cmake(framework, cfg)
     (work_dir / "CMakeLists.txt").write_text(cmake_content, encoding="utf-8")
