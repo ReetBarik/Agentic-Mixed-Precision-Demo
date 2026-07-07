@@ -135,10 +135,17 @@ public:
 
     Tracked() : value_(T(0)), rel_err_bound_(T(0)), max_cond_seen_(T(0)) {}
 
-    // Unnamed literal (e.g. Tracked<T>(0.5) inside a kernel). No provenance and
-    // an empty id — prefer track()/constant() for anything you want attributed.
+    // Unnamed literal (e.g. Tracked<T>(0.5) inside a kernel). No provenance, but
+    // it synthesizes a real literal id ("_lit@?#<n>", or with a source location if
+    // one is threaded through literal()) so a value promoted through this ctor can
+    // never enter an op with an empty operand id. Prefer track()/constant() for
+    // anything you want attributed; prefer literal(v, TRACKED_HERE) to capture a
+    // source location. The id is synthesized inline via detail::make_id rather than
+    // by delegating to literal(), because literal() constructs through this very
+    // ctor and delegation would recurse.
     explicit Tracked(T v)
-        : value_(v), rel_err_bound_(unit_roundoff<T>()), max_cond_seen_(T(0)) {}
+        : value_(v), rel_err_bound_(unit_roundoff<T>()), max_cond_seen_(T(0))
+        , id_(detail::make_id("_lit", SourceLocation{})) {}
 
     Tracked(T v, T err, T cond, TrackedId id,
             std::set<std::string> pv, std::set<std::string> pc)
@@ -180,20 +187,21 @@ public:
 // it seeds prov_vars.
 template <class T>
 Tracked<T> track(std::string name, T value) {
-    Tracked<T> r(value);
-    r.id_        = name;
-    r.prov_vars_ = {std::move(name)};
-    return r;
+    // Build via the full ctor so the one-arg Tracked(T) id-synthesis is not run
+    // (and then discarded) — keeps the literal counter sequence stable.
+    std::set<std::string> pv{name};
+    return Tracked<T>(value, unit_roundoff<T>(), T(0), std::move(name),
+                      std::move(pv), {});
 }
 
 // Tag a fresh *named constant* — participates in provenance for audit but is not
 // an attribution root. Its id is its name and it seeds prov_consts.
 template <class T>
 Tracked<T> constant(std::string name, T value) {
-    Tracked<T> r(value);
-    r.id_          = name;
-    r.prov_consts_ = {std::move(name)};
-    return r;
+    // Full ctor: skip the discarded one-arg id-synthesis (see track()).
+    std::set<std::string> pc{name};
+    return Tracked<T>(value, unit_roundoff<T>(), T(0), std::move(name),
+                      {}, std::move(pc));
 }
 
 // Anonymous literal: a bare scalar value promoted into the tracked graph.
@@ -208,9 +216,11 @@ Tracked<T> constant(std::string name, T value) {
 // constant() (named) or track() (source variable).
 template <class T>
 Tracked<T> literal(T value, SourceLocation loc = {}) {
-    Tracked<T> r(value);
-    r.id_ = detail::make_id("_lit", loc);
-    return r;
+    // Full ctor with the located id: constructing through Tracked(T) would first
+    // synthesize a no-location "_lit@?#n" id and then overwrite it, double-bumping
+    // the counter. Building directly keeps one id per literal() call.
+    return Tracked<T>(value, unit_roundoff<T>(), T(0),
+                      detail::make_id("_lit", loc), {}, {});
 }
 
 // Opaque-call barrier: value crosses a non-Tracked boundary.
