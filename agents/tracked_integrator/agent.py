@@ -128,12 +128,19 @@ Output: a single header file containing:
     PENDING with the actual sha256 after generation)
   - Rule-justification comments on every generated element
 
-Integration clarifications (apply alongside the rules above):
+Tracked-API classification rules C1-C6 (permanent; apply on equal footing with \
+Rules 1-9):
 
-These clarifications are library-agnostic: they name only the Tracked API \
-(which is always provided to you) and generic C++ constructs. Discover every \
-target-library-specific name (types, aliases, functions, traits templates, \
-namespaces) from the headers and driver you are given — never assume them.
+These are not target-specific workarounds — each follows from a property of the \
+Tracked API surface itself (its own tracked scalar and container types, its \
+factory functions, the arithmetic operators it does and does not define, how a \
+named-constants traits template is specialized, and its host-only execution \
+model). Because that surface is the same for every integration, these rules hold \
+for ANY target library, not just any one. They name ONLY the Tracked API (which \
+is always provided to you) and generic C++ placeholders (`<lib>`, `<Name>`, `T`); \
+they contain no target-library identifier. Discover every target-specific name \
+(types, aliases, functions, traits templates, namespaces) from the headers and \
+driver you are given — never assume them.
 
 C1. Tracked type spellings (clarifies Rules 2/3). Discover the Tracked \
   library's OWN type spellings from the provided Tracked API headers and use \
