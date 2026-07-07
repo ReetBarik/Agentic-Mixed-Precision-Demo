@@ -8,6 +8,10 @@
 // get a generated id "<op>@<file>:<line>#<callsite_counter>[@<scope>]".
 // See docs/PROVENANCE.md.
 //
+// v0.4: literal() completes the factory taxonomy — an anonymous scalar promoted
+// into the graph with an auto-generated "_lit@..." id but no provenance role.
+// See docs/PLAN-v0.4.md.
+//
 // Usage:
 //   #include <tracked/tracked.hpp>
 //   #include <tracked/ops.hpp>     // for sqrt, exp, log, abs
@@ -189,6 +193,23 @@ Tracked<T> constant(std::string name, T value) {
     Tracked<T> r(value);
     r.id_          = name;
     r.prov_consts_ = {std::move(name)};
+    return r;
+}
+
+// Anonymous literal: a bare scalar value promoted into the tracked graph.
+// Gets an auto-generated id ("_lit@<file>:<line>#<n>[@<scope>]", or "_lit@?#<n>"
+// without a source location) so downstream ops can point at it, but is NOT
+// classified as a source variable (empty prov_vars) or a named constant
+// (empty prov_consts). Analysis tooling can filter or aggregate literals by the
+// "_lit@" id prefix.
+//
+// Use for scratch scalars whose semantic identity doesn't matter and which the
+// caller doesn't want to name. If the value has a semantic role, prefer
+// constant() (named) or track() (source variable).
+template <class T>
+Tracked<T> literal(T value, SourceLocation loc = {}) {
+    Tracked<T> r(value);
+    r.id_ = detail::make_id("_lit", loc);
     return r;
 }
 

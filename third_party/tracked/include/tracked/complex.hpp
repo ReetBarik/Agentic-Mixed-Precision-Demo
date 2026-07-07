@@ -29,14 +29,21 @@ public:
 
     Complex() = default;
 
+    // Bare-scalar components are anonymous — promote them via literal() so
+    // downstream ops get a valid `in` id instead of the empty id an explicit
+    // Tracked<T>(v) would leave behind.
     Complex(T re, T im = T(0))
-        : re_(Tracked<T>(re)), im_(Tracked<T>(im)) {}
+        : re_(literal(re)), im_(literal(im)) {}
 
     Complex(Tracked<T> re, Tracked<T> im)
         : re_(std::move(re)), im_(std::move(im)) {}
 
+    // The imaginary part of a real-promoted complex is a structural padding
+    // artifact, not a zero the user's math named — so it's an anonymous
+    // literal(), not constant("zero"). prov_consts is reserved for constants the
+    // computation actually referred to by name.
     explicit Complex(Tracked<T> re)
-        : re_(std::move(re)), im_(Tracked<T>(T(0))) {}
+        : re_(std::move(re)), im_(literal(T(0))) {}
 
     const Tracked<T>& real() const { return re_; }
     const Tracked<T>& imag() const { return im_; }
@@ -144,36 +151,36 @@ Complex<T> operator+(const Complex<T>& a, const Tracked<T>& s) { return a + Comp
 template <class T>
 Complex<T> operator+(const Tracked<T>& s, const Complex<T>& b) { return Complex<T>(s) + b; }
 template <class T>
-Complex<T> operator+(const Complex<T>& a, T s) { return a + Complex<T>(Tracked<T>(s)); }
+Complex<T> operator+(const Complex<T>& a, T s) { return a + Complex<T>(literal(s)); }
 template <class T>
-Complex<T> operator+(T s, const Complex<T>& b) { return Complex<T>(Tracked<T>(s)) + b; }
+Complex<T> operator+(T s, const Complex<T>& b) { return Complex<T>(literal(s)) + b; }
 
 template <class T>
 Complex<T> operator-(const Complex<T>& a, const Tracked<T>& s) { return a - Complex<T>(s); }
 template <class T>
 Complex<T> operator-(const Tracked<T>& s, const Complex<T>& b) { return Complex<T>(s) - b; }
 template <class T>
-Complex<T> operator-(const Complex<T>& a, T s) { return a - Complex<T>(Tracked<T>(s)); }
+Complex<T> operator-(const Complex<T>& a, T s) { return a - Complex<T>(literal(s)); }
 template <class T>
-Complex<T> operator-(T s, const Complex<T>& b) { return Complex<T>(Tracked<T>(s)) - b; }
+Complex<T> operator-(T s, const Complex<T>& b) { return Complex<T>(literal(s)) - b; }
 
 template <class T>
 Complex<T> operator*(const Complex<T>& a, const Tracked<T>& s) { return a * Complex<T>(s); }
 template <class T>
 Complex<T> operator*(const Tracked<T>& s, const Complex<T>& b) { return Complex<T>(s) * b; }
 template <class T>
-Complex<T> operator*(const Complex<T>& a, T s) { return a * Complex<T>(Tracked<T>(s)); }
+Complex<T> operator*(const Complex<T>& a, T s) { return a * Complex<T>(literal(s)); }
 template <class T>
-Complex<T> operator*(T s, const Complex<T>& b) { return Complex<T>(Tracked<T>(s)) * b; }
+Complex<T> operator*(T s, const Complex<T>& b) { return Complex<T>(literal(s)) * b; }
 
 template <class T>
 Complex<T> operator/(const Complex<T>& a, const Tracked<T>& s) { return a / Complex<T>(s); }
 template <class T>
 Complex<T> operator/(const Tracked<T>& s, const Complex<T>& b) { return Complex<T>(s) / b; }
 template <class T>
-Complex<T> operator/(const Complex<T>& a, T s) { return a / Complex<T>(Tracked<T>(s)); }
+Complex<T> operator/(const Complex<T>& a, T s) { return a / Complex<T>(literal(s)); }
 template <class T>
-Complex<T> operator/(T s, const Complex<T>& b) { return Complex<T>(Tracked<T>(s)) / b; }
+Complex<T> operator/(T s, const Complex<T>& b) { return Complex<T>(literal(s)) / b; }
 
 // ---- Math functions ---------------------------------------------------------
 //
@@ -244,31 +251,33 @@ Complex<T> sqrt(const Complex<T>& z, SourceLocation loc = {}) {
     if (z.re_.value_ >= T(0)) {
         // Stable branch for re >= 0
         auto sum  = add(r, z.re_, loc);
-        auto half = Tracked<T>(T(0.5));
+        auto half = constant("half", T(0.5));
         auto hw   = mul(half, sum, loc);
         auto w    = tracked::sqrt(hw, loc);
 
         // im / (2w) — guard against w=0 (only at z=0 exactly)
-        auto two  = Tracked<T>(T(2));
+        auto two  = constant("two", T(2));
         auto tw   = mul(two, w, loc);
         auto im   = div(z.im_, tw, loc);
         return Complex<T>(w, im);
     } else {
         // Stable branch for re < 0
         auto diff  = sub(r, z.re_, loc);   // r - re = r + |re|, always positive
-        auto half  = Tracked<T>(T(0.5));
+        auto half  = constant("half", T(0.5));
         auto hd    = mul(half, diff, loc);
         auto w     = tracked::sqrt(hd, loc);
 
         // |im| / (2w)
         auto abs_im = tracked::abs(z.im_, loc);
-        auto two    = Tracked<T>(T(2));
+        auto two    = constant("two", T(2));
         auto tw     = mul(two, w, loc);
         auto re_out = div(abs_im, tw, loc);
 
-        // sign(im) · w
+        // sign(im) · w — the sign is a runtime-selected ±1, not a named
+        // constant (constant() dedups by name, so a shared "sign" id would
+        // conflate +1 and -1), so it enters the graph as an anonymous literal.
         T sign_im = (z.im_.value_ >= T(0)) ? T(1) : T(-1);
-        auto sign_t = Tracked<T>(sign_im);
+        auto sign_t = literal(sign_im);
         auto im_out = mul(sign_t, w, loc);
 
         return Complex<T>(re_out, im_out);

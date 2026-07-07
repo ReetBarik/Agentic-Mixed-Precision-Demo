@@ -28,14 +28,16 @@ v0.3 fixes the data model: **every value carries a stable id**, and `in` records
 the operands' ids verbatim. With real identities to point at, the aliasing
 dissolves — there is no longer a "pick one name" step to get wrong.
 
-## Two-category provenance
+## The factory taxonomy
 
-There are two factories, corresponding to two roles a leaf value can play:
+Three factories cover the roles a leaf value can play. Pick by what the value
+*is*, not by how it happens to be spelled at the call site:
 
 | Factory | Role | Seeds | Is an attribution root? |
 |---|---|---|---|
 | `tracked::track(name, value)` | source variable | `prov_vars` | **yes** |
 | `tracked::constant(name, value)` | named constant | `prov_consts` | no |
+| `tracked::literal(value [, loc])` | anonymous scalar | *(neither)* | no |
 
 A **source variable** is an input whose value your computation is *about*
 (`m1[79]`, `mu2`, a measurement, a sample). Attribution — "which inputs
@@ -46,9 +48,14 @@ A **named constant** is a literal with a name for readability and audit (`pi`,
 but it is never reported as the *origin* of a value; asking "where did this
 number come from?" should not answer "from the constant 2."
 
-Both are unioned separately as ops combine values: an op's result carries the
-union of its operands' `prov_vars` and, independently, the union of their
-`prov_consts`.
+An **anonymous literal** (v0.4) is a bare scalar that enters the graph without a
+semantic name — a scratch value the caller doesn't care to name. It gets an
+auto-generated id so downstream ops can point at it, but seeds neither provenance
+category. See [Literals](#literals-anonymous-scalars) below.
+
+Provenance is unioned per category as ops combine values: an op's result carries
+the union of its operands' `prov_vars` and, independently, the union of their
+`prov_consts`. Literals contribute to neither, so they leave both sets untouched.
 
 ### The underscore convention is retired
 
@@ -84,9 +91,61 @@ placeholder file and a separate anonymous counter: `sub@?#<n>`. Prefer the named
 free functions with `TRACKED_HERE` (`sub(a, b, TRACKED_HERE)`) when you want
 readable, source-anchored ids.
 
-Unnamed literals built with the bare `Tracked<T>(v)` constructor (e.g. a `0.5`
-created inside a kernel) have an **empty id** and empty provenance — they are
-anonymous. Use `constant()` for any literal you want to see in the journal.
+Values built with the bare `Tracked<T>(v)` constructor (e.g. a `0.5` created
+inside a kernel) have an **empty id** and empty provenance — the constructor is
+an ergonomic escape hatch, and reaching for it directly opts out of graph
+traceability. Prefer `literal(v)` for anonymous scalars (auto id, still
+walkable) or `constant()` for anything that deserves a name. See below.
+
+## Literals (anonymous scalars)
+
+`tracked::literal(value, loc = {})` promotes a bare scalar into the tracked graph
+**without** giving it a semantic name. It is the third corner of the factory
+taxonomy: unlike `track()` and `constant()`, it seeds no provenance, but unlike
+the raw `Tracked<T>(v)` constructor it *does* get a stable id, so an op that
+consumes it emits a record whose `in` points at a real node instead of an empty
+string.
+
+**Why it's distinct from `constant()`.** A constant has a semantic name (`pi`,
+`half`) and lands in `prov_consts` for audit. A literal has neither — it is a
+scratch value whose identity doesn't matter to attribution. Use it precisely
+when a scalar *doesn't* warrant a name; if it does, that's what `constant()` is
+for.
+
+**Id shape.** Literals reuse the same generator as derived values, with a `_lit`
+op tag:
+
+```
+_lit@<file>:<line>#<counter>[@<scope>]     // with a SourceLocation (TRACKED_HERE)
+_lit@?#<counter>[@<scope>]                 // without (operator-form / default loc)
+```
+
+The `_lit@` prefix is deliberate: downstream tooling can **filter or aggregate**
+literals with a single string check (`id.rfind("_lit@", 0) == 0`) — e.g. to hide
+scratch nodes from a graph view, or to roll up all literals into one bucket.
+
+**Graph-walk semantics.**
+
+- `trace_sources(id)` — literals **never** appear. They are not source variables,
+  so attribution ignores them (behavior unchanged from v0.3).
+- `trace_ancestors(id)` — literals **do** appear. They are valid causal nodes;
+  they simply show up now that they carry ids.
+
+**Where it's used internally.** `Complex<T>`'s bare-scalar promotions route
+through `literal()` — the `Complex(T re, T im)` component constructors, the
+mixed-scalar operators (`z * 3.0`, etc.), and the imaginary padding of a
+real-promoted complex (`Complex(Tracked<T> re)`, whose `im` is a structural zero,
+not a zero the user's math named). This is the root fix for the empty-`in`
+records that anonymous scalar-to-complex promotions produced before v0.4.
+
+By contrast, `half`/`two` in `sqrt` *are* named `constant()`s — they are
+mathematical coefficients the algorithm invokes by name. The line is intent:
+`prov_consts` records constants the computation referred to, not machinery.
+
+**Guidance.** Prefer `constant()` for anything with a semantic name; reach for
+`literal()` only when the scalar truly doesn't warrant one. The raw
+`Tracked<T>(v)` constructor remains available but is the opt-out — it gives
+neither an id nor provenance.
 
 ## Scopes
 
@@ -144,8 +203,8 @@ to recover order.
 ## Graph model and walk helpers
 
 The journal is a DAG. Each record's `id` is a node; its `in` lists the ids of
-the operands that produced it. Leaf ids (source variables, constants, opaque
-markers) never appear as a produced `id`, so they have no `in` edges. The
+the operands that produced it. Leaf ids (source variables, constants, literals,
+opaque markers) never appear as a produced `id`, so they have no `in` edges. The
 library owns the traversal:
 
 ```cpp
@@ -163,9 +222,9 @@ namespace tracked::journal {
 - **`parents(id)`** returns the record's `in`, or empty for a leaf / unknown id.
 - **`trace_sources(id)`** BFS-walks backward through `in` edges and returns the
   set of ids that are **source variables** — i.e. that appear in some record's
-  `prov_vars`. Constants (which appear only in `prov_consts`) and opaque markers
-  (which appear in neither) are excluded. This is the answer to "which source
-  variables ultimately fed this value?"
+  `prov_vars`. Constants (which appear only in `prov_consts`), literals, and
+  opaque markers (which appear in neither) are excluded. This is the answer to
+  "which source variables ultimately fed this value?"
 - **`trace_ancestors(id)`** returns every causal ancestor (including `id`) in
   topological order: each id appears *after* all of its parents, with roots
   first and `id` last.
