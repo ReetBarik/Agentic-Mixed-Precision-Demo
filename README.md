@@ -34,10 +34,19 @@ int main() {
 }
 ```
 
-Two factories, two provenance categories: `track()` introduces a **source
-variable** (an attribution root), `constant()` introduces a **named constant**
-(recorded for audit, but never reported as the origin of a value). See
-[docs/PROVENANCE.md](docs/PROVENANCE.md).
+Three factories complete the role taxonomy — pick by what the value *is*:
+
+| Factory              | Role             | Attribution      | Provenance    |
+| -------------------- | ---------------- | ---------------- | ------------- |
+| `track(name, v)`     | source variable  | attribution root | `prov_vars`   |
+| `constant(name, v)`  | named constant   | audit-only       | `prov_consts` |
+| `literal(v [, loc])` | anonymous scalar | auto-id, neither | (neither)     |
+
+`track()` seeds `prov_vars` (reported as the origin of a value); `constant()`
+seeds `prov_consts` (recorded for audit, never reported as an origin);
+`literal()` promotes a bare scalar with an auto-generated `_lit@…` id but no
+provenance role — reach for it only when a scratch scalar genuinely doesn't
+warrant a name. See [docs/PROVENANCE.md](docs/PROVENANCE.md).
 
 Each journal record (schema **v0.3**) looks like:
 
@@ -94,8 +103,8 @@ cd build && ctest --output-on-failure
 ## What's included
 
 - **`include/tracked/`** — the library:
-  - `tracked.hpp` — `Tracked<T>`, `track()`, `constant()`, `scope`, `opaque()`,
-    arithmetic.
+  - `tracked.hpp` — `Tracked<T>`, `track()`, `constant()`, `literal()`, `scope`,
+    `opaque()`, arithmetic.
   - `ops.hpp` — `sqrt`, `exp`, `log`, `abs`, `sin`, `cos`, `atan2` with
     per-op condition numbers.
   - `complex.hpp` — `tracked::Complex<T>`, full complex math decomposed into
@@ -107,10 +116,10 @@ cd build && ctest --output-on-failure
 - **`examples/complex_log_micro/`** — optional Kokkos-based micro-driver
   demonstrating the **opaque-barrier** pattern for kernels that call framework
   math you can't see into. Not built by the top-level CMake; see its README.
-- **`docs/`** — design records (`PLAN.md`, `PLAN-v1.1.md`, `PLAN-v0.3.md`),
-  `PROVENANCE.md` (the v0.3 provenance model), and `CONDITION_NUMBERS.md` (full
-  derivations of every per-op condition number, the error-propagation model, and
-  the numerical-analysis references).
+- **`docs/`** — design records (`PLAN.md`, `PLAN-v1.1.md`, `PLAN-v0.3.md`,
+  `PLAN-v0.4.md`), `PROVENANCE.md` (the provenance model, incl. literals), and
+  `CONDITION_NUMBERS.md` (full derivations of every per-op condition number, the
+  error-propagation model, and the numerical-analysis references).
 
 ## Key ideas
 
@@ -118,7 +127,8 @@ cd build && ctest --output-on-failure
   "too unstable" threshold — consumers apply their own based on their precision
   needs.
 - **Provenance is two categories, not one flat set.** `track()` seeds
-  `prov_vars` (attribution roots); `constant()` seeds `prov_consts` (audit-only).
+  `prov_vars` (attribution roots); `constant()` seeds `prov_consts` (audit-only);
+  `literal()` seeds neither but still gets an id so the graph stays walkable.
   Every value has a stable `id`, and `in` records operand ids directly, so
   attribution is a graph walk (`trace_sources`), not a heuristic guess.
 - **Error model** (first-order):

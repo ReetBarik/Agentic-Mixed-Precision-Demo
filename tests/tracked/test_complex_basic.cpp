@@ -29,6 +29,28 @@ TEST_CASE("Complex: construct from raw scalars") {
     REQUIRE(z.imag().value_ == 4.0);
 }
 
+TEST_CASE("Complex: raw-scalar components are anonymous literals (v0.4)") {
+    // Bare scalars promote via literal(): non-empty _lit ids, no provenance.
+    Complex<double> z(3.0, 4.0);
+    REQUIRE(z.real().id().rfind("_lit@", 0) == 0);
+    REQUIRE(z.imag().id().rfind("_lit@", 0) == 0);
+    REQUIRE(z.real().prov_vars_.empty());
+    REQUIRE(z.real().prov_consts_.empty());
+    REQUIRE(z.imag().prov_vars_.empty());
+    REQUIRE(z.imag().prov_consts_.empty());
+}
+
+TEST_CASE("Complex: real-promoted imaginary part is a structural literal (v0.4)") {
+    // The imag padding is machinery, not a user-named zero — so it's an
+    // anonymous literal, and prov_consts stays empty.
+    auto re = track("re", 7.0);
+    Complex<double> z(re);              // explicit single-Tracked ctor
+    REQUIRE(z.imag().value_ == 0.0);
+    REQUIRE(z.imag().id().rfind("_lit@", 0) == 0);
+    REQUIRE(z.imag().prov_consts_.empty());
+    REQUIRE(z.imag().prov_vars_.empty());
+}
+
 TEST_CASE("Complex: construct from Tracked reals") {
     auto re = track("re", 1.5);
     auto im = track("im", 2.5);
