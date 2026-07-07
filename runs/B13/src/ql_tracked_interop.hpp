@@ -96,28 +96,35 @@ struct Constants;
 // ============================================================
 // Constants<Tracked<T>> specialization
 //
-// Local B13-spike workaround for the tracked-library constant-
-// naming gap. Routes every constant through tracked::track so
-// provenance is preserved into arithmetic that touches
-// ql::Constants::_foo(). See MEMORY.md follow-up (a) for scope
-// and a link to any upstream Tracked issue that supersedes this.
+// Local B13-spike shim for the tracked-library constant gap.
+// Routes every qcdloop constant through tracked::constant so it
+// is named in the journal and carried through arithmetic that
+// touches ql::Constants::_foo() — landing in prov_consts (audit),
+// never prov_vars (attribution). See docs/PROVENANCE.md.
 //
 // Without this, the generic ql::Constants<T> (kokkosMaths.h)
 // returns T(literal_double); for T = tracked::Tracked<double>
-// that mints an *anonymous* Tracked (empty provenance). Paths
-// that subtract two such constants produce the useless
-//   {"op":"sub","in":["_","_"],"prov":[],"cond":9e15,...}
-// records (2397 / 0.73% of the 256-sample journal at 7a5e231).
+// that mints an *anonymous* Tracked (empty id, empty provenance).
+// Paths that subtract two such constants produce useless
+//   {"op":"sub","in":["",""],"prov_consts":[],"cond":9e15,...}
+// records.
 //
 // Fix: mirror the FULL generic Constants<T> interface so no
 // ql:: symbol is lost, but mint each leaf scalar constant via
-// tracked::track("_name", value). Numeric values are copied
+// tracked::constant("name", value). Numeric values are copied
 // verbatim from qcdloop_headers/kokkosMaths.h's generic
 // template (NOT the DD reference, whose eps/coeff values differ)
 // so the tracked build reproduces the untracked spike's numerics
 // bit-for-bit; only the provenance labels are added.
 //
-// track() uses std::string / the journal, so these members are
+// v0.3 note: names are the clean form (pi, half, four, …); the
+// leading-underscore convention of v0.2 was cosmetic and is
+// dropped — v0.3 no library code inspects the name prefix. The
+// ql:: *method* names keep their underscore (_pi()), since that
+// is qcdloop's public Constants API; only the journal label
+// string changed.
+//
+// constant() uses std::string / the journal, so these members are
 // host-only plain-inline (not KOKKOS_INLINE_FUNCTION / constexpr)
 // — fine for the Serial-only spike. _num_C()/_num_B() stay
 // constexpr int: they are loop bounds, carry no value to track.
@@ -153,7 +160,7 @@ struct Constants<tracked::Tracked<T>> {
             0.0000000000000009,
             -0.0000000000000001
         };
-        return tracked::track<T>("_C", T(coeffs[i]));
+        return tracked::constant<T>("C", T(coeffs[i]));
     }
 
     // ---- Bernoulli coefficients for li2series (25 terms) ----
@@ -185,64 +192,64 @@ struct Constants<tracked::Tracked<T>> {
             -1.987010831152385925564820669234786567541858996E-40,
             4.83577851804055089628705937311537820769430091E-42
         };
-        return tracked::track<T>("_B", T(coeffs[i]));
+        return tracked::constant<T>("B", T(coeffs[i]));
     }
 
     // ---- on-shell cutoff (templated to match generic signature) ----
     template <typename TOutput, typename TMass, typename TScale>
     static inline tracked::Tracked<T> _qlonshellcutoff() {
-        return tracked::track<T>("_qlonshellcutoff", T(1e-10));
+        return tracked::constant<T>("qlonshellcutoff", T(1e-10));
     }
 
     // ---- pi family ----
     static inline tracked::Tracked<T> _pi() {
-        return tracked::track<T>("_pi", T(M_PI));
+        return tracked::constant<T>("pi", T(M_PI));
     }
     static inline tracked::Tracked<T> _pi2() {
-        return tracked::track<T>("_pi2", T(M_PI * M_PI));
+        return tracked::constant<T>("pi2", T(M_PI * M_PI));
     }
     template <typename TOutput, typename TMass, typename TScale>
     static inline tracked::Tracked<T> _pio3() {
-        return tracked::track<T>("_pio3", T(M_PI / 3.0));
+        return tracked::constant<T>("pio3", T(M_PI / 3.0));
     }
     template <typename TOutput, typename TMass, typename TScale>
     static inline tracked::Tracked<T> _pio6() {
-        return tracked::track<T>("_pio6", T(M_PI / 6.0));
+        return tracked::constant<T>("pio6", T(M_PI / 6.0));
     }
     template <typename TOutput, typename TMass, typename TScale>
     static inline tracked::Tracked<T> _pi2o3() {
-        return tracked::track<T>("_pi2o3", T(M_PI * (M_PI / 3.0)));
+        return tracked::constant<T>("pi2o3", T(M_PI * (M_PI / 3.0)));
     }
     template <typename TOutput, typename TMass, typename TScale>
     static inline tracked::Tracked<T> _pi2o6() {
-        return tracked::track<T>("_pi2o6", T(M_PI * (M_PI / 6.0)));
+        return tracked::constant<T>("pi2o6", T(M_PI * (M_PI / 6.0)));
     }
     template <typename TOutput, typename TMass, typename TScale>
     static inline tracked::Tracked<T> _pi2o12() {
-        return tracked::track<T>("_pi2o12", T((M_PI * M_PI) / 12.0));
+        return tracked::constant<T>("pi2o12", T((M_PI * M_PI) / 12.0));
     }
 
     // ---- integer / simple-fraction constants ----
-    static inline tracked::Tracked<T> _zero()  { return tracked::track<T>("_zero",  T(0.0));  }
-    static inline tracked::Tracked<T> _half()  { return tracked::track<T>("_half",  T(0.5));  }
-    static inline tracked::Tracked<T> _one()   { return tracked::track<T>("_one",   T(1.0));  }
-    static inline tracked::Tracked<T> _two()   { return tracked::track<T>("_two",   T(2.0));  }
-    static inline tracked::Tracked<T> _three() { return tracked::track<T>("_three", T(3.0));  }
-    static inline tracked::Tracked<T> _four()  { return tracked::track<T>("_four",  T(4.0));  }
-    static inline tracked::Tracked<T> _five()  { return tracked::track<T>("_five",  T(5.0));  }
-    static inline tracked::Tracked<T> _six()   { return tracked::track<T>("_six",   T(6.0));  }
-    static inline tracked::Tracked<T> _ten()   { return tracked::track<T>("_ten",   T(10.0)); }
+    static inline tracked::Tracked<T> _zero()  { return tracked::constant<T>("zero",  T(0.0));  }
+    static inline tracked::Tracked<T> _half()  { return tracked::constant<T>("half",  T(0.5));  }
+    static inline tracked::Tracked<T> _one()   { return tracked::constant<T>("one",   T(1.0));  }
+    static inline tracked::Tracked<T> _two()   { return tracked::constant<T>("two",   T(2.0));  }
+    static inline tracked::Tracked<T> _three() { return tracked::constant<T>("three", T(3.0));  }
+    static inline tracked::Tracked<T> _four()  { return tracked::constant<T>("four",  T(4.0));  }
+    static inline tracked::Tracked<T> _five()  { return tracked::constant<T>("five",  T(5.0));  }
+    static inline tracked::Tracked<T> _six()   { return tracked::constant<T>("six",   T(6.0));  }
+    static inline tracked::Tracked<T> _ten()   { return tracked::constant<T>("ten",   T(10.0)); }
 
     // ---- epsilon / tolerance constants ----
-    static inline tracked::Tracked<T> _eps()    { return tracked::track<T>("_eps",    T(1e-6));  }
-    static inline tracked::Tracked<T> _eps4()   { return tracked::track<T>("_eps4",   T(1e-4));  }
-    static inline tracked::Tracked<T> _eps7()   { return tracked::track<T>("_eps7",   T(1e-7));  }
-    static inline tracked::Tracked<T> _eps10()  { return tracked::track<T>("_eps10",  T(1e-10)); }
-    static inline tracked::Tracked<T> _eps14()  { return tracked::track<T>("_eps14",  T(1e-14)); }
-    static inline tracked::Tracked<T> _eps15()  { return tracked::track<T>("_eps15",  T(1e-15)); }
-    static inline tracked::Tracked<T> _xloss()  { return tracked::track<T>("_xloss",  T(0.125)); }
-    static inline tracked::Tracked<T> _neglig() { return tracked::track<T>("_neglig", T(1e-14)); }
-    static inline tracked::Tracked<T> _reps()   { return tracked::track<T>("_reps",   T(1e-16)); }
+    static inline tracked::Tracked<T> _eps()    { return tracked::constant<T>("eps",    T(1e-6));  }
+    static inline tracked::Tracked<T> _eps4()   { return tracked::constant<T>("eps4",   T(1e-4));  }
+    static inline tracked::Tracked<T> _eps7()   { return tracked::constant<T>("eps7",   T(1e-7));  }
+    static inline tracked::Tracked<T> _eps10()  { return tracked::constant<T>("eps10",  T(1e-10)); }
+    static inline tracked::Tracked<T> _eps14()  { return tracked::constant<T>("eps14",  T(1e-14)); }
+    static inline tracked::Tracked<T> _eps15()  { return tracked::constant<T>("eps15",  T(1e-15)); }
+    static inline tracked::Tracked<T> _xloss()  { return tracked::constant<T>("xloss",  T(0.125)); }
+    static inline tracked::Tracked<T> _neglig() { return tracked::constant<T>("neglig", T(1e-14)); }
+    static inline tracked::Tracked<T> _reps()   { return tracked::constant<T>("reps",   T(1e-16)); }
 
     // ---- complex composites (verbatim from generic; the scalar
     //      constants they build from are now named via the above) ----
