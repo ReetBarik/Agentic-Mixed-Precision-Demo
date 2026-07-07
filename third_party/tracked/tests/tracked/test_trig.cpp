@@ -124,11 +124,11 @@ TEST_CASE("atan2: cond capped at 1/u when atan2 < u") {
     REQUIRE(rec.cond == Approx(1.0 / u).epsilon(1e-6));
 }
 
-TEST_CASE("atan2: provenance is union of y and x") {
+TEST_CASE("atan2: prov_vars is union of y and x") {
     auto y = track("y", 1.0);
     auto x = track("x", 1.0);
     auto r = tracked::atan2(y, x);
-    REQUIRE(r.provenance_ == (std::set<std::string>{"x", "y"}));
+    REQUIRE(r.prov_vars_ == (std::set<std::string>{"x", "y"}));
 }
 
 TEST_CASE("atan2: in field carries both input primary ids") {

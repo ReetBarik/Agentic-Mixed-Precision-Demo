@@ -20,26 +20,65 @@ higher-precision number type.
 #include <tracked/journal.hpp>
 
 using tracked::track;
+using tracked::constant;
 
 int main() {
-    auto a = track("a", 1.0 + 1e-12);
-    auto b = track("b", 1.0);
+    auto a  = track("a", 1.0 + 1e-12);    // source variable  → prov_vars
+    auto b  = track("b", 1.0);            // source variable  → prov_vars
+    auto pi = constant("pi", 3.14159);    // named constant    → prov_consts
+
     auto d = a - b;                       // catastrophic cancellation
-    // d.value() ≈ 1e-12, but d.max_cond_seen() is huge → accuracy warning
+    // d.value() ≈ 1e-12, but d.max_cond() is huge → accuracy warning
 
     tracked::journal::flush("run.jsonl"); // one JSONL record per op
 }
 ```
 
-Each journal record looks like:
+Two factories, two provenance categories: `track()` introduces a **source
+variable** (an attribution root), `constant()` introduces a **named constant**
+(recorded for audit, but never reported as the origin of a value). See
+[docs/PROVENANCE.md](docs/PROVENANCE.md).
+
+Each journal record (schema **v0.3**) looks like:
 
 ```json
-{"op":"sub","at":"main.cpp:main:8","in":["a","b"],
- "val":1e-12,"cond":2e12,"rel_err":2.2e-4,"prov":["a","b"]}
+{"op":"sub","at":"main.cpp:main:10","id":"sub@main.cpp:10#1",
+ "in":["a","b"],"val":1e-12,"cond":2e12,"rel_err":2.2e-4,
+ "prov_vars":["a","b"],"prov_consts":[]}
 ```
 
-`cond` is the local condition number of the op; bits lost ≈ `log2(cond)`,
-decimal digits lost ≈ `log10(cond)`.
+Every value carries a stable `id`; `in` lists the **ids of the direct
+operands** verbatim, so the journal is a walkable DAG. `cond` is the local
+condition number of the op; bits lost ≈ `log2(cond)`, decimal digits lost ≈
+`log10(cond)`.
+
+## Provenance and attribution
+
+Every `Tracked` value has a stable `TrackedId`: source variables and constants
+use their given name; derived values get `<op>@<file>:<line>#<counter>[@<scope>]`.
+Because `in` records operand ids directly, the library can answer attribution
+questions by walking the graph:
+
+```cpp
+namespace tracked::journal {
+  std::vector<std::string> parents(std::string_view id);        // direct operands
+  std::set<std::string>    trace_sources(std::string_view id);  // variable roots that fed it
+  std::vector<std::string> trace_ancestors(std::string_view id);// full causal order
+}
+```
+
+Optionally scope generated ids with an RAII helper — handy for per-sample or
+per-iteration attribution:
+
+```cpp
+for (int s = 0; s < N; ++s) {
+    tracked::scope samp("sample=" + std::to_string(s));   // ids get "@sample=<s>"
+    ...
+}
+```
+
+Full design rationale, the id scheme, scope semantics, the graph model, and
+migration notes from v0.2 are in [docs/PROVENANCE.md](docs/PROVENANCE.md).
 
 ## Build & test
 
@@ -55,26 +94,33 @@ cd build && ctest --output-on-failure
 ## What's included
 
 - **`include/tracked/`** — the library:
-  - `tracked.hpp` — `Tracked<T>`, `track()`, `opaque()`, arithmetic.
+  - `tracked.hpp` — `Tracked<T>`, `track()`, `constant()`, `scope`, `opaque()`,
+    arithmetic.
   - `ops.hpp` — `sqrt`, `exp`, `log`, `abs`, `sin`, `cos`, `atan2` with
     per-op condition numbers.
   - `complex.hpp` — `tracked::Complex<T>`, full complex math decomposed into
     real ops so each is visible in the journal.
-  - `journal.hpp` — the JSONL journal (`tracked::journal` namespace).
+  - `journal.hpp` — the JSONL journal and graph-walk helpers
+    (`tracked::journal` namespace).
 - **`tests/tracked/`** — Catch2 calibration suite: each test drives a known
   numerical pathology and asserts `Tracked<T>` surfaces it.
 - **`examples/complex_log_micro/`** — optional Kokkos-based micro-driver
   demonstrating the **opaque-barrier** pattern for kernels that call framework
   math you can't see into. Not built by the top-level CMake; see its README.
-- **`docs/`** — design records (`PLAN.md`, `PLAN-v1.1.md`) and
-  `CONDITION_NUMBERS.md` (full derivations of every per-op condition number,
-  the error-propagation model, and the numerical-analysis references).
+- **`docs/`** — design records (`PLAN.md`, `PLAN-v1.1.md`, `PLAN-v0.3.md`),
+  `PROVENANCE.md` (the v0.3 provenance model), and `CONDITION_NUMBERS.md` (full
+  derivations of every per-op condition number, the error-propagation model, and
+  the numerical-analysis references).
 
 ## Key ideas
 
 - **Condition number is the only signal.** The library doesn't hardcode a
   "too unstable" threshold — consumers apply their own based on their precision
   needs.
+- **Provenance is two categories, not one flat set.** `track()` seeds
+  `prov_vars` (attribution roots); `constant()` seeds `prov_consts` (audit-only).
+  Every value has a stable `id`, and `in` records operand ids directly, so
+  attribution is a graph walk (`trace_sources`), not a heuristic guess.
 - **Error model** (first-order):
   `new_rel_err = local_cond · (max(input_rel_errs) + unit_roundoff<T>())`,
   with `unit_roundoff<double>() = 2⁻⁵³ ≈ 1.11e-16`.

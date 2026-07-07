@@ -176,32 +176,35 @@ TEST_CASE("max_cond_seen accumulates across a chain of ops") {
 // Provenance
 // ============================================================
 
-TEST_CASE("track: sets provenance to given id") {
+TEST_CASE("track: sets id and prov_vars to given name") {
     auto a = track("alpha", 1.0);
-    REQUIRE(a.provenance_ == std::set<std::string>{"alpha"});
+    REQUIRE(a.id_ == "alpha");
+    REQUIRE(a.prov_vars_ == std::set<std::string>{"alpha"});
+    REQUIRE(a.prov_consts_.empty());
 }
 
-TEST_CASE("binary op: provenance is union of inputs") {
+TEST_CASE("binary op: prov_vars is union of inputs") {
     auto a = track("a", 1.0);
     auto b = track("b", 2.0);
     auto r = a + b;
-    REQUIRE(r.provenance_ == (std::set<std::string>{"a", "b"}));
+    REQUIRE(r.prov_vars_ == (std::set<std::string>{"a", "b"}));
 }
 
-TEST_CASE("chain: provenance accumulates transitively") {
+TEST_CASE("chain: prov_vars accumulates transitively") {
     auto a = track("a", 1.0);
     auto b = track("b", 2.0);
     auto c = track("c", 3.0);
     auto r = (a + b) * c;
-    REQUIRE(r.provenance_ == (std::set<std::string>{"a", "b", "c"}));
+    REQUIRE(r.prov_vars_ == (std::set<std::string>{"a", "b", "c"}));
 }
 
-TEST_CASE("log record prov field matches result provenance") {
+TEST_CASE("log record prov_vars field matches result provenance") {
     auto a = track("x", 2.0);
     auto b = track("y", 3.0);
     auto rec = SINGLE_OP(add(a, b, TRACKED_HERE));
-    REQUIRE(std::set<std::string>(rec.prov.begin(), rec.prov.end())
+    REQUIRE(std::set<std::string>(rec.prov_vars.begin(), rec.prov_vars.end())
             == (std::set<std::string>{"x", "y"}));
+    REQUIRE(rec.prov_consts.empty());
 }
 
 // ============================================================
@@ -237,9 +240,15 @@ TEST_CASE("opaque: emits barrier record with op=opaque") {
     REQUIRE(records()[0].in == std::vector<std::string>{"external_fn"});
 }
 
-TEST_CASE("opaque: result carries fn_name as provenance") {
+TEST_CASE("opaque: fn_name is a boundary marker in 'in', not provenance") {
+    // v0.3: the fn_name marker is neither a source variable nor a named
+    // constant, so it stays out of prov_vars/prov_consts (retiring v0.2, which
+    // folded it into provenance). It survives as the leading entry of `in`.
+    clear();
     auto r = tracked::opaque("ext", 1.0);
-    REQUIRE(r.provenance_ == std::set<std::string>{"ext"});
+    REQUIRE(records().back().in == std::vector<std::string>{"ext"});
+    REQUIRE(r.prov_vars_.empty());
+    REQUIRE(r.prov_consts_.empty());
 }
 
 TEST_CASE("opaque_at with TRACKED_HERE: location captured") {
@@ -281,12 +290,16 @@ TEST_CASE("opaque with tracked inputs: rel_err propagates from max input") {
     REQUIRE(records()[0].rel_err == Approx(cancel.rel_err_bound_ + tracked::unit_roundoff<double>()));
 }
 
-TEST_CASE("opaque with tracked inputs: provenance is union(inputs) U {fn_name}") {
+TEST_CASE("opaque with tracked inputs: prov_vars is union(inputs); fn_name leads 'in'") {
     clear();
     auto a = track("a", 1.0);
     auto b = track("b", 2.0);
     auto r = tracked::opaque("my_fn", 99.0, a, b);
-    REQUIRE(r.provenance_ == std::set<std::string>{"a", "b", "my_fn"});
+    // Provenance is the forwarded inputs only — fn_name is a marker, not a var.
+    REQUIRE(r.prov_vars_ == (std::set<std::string>{"a", "b"}));
+    REQUIRE(r.prov_consts_.empty());
+    // `in` = [fn_name, input_ids...] so the value graph stays traversable.
+    REQUIRE(records().back().in == (std::vector<std::string>{"my_fn", "a", "b"}));
 }
 
 // ============================================================
