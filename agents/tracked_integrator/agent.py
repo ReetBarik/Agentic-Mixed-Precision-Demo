@@ -128,7 +128,7 @@ Output: a single header file containing:
     PENDING with the actual sha256 after generation)
   - Rule-justification comments on every generated element
 
-Tracked-API classification rules C1-C6 (permanent; apply on equal footing with \
+Tracked-API classification rules C1-C7 (permanent; apply on equal footing with \
 Rules 1-9):
 
 These are not target-specific workarounds — each follows from a property of the \
@@ -167,7 +167,17 @@ C3. Missing operators. If a target-library template applies an operator to a \
   tracked value that the Tracked type does not define (e.g. unary `operator+` \
   on a tracked scalar), add that operator as a free function in the Tracked \
   library's namespace (found by ADL) rather than editing the Tracked library. \
-  An identity operator introduces no rounding and should emit no journal record.
+  An identity operator introduces no rounding and should emit no journal record. \
+  Scope by STATIC INSTANTIATION, not by run-time path: the operators (and, more \
+  generally, the overloads) you must supply are those applied ANYWHERE in the \
+  statically-instantiated call graph of the driver's calls — NOT only along the \
+  branch the driver's specific inputs happen to select at run time. A dispatcher \
+  template that routes to sub-cases by kinematics/flags/values instantiates EVERY \
+  branch at compile time regardless of the driver's data, so an operator or \
+  overload used in any branch MUST be provided even if this driver's inputs never \
+  reach that branch at run time. Never omit an overload with reasoning like "the \
+  path we exercise doesn't need it" — if the translation unit compiles the \
+  branch, you must shim what that branch uses.
 
 C4. Execution-space annotation follows the DRIVER (clarifies Rule 8). Choose \
   the annotation from how the DRIVER dispatches the shimmed calls, not from \
@@ -191,7 +201,11 @@ C5. Specializing a class template the target library owns (clarifies Rule 5). \
   interface of the library's primary template (every accessor the driver's call \
   graph can reach), routing each named leaf scalar through \
   `tracked::constant("<name>", T(value))` so no library symbol is lost and \
-  every constant keeps its name in the journal.
+  every constant keeps its name in the journal. (This rule governs CLASS \
+  templates, where partial SPECIALIZATION on the tracked scalar is the \
+  mechanism. For FUNCTION templates that shadow a library primary of the same \
+  name, see C7 — partial ORDERING, not partial specialization, is what makes \
+  your overload win.)
 
 C6. Discrete vs floating-point is decided by USE, not by name (disambiguates \
   Rules 1 vs 2). Before returning a raw int/bool under Rule 1, check how the \
@@ -205,6 +219,50 @@ C6. Discrete vs floating-point is decided by USE, not by name (disambiguates \
   counts, or branch/boolean conditions (e.g. a zero-test used solely inside an \
   `if`). Apply the test per overload: a complex sign used as `z / |z|` returns \
   the tracked complex container (Rule 3).
+
+C7. Outrank a library's OWN same-named function template via partial ordering \
+  (clarifies Rules 2/3/8; the function-template counterpart of C5). When the \
+  target library declares its OWN function template of a name your shim must \
+  override — so a qualified `<lib>::foo<...>(x)` call at the library's own \
+  definition sites resolves to your tracked overload rather than the library's \
+  generic one — every shim overload MUST be STRICTLY MORE SPECIALIZED than that \
+  library primary under C++ overload partial ordering. Achieve this by \
+  constraining the VALUE parameter to the concrete tracked type \
+  (`const tracked::Tracked<T>&` / `const tracked::Complex<T>&`), while carrying \
+  whatever LEADING explicit template parameters the call site names — mirror the \
+  primary's leading explicit-parameter arity exactly, e.g. for a library \
+  `template <class TOutput, class TMass, class TScale> R foo(TMass const&, ...)` \
+  emit `template <class TOutput, class TMass, class TScale, class T> \
+  tracked::Tracked<T> foo(const tracked::Tracked<T>&, ...)`. A concrete tracked \
+  value parameter is more specialized than the library's bare template parameter, \
+  so partial ordering picks your overload unambiguously. NEVER introduce a \
+  catch-all forwarder `template <..., class Base> foo(const Base&, ...)`: a bare \
+  template type parameter in the value position is NOT more specialized than the \
+  library's own generic parameter — the two tie under partial ordering and EVERY \
+  qualified call becomes ambiguous ("call of overloaded ... is ambiguous"). \
+  Provide one constrained overload per concrete tracked argument shape (scalar, \
+  complex) instead. Critically, the SAME constrained overload must serve BOTH \
+  the library's qualified `foo<A,B,C>(x)` call sites AND any unqualified `foo(x)` \
+  sites: carry the leading explicit parameters ON the constrained overload (they \
+  may go unused in the body) so an explicit-argument call binds to it directly. \
+  Do NOT emit a deduced-only pair plus a separate forwarder — that forwarder IS \
+  the catch-all this rule forbids. \
+  WRONG (deduced pair + `Base` forwarder; the forwarder ties with the library \
+  primary): `template <class T> Tracked<T> foo(const Tracked<T>&, const int&);` \
+  and `template <class TOutput,class TMass,class TScale,class Base> auto \
+  foo(const Base&, const int&) -> decltype(foo(...));`  // AMBIGUOUS. \
+  RIGHT (each constrained overload itself carries the leading explicit params; no \
+  forwarder): `template <class TOutput,class TMass,class TScale,class T> \
+  tracked::Tracked<T> foo(const tracked::Tracked<T>&, const int&);` and the \
+  matching `tracked::Complex<T>` overload. \
+  Root cause you must internalize: a deduced-only `template <class T> foo(const \
+  tracked::Tracked<T>&, ...)` overload has ONE template parameter, so a qualified \
+  `foo<A,B,C>(x)` call supplying THREE explicit arguments cannot select it (too \
+  many explicit args) — the call then falls through to the library primary, \
+  silently losing journaling; the reflex "add a forwarder to accept the 3 explicit \
+  args" reintroduces the ambiguity. The ONLY correct shape is to put the leading \
+  explicit parameters directly on each concrete-typed overload so the qualified \
+  call binds to it AND it outranks the primary by partial ordering.
 """
 
 # Max output tokens for the generation call.  The reference B13 shim is ~480
@@ -288,7 +346,7 @@ def integrate(
             f"target_library_headers is not a directory: {headers_dir}"
         )
 
-    source_hash = _hash_header_dir(headers_dir)
+    source_hash = _compute_source_hash(headers_dir)
 
     resolved_app_name = app_name or _derive_app_name(headers_dir)
 
@@ -567,6 +625,33 @@ def _apply_source_hash(text: str, source_hash: str) -> str:
 # ---------------------------------------------------------------------------
 # Internal helpers
 # ---------------------------------------------------------------------------
+
+def _ruleset_hash() -> str:
+    """SHA-256 of the LLM system prompt (the classification rule set).
+
+    Folded into the shim's ``SOURCE_HASH`` so that a rule refinement (adding C8,
+    tightening C7, etc.) invalidates every cached shim automatically.  Without
+    this, a shim cached against an unchanged target-header tree would be reused
+    verbatim even after the rules that generated it changed — silently serving a
+    stale shim across a whole Stage-2 sweep and defeating any re-validation.
+    """
+    return hashlib.sha256(_SYSTEM_PROMPT.encode("utf-8")).hexdigest()
+
+
+def _compute_source_hash(headers_dir: Path) -> str:
+    """The shim's staleness key: target headers AND the rule-set version.
+
+    Combining both means the cache hits only when BOTH the target library's
+    headers and the generating rule set are unchanged.  A change to either forces
+    regeneration, so ``existing_shim=None`` first-time integrations and rule
+    refinements both invalidate correctly.
+    """
+    h = hashlib.sha256()
+    h.update(_hash_header_dir(headers_dir).encode("utf-8"))
+    h.update(b"\0")
+    h.update(_ruleset_hash().encode("utf-8"))
+    return h.hexdigest()
+
 
 def _hash_header_dir(headers_dir: Path) -> str:
     """SHA-256 over the header files under ``headers_dir`` (recursive).
