@@ -29,7 +29,6 @@ from __future__ import annotations
 
 import difflib
 import hashlib
-import json
 import re
 from pathlib import Path
 
@@ -129,10 +128,6 @@ Output: a single header file containing:
   - A `// SOURCE_HASH: PENDING` placeholder line (the caller replaces \
     PENDING with the actual sha256 after generation)
   - Rule-justification comments on every generated element
-
-Then — after the complete header — the C8 patch section: the sentinel line \
-`===C8PATCH===` followed by a single JSON array of library-patch records (or `[]` \
-if there are none), exactly as specified in rule C8. Emit nothing after the JSON.
 
 Tracked-API classification rules C1-C7 (permanent; apply on equal footing with \
 Rules 1-9):
@@ -269,56 +264,6 @@ C7. Outrank a library's OWN same-named function template via partial ordering \
   args" reintroduces the ambiguity. The ONLY correct shape is to put the leading \
   explicit parameters directly on each concrete-typed overload so the qualified \
   call binds to it AND it outranks the primary by partial ordering.
-
-C8. Type-boundary annotations (library patch). Some target libraries contain, in \
-  their OWN source, an int/bool <-> tracked crossing that a free-function shim \
-  cannot bridge, because the Tracked scalar has an EXPLICIT scalar constructor and \
-  defines no `operator int` / `operator bool` conversion (discover both from the \
-  provided Tracked API headers). Three crossing patterns arise: \
-    (a) a tracked scalar value assigned to (or used to initialize) an int/bool \
-        lvalue in library code; \
-    (b) an int/bool expression passed where a tracked scalar (by value or \
-        `const&`) is expected, or bound to a tracked reference / temporary; \
-    (c) a tracked scalar compared (`==` / `!=`) against an integer or boolean \
-        LITERAL. \
-  Do NOT work around these in the shim and do NOT change the Tracked API. Instead \
-  emit a LIBRARY PATCH that makes each crossing explicit with an annotation that \
-  is a NO-OP when the tracked scalar is a plain scalar (its underlying real type, \
-  e.g. `double`) and a transparent boundary marker under the tracked build: \
-    (a) wrap the tracked expression in `.value()`, plus `static_cast<int>( ... )` \
-        (or the matching integral type) when the lvalue is integral; \
-    (b) wrap the int/bool argument in the tracked scalar's explicit constructor \
-        (`tracked::Tracked<T>( ... )`, spelled with whatever alias the library \
-        uses for that type) at the call / bind site; \
-    (c) rewrite `<tracked> == <intlit>` as `<tracked>.value() == <matching \
-        floating literal>` (e.g. `== 0` becomes `.value() == 0.0`). \
-  These annotations preserve exact semantics — the crossed values are discrete \
-  branch tags with no rounding to track — while keeping every tracked<->discrete \
-  transition visible in the source. Do NOT instead add a hidden conversion \
-  operator or a broad `operator==(tracked, int)`: that would silently re-enable \
-  int<->tracked mixing everywhere and erase the type discipline the Tracked \
-  datatype exists to provide. Scope by STATIC INSTANTIATION exactly as C3: patch \
-  every crossing in any branch the translation unit compiles, not only the \
-  run-time path this driver's inputs happen to take. \
-  OUTPUT MECHANISM: emit the shim header FIRST, then on its own line the sentinel \
-  `===C8PATCH===`, then a SINGLE JSON array of patch records and nothing after it. \
-  Each record is an object: \
-    {"file": "<library header path relative to the target library header root, \
-       e.g. <subdir>/<Header>.h>", \
-     "pattern": "a" | "b" | "c", \
-     "original": "<exact source substring to replace, copied VERBATIM from that \
-       header>", \
-     "replacement": "<the annotated substring>", \
-     "rule": "<one-line justification, e.g. C8(a) tracked->int assignment>"}. \
-  The `original` string MUST occur EXACTLY ONCE in its file — include the whole \
-  statement, and the preceding line as well if needed, so it is unique BY \
-  CONSTRUCTION (the caller HARD-FAILS if it matches zero or multiple times). Emit \
-  NO line numbers and NO hunk headers; the caller synthesizes the unified diff \
-  deterministically from `original`/`replacement`. If the target library has no \
-  such crossing, emit `===C8PATCH===` followed by `[]`. If a crossing does not fit \
-  pattern (a), (b), or (c), do NOT invent a patch: emit, in the shim body, \
-  `#error "C8_UNCLASSIFIED_BOUNDARY: <site>"` (a hard build failure, like Rule 9) \
-  and omit that site from the JSON array.
 """
 
 # Max output tokens for the generation call.  The reference B13 shim is ~480
@@ -343,19 +288,6 @@ _SOURCE_HASH_RE = re.compile(r"//\s*SOURCE_HASH:\s*(\S+)")
 # Written verbatim by Part 1; Part 2's post-processing replaces PENDING with the
 # real hash.  The scaffold writes the real hash directly (no LLM round-trip).
 _SOURCE_HASH_PENDING = "PENDING"
-
-# C8 (type-boundary library patch).  The LLM emits the shim, then this sentinel on
-# its own line, then a JSON array of patch records (see rule C8 in the system
-# prompt).  The sentinel is an in-transit delimiter only — it is split off here and
-# never written into either on-disk artifact.
-_C8_SENTINEL = "===C8PATCH==="
-
-# sha256 of the emitted <app>.patch, stamped into the shim so patch tampering or
-# deletion invalidates the cache (a shim keyed only on the header/rule hash would
-# otherwise be reused even after its companion patch was changed or removed).
-# "NONE" means the target had no boundary sites and no patch file exists.
-_PATCH_HASH_RE = re.compile(r"//\s*PATCH_HASH:\s*(\S+)")
-_PATCH_HASH_NONE = "NONE"
 
 
 def integrate(
@@ -429,17 +361,11 @@ def integrate(
         shim_path = driver_path.parent / f"{resolved_app_name}_interop.hpp"
 
     # Staleness check: an existing shim whose embedded hash matches the current
-    # header contents is up to date — return it without rewriting.  The check now
-    # also validates the companion C8 patch (if the shim declares one): a matching
-    # SOURCE_HASH but a missing/edited patch is treated as stale so the build never
-    # applies a patch inconsistent with the shim that declared it.
+    # header contents is up to date — return it without rewriting.
     cache_candidate = Path(existing_shim).resolve() if existing_shim is not None else shim_path
     if cache_candidate.exists():
-        cached_text = cache_candidate.read_text(encoding="utf-8")
-        cached_hash = _extract_source_hash(cached_text)
-        if cached_hash == source_hash and _patch_cache_valid(
-            cached_text, cache_candidate, resolved_app_name
-        ):
+        cached_hash = _extract_source_hash(cache_candidate.read_text(encoding="utf-8"))
+        if cached_hash == source_hash:
             return cache_candidate
 
     # (Re)generate.  With a cfg we drive the LLM; without one (scaffold /
@@ -447,11 +373,8 @@ def integrate(
     # benign placeholder so callers that don't wire up an LLM still get a
     # compilable no-op shim with a valid SOURCE_HASH.
     shim_path.parent.mkdir(parents=True, exist_ok=True)
-    patch_path = shim_path.with_name(f"{resolved_app_name}.patch")
     if cfg is None:
         shim_text = _render_placeholder(resolved_app_name, source_hash)
-        shim_text = _apply_patch_hash(shim_text, _PATCH_HASH_NONE)
-        _remove_if_exists(patch_path)
     else:
         raw = _generate_shim(
             headers_dir=headers_dir,
@@ -461,29 +384,9 @@ def integrate(
             app_name=resolved_app_name,
             cfg=cfg,
         )
-        # Split the single LLM response into the shim header and the C8 patch
-        # records (the `===C8PATCH===` sentinel is only an in-transit delimiter).
-        shim_raw, records = _split_llm_response(raw)
-        shim_text = _strip_code_fences(shim_raw)
-
-        # Synthesize the library patch (deterministic unified diff) from the
-        # records, if any.  git-apply-able paths are relative to the repo root.
-        repo_root = _find_repo_root(headers_dir) or headers_dir
-        patch_text = _synthesize_patch(records, headers_dir, repo_root)
-
         # Post-process: the model emits `// SOURCE_HASH: PENDING`; stamp the real
-        # hash (step 4 of the spec), then stamp the patch hash so patch changes
-        # invalidate the cache.
-        shim_text = _apply_source_hash(shim_text, source_hash)
-        if patch_text is not None:
-            patch_bytes = patch_text.encode("utf-8")
-            shim_text = _apply_patch_hash(
-                shim_text, hashlib.sha256(patch_bytes).hexdigest()
-            )
-            patch_path.write_bytes(patch_bytes)
-        else:
-            shim_text = _apply_patch_hash(shim_text, _PATCH_HASH_NONE)
-            _remove_if_exists(patch_path)
+        # hash computed above (step 4 of the spec).
+        shim_text = _apply_source_hash(raw, source_hash)
 
     shim_path.write_text(shim_text, encoding="utf-8")
     return shim_path
@@ -533,9 +436,7 @@ def _generate_shim(
     ).strip()
     if not text:
         raise RuntimeError("tracked_integrator: LLM returned no text content")
-    # Return the raw response; the caller splits off the C8 patch section (on the
-    # `===C8PATCH===` sentinel) and strips code fences from the shim part.
-    return text
+    return _strip_code_fences(text)
 
 
 def _build_user_message(
@@ -608,15 +509,11 @@ def _build_user_message(
     # --- Output contract ---
     parts.append(
         f"## Output\n"
-        f"Emit the complete contents of `{app_name}_interop.hpp` — no prose, no "
-        f"markdown fences. Include a `// SOURCE_HASH: PENDING` line near the top; "
-        f"the caller replaces PENDING with the real hash. Every generated "
-        f"overload, specialization, and annotation must carry a comment naming "
-        f"the rule that justified it.\n"
-        f"Then, on its own line, emit the sentinel `===C8PATCH===` followed by a "
-        f"single JSON array of C8 library-patch records (or `[]` if the library "
-        f"has no int/bool<->tracked crossing), exactly as specified in rule C8. "
-        f"Emit nothing after the JSON array."
+        f"Emit ONLY the complete contents of `{app_name}_interop.hpp` — no "
+        f"prose, no markdown fences. Include a `// SOURCE_HASH: PENDING` line "
+        f"near the top; the caller replaces PENDING with the real hash. Every "
+        f"generated overload, specialization, and annotation must carry a "
+        f"comment naming the rule that justified it."
     )
     return "\n".join(parts)
 
@@ -726,90 +623,352 @@ def _apply_source_hash(text: str, source_hash: str) -> str:
     return "\n".join(lines) + ("\n" if text.endswith("\n") else "")
 
 
-# ---------------------------------------------------------------------------
-# C8 library-patch synthesis (Part 2, type-boundary annotations)
-# ---------------------------------------------------------------------------
+# ===========================================================================
+# C8 — type-boundary annotations (deterministic, compiler-error-driven)
+# ===========================================================================
+#
+# Some target libraries contain, in their OWN source, int<->tracked crossings
+# that a free-function shim cannot bridge (the tracked scalar has an EXPLICIT
+# scalar ctor and no operator int/bool).  Rather than ask the LLM to hunt for
+# these, we let the compiler find them: build the shimmed target once, and map
+# the resulting int<->tracked diagnostics to source annotations.  The compiler
+# is a perfect, reproducible detector — it names the exact site and crossing
+# type — so the mapping is pure Python (no LLM, no shim-cache coupling).  Three
+# recognized crossing patterns, each a mechanical rewrite:
+#
+#   (a) tracked value assigned to an int/bool lvalue
+#         -> wrap the RHS: `X = static_cast<int>((RHS).value())`
+#   (b) an int/bool bound where a tracked scalar (const&) is expected
+#         -> wrap the argument: `<TrackedType>(arg)`
+#   (c) a tracked value compared to an integer/boolean literal
+#         -> `.value()` on the tracked operand
+#
+# An int<->tracked-flavored diagnostic that fits none of the three is a hard
+# failure (C8_UNCLASSIFIED_ERROR) surfaced for human review — the same
+# ambiguity-surfacing discipline as the LLM ruleset's UNCLASSIFIED escape hatch.
 
-def _split_llm_response(text: str) -> tuple[str, list[dict]]:
-    """Split the raw LLM response into (shim text, C8 patch records).
+# gcc renders identifiers in ‘curly’ quotes; accept those and straight quotes.
+_Q = "[‘’'\"`]"
+_C8_ERR_RE = re.compile(r"^(.*?):(\d+):(\d+): error: (.*)$")
+_C8_TRACKED_RE = re.compile(r"tracked::Tracked<")
+_C8_ASSIGN_RE = re.compile(
+    r"cannot convert " + _Q + r"tracked::Tracked<.*?>" + _Q
+    + r" to " + _Q + r"(?:int|bool|unsigned int|long|size_t)" + _Q
+    + r" in (?:assignment|initialization)"
+)
+_C8_REFBIND_RE = re.compile(
+    r"invalid initialization of reference of type " + _Q
+    + r"const (tracked::Tracked<.*?>)\s*&" + _Q
+    + r" from expression of type " + _Q + r"(?:int|bool|unsigned int|long|size_t)" + _Q
+)
+_C8_NOEQ_RE = re.compile(
+    r"no match for " + _Q + r"operator(==|!=)" + _Q
+    + r" \(operand types are " + _Q + r"(.*?)" + _Q + r" and " + _Q + r"(.*?)" + _Q + r"\)"
+)
+_C8_ARGNOTE_RE = re.compile(r"in passing argument (\d+) of\b.*?([A-Za-z_][\w:]*)\s*\(")
+# an assignment '=' that is not ==, <=, >=, !=, +=, etc.
+_C8_ASSIGN_EQ_RE = re.compile(r"(?<![=<>!+\-*/%&|^~])=(?![=])")
 
-    The response is ``<shim>`` then, optionally, the ``===C8PATCH===`` sentinel
-    followed by a JSON array of patch records.  A response without the sentinel
-    (older prompts / a model that emitted no C8 section) yields no records.
+
+def derive_c8_patch(compile_stderr: str, headers_dir, repo_root) -> str | None:
+    """Map int<->tracked compile diagnostics to a git-apply-able library patch.
+
+    Parses ``compile_stderr`` for the three recognized int<->tracked crossing
+    patterns (C8 a/b/c) at sites INSIDE ``headers_dir``, turns each into an exact
+    source edit, and synthesizes a unified diff via :func:`_synthesize_patch`
+    (``a/``,``b/`` labels relative to ``repo_root``).
+
+    Returns ``None`` when the diagnostics contain no int<->tracked crossing at
+    all (a genuine, non-C8 build failure).  Raises ``RuntimeError`` prefixed
+    ``C8_UNCLASSIFIED_ERROR`` for an int<->tracked-flavored diagnostic that fits
+    none of the three patterns — surfacing it for review rather than guessing.
     """
-    if _C8_SENTINEL not in text:
-        return text, []
-    shim_part, _, patch_part = text.partition(_C8_SENTINEL)
-    return shim_part, _parse_patch_records(patch_part)
+    headers_dir = Path(headers_dir).resolve()
+    repo_root = Path(repo_root).resolve()
+    records = _parse_c8_errors(compile_stderr, headers_dir)
+    if not records:
+        return None
+    return _synthesize_patch(records, headers_dir, repo_root)
 
 
-def _parse_patch_records(patch_part: str) -> list[dict]:
-    """Parse the JSON array following the ``===C8PATCH===`` sentinel.
+def _parse_c8_errors(stderr: str, headers_dir: Path) -> list[dict]:
+    """Classify int<->tracked diagnostics into deduplicated C8 edit records."""
+    records: list[dict] = []
+    unclassified: list[str] = []
+    seen: set[tuple] = set()
 
-    A bare ``[]`` (or an empty section) means "no boundary sites".  Malformed
-    JSON is a hard error — the C8 contract is machine-readable by design, so a
-    parse failure surfaces the ambiguity rather than silently dropping patches.
-    """
-    body = _strip_code_fences(patch_part.strip())
-    if not body:
-        return []
-    try:
-        data = json.loads(body)
-    except json.JSONDecodeError as exc:
+    for block in _iter_error_blocks(stderr):
+        try:
+            target = Path(block["file"]).resolve()
+        except (OSError, ValueError):
+            continue
+        # Only crossings inside the library we may patch are C8's concern.
+        if not _is_within(target, headers_dir):
+            continue
+
+        rec = None
+        if _C8_ASSIGN_RE.search(block["msg"]):
+            rec = _map_assign(block, headers_dir)
+        elif _C8_REFBIND_RE.search(block["msg"]):
+            rec = _map_refbind(block, headers_dir)
+        elif _C8_NOEQ_RE.search(block["msg"]):
+            rec = _map_noeq(block, headers_dir)
+        elif _is_int_tracked_flavored(block["msg"]):
+            unclassified.append(f"{target}:{block['line']}: {block['msg']}")
+            continue
+        else:
+            continue
+
+        if rec is None:
+            unclassified.append(f"{target}:{block['line']}: {block['msg']}")
+            continue
+        key = (rec["file"], rec["original"], rec["replacement"])
+        if key not in seen:
+            seen.add(key)
+            records.append(rec)
+
+    if unclassified:
         raise RuntimeError(
-            f"tracked_integrator C8: could not parse patch JSON after "
-            f"{_C8_SENTINEL!r}: {exc}"
-        ) from exc
-    if not isinstance(data, list):
-        raise RuntimeError(
-            "tracked_integrator C8: patch section must be a JSON array, got "
-            f"{type(data).__name__}"
+            "C8_UNCLASSIFIED_ERROR: int<->tracked crossing(s) matched no known "
+            "pattern (a)/(b)/(c) — human review needed:\n  "
+            + "\n  ".join(unclassified)
         )
-    return data
+    return records
 
 
-def _synthesize_patch(
-    records: list[dict], headers_dir: Path, repo_root: Path
-) -> str | None:
+def _iter_error_blocks(stderr: str):
+    """Yield one dict per compiler ``error:`` diagnostic.
+
+    Each block carries the error ``file``/``line``/``col``/``msg`` plus the
+    diagnostic's own source line, caret ruler, and any following ``note:`` lines
+    (the "in passing argument N of ..." note drives pattern (b)).
+    """
+    lines = stderr.splitlines()
+    i = 0
+    while i < len(lines):
+        m = _C8_ERR_RE.match(lines[i])
+        if not m:
+            i += 1
+            continue
+        block = {
+            "file": m.group(1), "line": int(m.group(2)), "col": int(m.group(3)),
+            "msg": m.group(4), "src": None, "caret": None, "notes": [],
+        }
+        j = i + 1
+        while j < len(lines) and not _C8_ERR_RE.match(lines[j]):
+            lj = lines[j]
+            if re.match(r"^\s*\d+\s*\|", lj) and block["src"] is None:
+                block["src"] = lj
+            elif "|" in lj and ("^" in lj or "~" in lj) and block["src"] is not None \
+                    and block["caret"] is None:
+                block["caret"] = lj
+            if "note:" in lj:
+                block["notes"].append(lj)
+            j += 1
+        yield block
+        i = j
+
+
+def _caret_span(block: dict) -> str | None:
+    """Extract the exact source substring gcc's caret ruler (``~~~^~~~``) marks."""
+    src, caret = block.get("src"), block.get("caret")
+    if not src or not caret or "|" not in src or "|" not in caret:
+        return None
+    s = src[src.index("|") + 1:]
+    c = caret[caret.index("|") + 1:]
+    idx = [k for k, ch in enumerate(c) if ch in "~^"]
+    if not idx:
+        return None
+    return s[idx[0]:idx[-1] + 1]
+
+
+def _file_line(headers_dir: Path, block: dict) -> str:
+    """Read the exact source line the diagnostic points at, from the file."""
+    target = Path(block["file"]).resolve()
+    text = target.read_text(encoding="utf-8").splitlines()
+    return text[block["line"] - 1]
+
+
+def _rel_in(headers_dir: Path, block: dict) -> str:
+    return Path(block["file"]).resolve().relative_to(headers_dir).as_posix()
+
+
+def _map_assign(block: dict, headers_dir: Path) -> dict | None:
+    """(a) `LHS = <tracked RHS>` -> `LHS = static_cast<int>((RHS).value())`."""
+    flagged = _caret_span(block)
+    if flagged is None:
+        return None
+    eqm = _C8_ASSIGN_EQ_RE.search(flagged)
+    if eqm is None:
+        return None
+    lhs, rhs = flagged[:eqm.start()], flagged[eqm.end():]
+    replacement = f"{lhs}= static_cast<int>(({rhs.strip()}).value())"
+    return {
+        "file": _rel_in(headers_dir, block),
+        "original": flagged,
+        "replacement": replacement,
+        "rule": "C8(a) tracked->int assignment",
+    }
+
+
+def _map_refbind(block: dict, headers_dir: Path) -> dict | None:
+    """(b) int arg bound to `const Tracked&` -> wrap arg in the tracked ctor."""
+    mtype = _C8_REFBIND_RE.search(block["msg"])
+    tracked_type = mtype.group(1)
+    note = next((n for n in block["notes"] if "in passing argument" in n), "")
+    ma = _C8_ARGNOTE_RE.search(note)
+    if ma is None:
+        return None
+    argn, callee = int(ma.group(1)), ma.group(2)
+    line = _file_line(headers_dir, block)
+    span = _extract_call_arg(line, callee, argn)
+    if span is None:
+        return None
+    arg_text, start, end = span
+    # Preserve the argument's leading whitespace (', ' after the comma) so the
+    # rewritten call reads naturally; only the token itself is wrapped.
+    lead = arg_text[: len(arg_text) - len(arg_text.lstrip())]
+    new_arg = f"{lead}{tracked_type}({arg_text.strip()})"
+    replacement = line[:start] + new_arg + line[end:]
+    return {
+        "file": _rel_in(headers_dir, block),
+        "original": line,
+        "replacement": replacement,
+        "rule": f"C8(b) int->tracked ref bind (arg {argn})",
+    }
+
+
+def _map_noeq(block: dict, headers_dir: Path) -> dict | None:
+    """(c) `tracked <op> intlit` -> `.value()` on the tracked operand."""
+    m = _C8_NOEQ_RE.search(block["msg"])
+    op, left_type, right_type = m.group(1), m.group(2), m.group(3)
+    flagged = _caret_span(block)
+    if flagged is None or op not in flagged:
+        return None
+    lhs, _, rhs = flagged.partition(op)
+    left_tracked = "tracked::Tracked<" in left_type
+    right_tracked = "tracked::Tracked<" in right_type
+    if left_tracked and not right_tracked:
+        replacement = f"({lhs.strip()}).value() {op} {rhs.strip()}"
+    elif right_tracked and not left_tracked:
+        replacement = f"{lhs.strip()} {op} ({rhs.strip()}).value()"
+    else:
+        return None
+    return {
+        "file": _rel_in(headers_dir, block),
+        "original": flagged,
+        "replacement": replacement,
+        "rule": f"C8(c) tracked {op} int comparison",
+    }
+
+
+def _extract_call_arg(line: str, callee: str, n: int):
+    """Return (text, start, end) of the n-th (1-based) top-level call argument.
+
+    Locates ``callee``'s argument list on ``line`` (skipping a balanced template
+    ``<...>``), then splits the parenthesized list on top-level commas — angle
+    brackets and nested brackets are respected so template commas don't split.
+    """
+    pos = line.find(callee)
+    if pos < 0:
+        return None
+    i = pos + len(callee)
+    ang = 0
+    while i < len(line):
+        ch = line[i]
+        if ch == "<":
+            ang += 1
+        elif ch == ">":
+            ang -= 1
+        elif ch == "(" and ang <= 0:
+            break
+        i += 1
+    if i >= len(line) or line[i] != "(":
+        return None
+    open_paren = i
+    depth = 0
+    j = open_paren
+    while j < len(line):
+        if line[j] == "(":
+            depth += 1
+        elif line[j] == ")":
+            depth -= 1
+            if depth == 0:
+                break
+        j += 1
+    if j >= len(line):
+        return None
+    inner_start = open_paren + 1
+    inner = line[inner_start:j]
+    args = _split_top_level(inner)
+    if n < 1 or n > len(args):
+        return None
+    text, off = args[n - 1]
+    start = inner_start + off
+    return text, start, start + len(text)
+
+
+def _split_top_level(s: str):
+    """Split ``s`` on top-level commas; return [(arg_text, offset), ...]."""
+    out = []
+    depth = 0
+    ang = 0
+    cur_start = 0
+    for k, ch in enumerate(s):
+        if ch in "([{":
+            depth += 1
+        elif ch in ")]}":
+            depth -= 1
+        elif ch == "<":
+            ang += 1
+        elif ch == ">":
+            ang -= 1
+        elif ch == "," and depth == 0 and ang <= 0:
+            out.append((s[cur_start:k], cur_start))
+            cur_start = k + 1
+    out.append((s[cur_start:], cur_start))
+    return out
+
+
+def _is_within(path: Path, root: Path) -> bool:
+    try:
+        path.relative_to(root)
+        return True
+    except ValueError:
+        return False
+
+
+def _is_int_tracked_flavored(msg: str) -> bool:
+    """True if the diagnostic looks like an int<->tracked crossing at all."""
+    if not _C8_TRACKED_RE.search(msg):
+        return False
+    return any(tok in msg for tok in ("int", "bool", "unsigned", "long", "size_t"))
+
+
+def _synthesize_patch(records: list[dict], headers_dir: Path, repo_root: Path) -> str | None:
     """Turn C8 edit records into a deterministic, git-apply-able unified diff.
 
     Each record names a library header (relative to ``headers_dir``), an exact
-    ``original`` substring, and its annotated ``replacement``.  For robustness the
-    model produces the *semantic* edit; Python owns the byte-exact diff:
-
-    * ``original`` MUST occur EXACTLY ONCE in the clean file — 0 or >1 is a hard
-      failure that surfaces an ambiguous / too-short ``original`` (never a silent
-      first-match), the same "surface the ambiguity" discipline as the C-rule
-      UNCLASSIFIED escape hatch.
-    * the diff is produced by :func:`difflib.unified_diff` with ``a/<repo-rel>`` /
-      ``b/<repo-rel>`` labels so ``git apply -p1`` from the repo root applies it.
-
-    Returns the combined diff text, or ``None`` when there are no records.
+    ``original`` substring, and its ``replacement``.  ``original`` MUST occur
+    EXACTLY ONCE in the clean file — 0 or >1 is a hard failure (surfacing an
+    ambiguous edit rather than a silent first-match) — and the diff is produced
+    by :func:`difflib.unified_diff` with ``a/``,``b/`` repo-relative labels so
+    ``git apply -p1`` from the repo root applies it.  Returns the combined diff,
+    or ``None`` when there are no records.
     """
     if not records:
         return None
-
     edits_by_file: dict[str, list[tuple[str, str, str]]] = {}
     for rec in records:
-        try:
-            relfile = rec["file"]
-            original = rec["original"]
-            replacement = rec["replacement"]
-        except (KeyError, TypeError) as exc:
-            raise RuntimeError(
-                f"tracked_integrator C8: malformed patch record {rec!r}: {exc}"
-            ) from exc
-        rule = rec.get("rule", "")
-        edits_by_file.setdefault(relfile, []).append((original, replacement, rule))
+        edits_by_file.setdefault(rec["file"], []).append(
+            (rec["original"], rec["replacement"], rec.get("rule", ""))
+        )
 
     diff_chunks: list[str] = []
     for relfile, edits in sorted(edits_by_file.items()):
         target = (headers_dir / relfile).resolve()
         if not target.is_file():
-            raise RuntimeError(
-                f"tracked_integrator C8: patch target not found: {relfile} "
-                f"(resolved {target})"
-            )
+            raise RuntimeError(f"tracked_integrator C8: patch target not found: {relfile}")
         original_text = target.read_text(encoding="utf-8")
         patched_text = original_text
         for original, replacement, rule in edits:
@@ -820,82 +979,21 @@ def _synthesize_patch(
                     f"{relfile} (found {clean_count}) [{rule}]: {original!r}"
                 )
             if patched_text.count(original) < 1:
-                # count==1 in the clean file but already consumed by a prior edit
-                # → duplicate / overlapping record.  Surface it, don't no-op.
                 raise RuntimeError(
                     f"tracked_integrator C8: 'original' already consumed by an "
                     f"earlier edit in {relfile} [{rule}]: {original!r}"
                 )
             patched_text = patched_text.replace(original, replacement, 1)
-
         rel = target.relative_to(repo_root).as_posix()
         diff = difflib.unified_diff(
             original_text.splitlines(keepends=True),
             patched_text.splitlines(keepends=True),
-            fromfile=f"a/{rel}",
-            tofile=f"b/{rel}",
+            fromfile=f"a/{rel}", tofile=f"b/{rel}",
         )
         diff_chunks.append("".join(diff))
 
     combined = "".join(diff_chunks)
     return combined if combined.strip() else None
-
-
-def _apply_patch_hash(text: str, patch_hash: str) -> str:
-    """Stamp ``// PATCH_HASH:`` into the shim (after the SOURCE_HASH line).
-
-    Replaces an existing PATCH_HASH line if present; otherwise appends the line
-    immediately after the SOURCE_HASH line (which :func:`_apply_source_hash`
-    guarantees exists by the time this runs).
-    """
-    line = f"// PATCH_HASH: {patch_hash}"
-    if _PATCH_HASH_RE.search(text):
-        return _PATCH_HASH_RE.sub(line, text, count=1)
-    if _SOURCE_HASH_RE.search(text):
-        return _SOURCE_HASH_RE.sub(lambda m: m.group(0) + "\n" + line, text, count=1)
-    # No SOURCE_HASH anchor (shouldn't happen post _apply_source_hash) — prepend.
-    lines = text.splitlines()
-    insert_at = 1 if lines else 0
-    lines.insert(insert_at, line)
-    return "\n".join(lines) + ("\n" if text.endswith("\n") else "")
-
-
-def _patch_cache_valid(shim_text: str, shim_path: Path, app_name: str) -> bool:
-    """True iff the shim's declared PATCH_HASH matches the on-disk patch.
-
-    A shim with no PATCH_HASH line predates C8 → nothing to validate.  A shim
-    declaring ``NONE`` must have no companion patch (a stray one would be applied
-    erroneously); a shim declaring a hash must have a matching ``<app>.patch``.
-    Any mismatch returns False so the caller regenerates.
-    """
-    m = _PATCH_HASH_RE.search(shim_text)
-    if not m:
-        return True
-    declared = m.group(1)
-    patch_path = shim_path.with_name(f"{app_name}.patch")
-    if declared == _PATCH_HASH_NONE:
-        return not patch_path.exists()
-    if not patch_path.exists():
-        return False
-    actual = hashlib.sha256(patch_path.read_bytes()).hexdigest()
-    return actual == declared
-
-
-def _find_repo_root(start: Path) -> Path | None:
-    """Walk up from ``start`` to the nearest directory containing ``.git``."""
-    start = Path(start).resolve()
-    for candidate in (start, *start.parents):
-        if (candidate / ".git").exists():
-            return candidate
-    return None
-
-
-def _remove_if_exists(path: Path) -> None:
-    """Delete ``path`` if present (used to clear a now-stale companion patch)."""
-    try:
-        path.unlink()
-    except FileNotFoundError:
-        pass
 
 
 # ---------------------------------------------------------------------------

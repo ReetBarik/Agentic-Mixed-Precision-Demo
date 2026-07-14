@@ -1,8 +1,11 @@
-"""Unit tests for the C8 library-patch synthesis (no LLM, no build).
+"""Unit tests for deterministic C8 library-patch synthesis (no LLM, no build).
 
-Exercises the deterministic Python half of C8: splitting the LLM response on the
-``===C8PATCH===`` sentinel, turning edit records into a git-apply-able unified
-diff, the exactly-once hard-fail guard, and the PATCH_HASH cache validation.
+C8 detects int<->tracked crossings from the compiler's own diagnostics and maps
+them to source annotations.  These tests feed synthetic gcc-style stderr to
+``derive_c8_patch`` and verify: the three crossing patterns (a/b/c) map to the
+correct rewrites, the synthesized diff ``git apply``s cleanly, an unrecognized
+int<->tracked error hard-fails (C8_UNCLASSIFIED_ERROR), and a non-C8 build error
+yields no patch.
 """
 
 import subprocess
@@ -12,116 +15,136 @@ import pytest
 from agents.tracked_integrator import agent as ti
 
 
-def _init_git_tree(root):
-    """A minimal git repo with one library header, for git-apply round-trips."""
+def _init_lib(root):
+    """A git repo with a header carrying one of each crossing pattern."""
     lib = root / "lib"
     (lib / "box").mkdir(parents=True)
     header = lib / "box" / "Widget.h"
     header.write_text(
-        "int flag = 0;\n"
-        "if (cond) flag = ten() * Sign(x);\n"
-        "call(a, flag);\n"
-        "if (Imag(z) == 0) { done(); }\n",
+        "        int ir12 = 0;\n"
+        "        if (cond) ir12 = ql::Constants<TScale>::_ten() * ql::Sign(rr);\n"
+        "        res = ql::xspence<TOutput, TMass, TScale>(x4, ix4, r14, ir12) +\n"
+        "        if (ql::Imag(r13) == 0) { done(); }\n",
         encoding="utf-8",
     )
     subprocess.run(["git", "init", "-q"], cwd=root, check=True)
     subprocess.run(["git", "add", "-A"], cwd=root, check=True)
     subprocess.run(
-        ["git", "-c", "user.email=t@t", "-c", "user.name=t", "commit", "-qm", "init"],
+        ["git", "-c", "user.email=t@t", "-c", "user.name=t", "commit", "-qm", "i"],
         cwd=root, check=True,
     )
     return lib, header
 
 
-def test_split_response_no_sentinel_yields_no_records():
-    shim, records = ti._split_llm_response("#pragma once\nint foo();\n")
-    assert "#pragma once" in shim
-    assert records == []
+def _diag(h, line_no, col, msg, src, target, notes=""):
+    """One gcc diagnostic block with a caret ruler aligned under ``target``.
+
+    Mirrors gcc's layout: ``NN | <src>`` then ``   | <carets>``, where the
+    content after ``|`` aligns.  The caret ruler is generated so the first/last
+    ``~``/``^`` fall exactly under ``target`` within ``src`` (no hand-counting).
+    """
+    src_content = " " + src            # the single space gcc prints after '|'
+    start = src_content.index(target)
+    ruler = [" "] * len(src_content)
+    for k in range(start, start + len(target)):
+        ruler[k] = "~"
+    ruler[start] = "^"
+    caret_content = "".join(ruler)
+    out = f"{h}:{line_no}:{col}: error: {msg}\n"
+    out += f"  {line_no} |{src_content}\n"
+    out += f"     |{caret_content}\n"
+    if notes:
+        out += notes
+    return out
 
 
-def test_split_response_empty_array():
-    resp = "#pragma once\n===C8PATCH===\n[]\n"
-    shim, records = ti._split_llm_response(resp)
-    assert "#pragma once" in shim
-    assert "===C8PATCH===" not in shim  # sentinel is split off, never in the shim
-    assert records == []
+def _stderr(lib):
+    """Synthetic gcc diagnostics (curly quotes) for the three crossings."""
+    h = lib / "box" / "Widget.h"
+    a = _diag(
+        h, 2, 35,
+        "cannot convert ‘tracked::Tracked<double>’ to ‘int’ in assignment",
+        "        if (cond) ir12 = ql::Constants<TScale>::_ten() * ql::Sign(rr);",
+        "ir12 = ql::Constants<TScale>::_ten() * ql::Sign(rr)",
+    )
+    # (b) uses the file line + the "in passing argument N" note (not the caret).
+    b = _diag(
+        h, 3, 63,
+        "invalid initialization of reference of type ‘const tracked::Tracked<double>&’ from expression of type ‘int’",
+        "        res = ql::xspence<TOutput, TMass, TScale>(x4, ix4, r14, ir12) +",
+        "ir12",
+        notes="other.h:606:1: note: in passing argument 4 of ‘TOutput ql::xspence(const X&, const Y&, const Z&, const tracked::Tracked<double>&)’\n  606 |   sig\n     |   ^\n",
+    )
+    c = _diag(
+        h, 4, 27,
+        "no match for ‘operator==’ (operand types are ‘tracked::Tracked<double>’ and ‘int’)",
+        "        if (ql::Imag(r13) == 0) { done(); }",
+        "ql::Imag(r13) == 0",
+    )
+    return a + b + c
 
 
-def test_synthesized_diff_applies_with_git(tmp_path):
-    lib, header = _init_git_tree(tmp_path)
-    records = [
-        {"file": "box/Widget.h", "pattern": "a",
-         "original": "flag = ten() * Sign(x);",
-         "replacement": "flag = static_cast<int>((ten() * Sign(x)).value());",
-         "rule": "C8(a)"},
-        {"file": "box/Widget.h", "pattern": "b",
-         "original": "call(a, flag);",
-         "replacement": "call(a, TScale(flag));",
-         "rule": "C8(b)"},
-        {"file": "box/Widget.h", "pattern": "c",
-         "original": "if (Imag(z) == 0) { done(); }",
-         "replacement": "if (Imag(z).value() == 0.0) { done(); }",
-         "rule": "C8(c)"},
-    ]
-    diff = ti._synthesize_patch(records, lib, tmp_path)
-    assert diff is not None
-    assert "a/lib/box/Widget.h" in diff and "b/lib/box/Widget.h" in diff
+def test_derive_maps_three_patterns_and_applies(tmp_path):
+    lib, header = _init_lib(tmp_path)
+    patch = ti.derive_c8_patch(_stderr(lib), lib, tmp_path)
+    assert patch is not None
+    # (a) tracked->int assignment
+    assert "ir12 = static_cast<int>((ql::Constants<TScale>::_ten() * ql::Sign(rr)).value())" in patch
+    # (b) int->tracked ref bind, leading ', ' preserved
+    assert "r14, tracked::Tracked<double>(ir12))" in patch
+    # (c) tracked==int -> .value() on the tracked side
+    assert "(ql::Imag(r13)).value() == 0" in patch
 
     patch_file = tmp_path / "app.patch"
-    patch_file.write_text(diff, encoding="utf-8")
-
-    # git apply --check must accept it, and applying yields the annotated source.
+    patch_file.write_text(patch, encoding="utf-8")
     subprocess.run(["git", "apply", "--check", str(patch_file)], cwd=tmp_path, check=True)
     subprocess.run(["git", "apply", str(patch_file)], cwd=tmp_path, check=True)
     patched = header.read_text(encoding="utf-8")
-    assert "static_cast<int>((ten() * Sign(x)).value())" in patched
-    assert "call(a, TScale(flag));" in patched
-    assert "Imag(z).value() == 0.0" in patched
+    assert "static_cast<int>(" in patched
+    assert "tracked::Tracked<double>(ir12)" in patched
+    assert "(ql::Imag(r13)).value() == 0" in patched
 
 
-def test_original_must_be_unique(tmp_path):
-    lib, _ = _init_git_tree(tmp_path)
-    # "flag" appears many times → not uniqueness-sufficient → hard fail.
-    records = [{"file": "box/Widget.h", "pattern": "a",
-                "original": "flag", "replacement": "FLAG", "rule": "bad"}]
-    with pytest.raises(RuntimeError, match="exactly once"):
-        ti._synthesize_patch(records, lib, tmp_path)
+def test_no_c8_errors_returns_none(tmp_path):
+    lib, _ = _init_lib(tmp_path)
+    genuine = (
+        f"{lib}/box/Widget.h:9:1: error: 'foo' was not declared in this scope\n"
+        "    9 | foo();\n      | ^~~\n"
+    )
+    assert ti.derive_c8_patch(genuine, lib, tmp_path) is None
 
 
-def test_missing_original_hard_fails(tmp_path):
-    lib, _ = _init_git_tree(tmp_path)
-    records = [{"file": "box/Widget.h", "pattern": "a",
-                "original": "no_such_text_here();", "replacement": "x", "rule": "bad"}]
-    with pytest.raises(RuntimeError, match="exactly once"):
-        ti._synthesize_patch(records, lib, tmp_path)
+def test_unclassified_int_tracked_error_hard_fails(tmp_path):
+    lib, _ = _init_lib(tmp_path)
+    # int<->tracked flavored (mentions tracked::Tracked + int) but not a/b/c.
+    weird = (
+        f"{lib}/box/Widget.h:2:1: error: no known conversion from "
+        "‘int’ to ‘tracked::Tracked<double>’ for some novel reason\n"
+        "    2 | x;\n      | ^\n"
+    )
+    with pytest.raises(RuntimeError, match="C8_UNCLASSIFIED_ERROR"):
+        ti.derive_c8_patch(weird, lib, tmp_path)
 
 
-def test_empty_records_returns_none(tmp_path):
-    lib, _ = _init_git_tree(tmp_path)
-    assert ti._synthesize_patch([], lib, tmp_path) is None
+def test_errors_outside_headers_dir_ignored(tmp_path):
+    lib, _ = _init_lib(tmp_path)
+    # An int<->tracked error in the DRIVER (outside headers_dir) is not C8's job.
+    outside = (
+        f"{tmp_path}/driver.cpp:5:1: error: cannot convert "
+        "‘tracked::Tracked<double>’ to ‘int’ in assignment\n"
+        "    5 | q = z;\n      | ~~^~~\n"
+    )
+    assert ti.derive_c8_patch(outside, lib, tmp_path) is None
 
 
-def test_patch_cache_valid_logic(tmp_path):
-    shim = tmp_path / "app_interop.hpp"
-    patch = tmp_path / "app.patch"
+def test_split_top_level_respects_templates():
+    # commas inside <...> and (...) must not split the argument list
+    parts = ti._split_top_level("a, Kokkos::Array<T, 2>, f(x, y), -z")
+    assert [p[0].strip() for p in parts] == ["a", "Kokkos::Array<T, 2>", "f(x, y)", "-z"]
 
-    # No PATCH_HASH line (pre-C8 shim) → always valid.
-    assert ti._patch_cache_valid("// SOURCE_HASH: abc\n", shim, "app") is True
 
-    # Declares NONE and no patch on disk → valid; a stray patch → invalid.
-    none_shim = "// SOURCE_HASH: abc\n// PATCH_HASH: NONE\n"
-    assert ti._patch_cache_valid(none_shim, shim, "app") is True
-    patch.write_text("stray\n", encoding="utf-8")
-    assert ti._patch_cache_valid(none_shim, shim, "app") is False
-    patch.unlink()
-
-    # Declares a hash → patch must exist and match.
-    body = b"diff body\n"
-    import hashlib
-    h = hashlib.sha256(body).hexdigest()
-    hash_shim = f"// SOURCE_HASH: abc\n// PATCH_HASH: {h}\n"
-    assert ti._patch_cache_valid(hash_shim, shim, "app") is False  # no file yet
-    patch.write_bytes(body)
-    assert ti._patch_cache_valid(hash_shim, shim, "app") is True
-    patch.write_bytes(b"tampered\n")
-    assert ti._patch_cache_valid(hash_shim, shim, "app") is False
+def test_extract_call_arg_negated():
+    line = "   ql::xspence<TOutput, TMass, TScale>(x4, ix4, a / r14, -ir14) +"
+    text, start, end = ti._extract_call_arg(line, "ql::xspence", 4)
+    assert text.strip() == "-ir14"
+    assert line[start:end] == text

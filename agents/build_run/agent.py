@@ -115,13 +115,19 @@ def build_and_run(
     # before compiling.  Imported locally so build_run stays import-light (the
     # integrator pulls in the LLM client in Part 2) and to avoid any cycle.
     #
-    # C8: the integrator may also emit an <app>.patch of type-boundary annotations
-    # for the target library's OWN source (int<->tracked crossings a free-function
-    # shim can't bridge).  We reset the library tree to its pristine committed
-    # state BEFORE integrate() (so it hashes clean sources and a leftover patch
-    # can't stack — idempotency), apply the patch AFTER integrate() and before
-    # cmake, and always reset the tree again in the finally so the working copy is
-    # left clean.  Regular targets emit no patch, so this is a no-op for them.
+    # C8 (type-boundary annotations): a target library's OWN source can contain
+    # int<->tracked crossings a free-function shim cannot bridge.  These are
+    # detected by the compiler, not the LLM: we reset the library tree to its
+    # pristine committed state BEFORE integrate() (so it hashes clean sources),
+    # build once, and if the build fails on int<->tracked diagnostics we map
+    # those to a deterministic library patch, git apply it, and rebuild.  The
+    # tree is always reset again in the finally so the working copy is left
+    # clean.  Regular B0m/B1m/B2m targets produce no such diagnostics, so the
+    # extra step is a no-op for them.
+    tracked_integrator = None
+    headers_path = None
+    repo_root = None
+    shim_path = None
     patched_tree: tuple[Path, Path] | None = None
     if use_tracked and target_library_headers is not None:
         from agents.tracked_integrator import agent as tracked_integrator
@@ -138,25 +144,6 @@ def build_and_run(
             existing_shim=existing_shim,
             cfg=cfg,
         )
-
-        patch_file = _find_companion_patch(shim_path)
-        if patch_file is not None:
-            if repo_root is None:
-                return RunResult(
-                    returncode=1, stdout="",
-                    stderr=(f"C8 patch {patch_file} present but the library tree "
-                            f"{headers_path} is not inside a git repo — cannot "
-                            f"apply/reset it safely."),
-                    journal_path=None, work_dir=work_dir, phase="configure",
-                )
-            apply_result = _git_apply(repo_root, patch_file)
-            if apply_result.returncode != 0:
-                return RunResult(
-                    returncode=apply_result.returncode, stdout=apply_result.stdout,
-                    stderr=f"C8 patch apply failed ({patch_file}):\n{apply_result.stderr}",
-                    journal_path=None, work_dir=work_dir, phase="configure",
-                )
-            patched_tree = (repo_root, headers_path)
 
     try:
         cmake_content = _render_cmake(framework, cfg)
@@ -188,6 +175,33 @@ def build_and_run(
 
         # --- Build ---
         build_result = _run_build_step(["cmake", "--build", ".", "-j"], cwd=str(build_dir))
+
+        # C8: a build failure on int<->tracked crossings in the library source is
+        # recoverable — derive the boundary patch from the diagnostics, apply it,
+        # and rebuild once.  derive_c8_patch returns None for a genuine (non-C8)
+        # build error and raises C8_UNCLASSIFIED_ERROR for an int<->tracked error
+        # matching no known pattern (surfaced for review, not silently patched).
+        if (build_result.returncode != 0 and tracked_integrator is not None
+                and repo_root is not None and shim_path is not None):
+            patch_text = tracked_integrator.derive_c8_patch(
+                build_result.stderr, headers_path, repo_root
+            )
+            if patch_text:
+                patch_file = _companion_patch_path(shim_path)
+                patch_file.write_text(patch_text, encoding="utf-8")
+                apply_result = _git_apply(repo_root, patch_file)
+                if apply_result.returncode != 0:
+                    return RunResult(
+                        returncode=apply_result.returncode,
+                        stdout=apply_result.stdout,
+                        stderr=f"C8 patch apply failed ({patch_file}):\n{apply_result.stderr}",
+                        journal_path=None, work_dir=work_dir, phase="build",
+                    )
+                patched_tree = (repo_root, headers_path)
+                build_result = _run_build_step(
+                    ["cmake", "--build", ".", "-j"], cwd=str(build_dir)
+                )
+
         if build_result.returncode != 0:
             combined_stderr = configure_result.stderr + "\n" + build_result.stderr
             return RunResult(
@@ -230,7 +244,7 @@ def build_and_run(
 
 
 # ---------------------------------------------------------------------------
-# C8 library-patch application (see agents/tracked_integrator)
+# C8 library-patch application (see agents/tracked_integrator.derive_c8_patch)
 # ---------------------------------------------------------------------------
 
 def _find_repo_root(start: Path) -> Path | None:
@@ -242,12 +256,12 @@ def _find_repo_root(start: Path) -> Path | None:
     return None
 
 
-def _find_companion_patch(shim_path) -> Path | None:
-    """Locate the ``<app>.patch`` the integrator writes next to the shim, if any."""
-    if shim_path is None:
-        return None
-    matches = sorted(Path(shim_path).parent.glob("*.patch"))
-    return matches[0] if matches else None
+def _companion_patch_path(shim_path: Path) -> Path:
+    """The ``<app>.patch`` written next to the shim ``<app>_interop.hpp``."""
+    shim_path = Path(shim_path)
+    name = shim_path.name
+    app = name[: -len("_interop.hpp")] if name.endswith("_interop.hpp") else shim_path.stem
+    return shim_path.with_name(f"{app}.patch")
 
 
 def _git_checkout(repo_root: Path, path: Path) -> subprocess.CompletedProcess:
