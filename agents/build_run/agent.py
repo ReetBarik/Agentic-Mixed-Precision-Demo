@@ -114,10 +114,24 @@ def build_and_run(
     # Prerequisite: ensure a Tracked interop shim exists for the target library
     # before compiling.  Imported locally so build_run stays import-light (the
     # integrator pulls in the LLM client in Part 2) and to avoid any cycle.
+    #
+    # C8: the integrator may also emit an <app>.patch of type-boundary annotations
+    # for the target library's OWN source (int<->tracked crossings a free-function
+    # shim can't bridge).  We reset the library tree to its pristine committed
+    # state BEFORE integrate() (so it hashes clean sources and a leftover patch
+    # can't stack — idempotency), apply the patch AFTER integrate() and before
+    # cmake, and always reset the tree again in the finally so the working copy is
+    # left clean.  Regular targets emit no patch, so this is a no-op for them.
+    patched_tree: tuple[Path, Path] | None = None
     if use_tracked and target_library_headers is not None:
         from agents.tracked_integrator import agent as tracked_integrator
 
-        tracked_integrator.integrate(
+        headers_path = Path(target_library_headers)
+        repo_root = _find_repo_root(headers_path)
+        if repo_root is not None:
+            _git_checkout(repo_root, headers_path)
+
+        shim_path = tracked_integrator.integrate(
             target_library_headers=target_library_headers,
             driver_source_path=driver_cpp,
             tracked_repo_path=cfg.tracked_root,
@@ -125,69 +139,130 @@ def build_and_run(
             cfg=cfg,
         )
 
-    cmake_content = _render_cmake(framework, cfg)
-    (work_dir / "CMakeLists.txt").write_text(cmake_content, encoding="utf-8")
+        patch_file = _find_companion_patch(shim_path)
+        if patch_file is not None:
+            if repo_root is None:
+                return RunResult(
+                    returncode=1, stdout="",
+                    stderr=(f"C8 patch {patch_file} present but the library tree "
+                            f"{headers_path} is not inside a git repo — cannot "
+                            f"apply/reset it safely."),
+                    journal_path=None, work_dir=work_dir, phase="configure",
+                )
+            apply_result = _git_apply(repo_root, patch_file)
+            if apply_result.returncode != 0:
+                return RunResult(
+                    returncode=apply_result.returncode, stdout=apply_result.stdout,
+                    stderr=f"C8 patch apply failed ({patch_file}):\n{apply_result.stderr}",
+                    journal_path=None, work_dir=work_dir, phase="configure",
+                )
+            patched_tree = (repo_root, headers_path)
 
-    build_dir = work_dir / "build"
-    if clean_build and build_dir.exists():
-        shutil.rmtree(build_dir)
-    build_dir.mkdir(exist_ok=True)
+    try:
+        cmake_content = _render_cmake(framework, cfg)
+        (work_dir / "CMakeLists.txt").write_text(cmake_content, encoding="utf-8")
 
-    # --- Configure ---
-    configure_cmd = [
-        "cmake", "..",
-        f"-DCMAKE_BUILD_TYPE=Release",
-    ]
-    if framework == "kokkos-serial" and cfg.kokkos_root:
-        configure_cmd.append(f"-DCMAKE_PREFIX_PATH={cfg.kokkos_root}")
+        build_dir = work_dir / "build"
+        if clean_build and build_dir.exists():
+            shutil.rmtree(build_dir)
+        build_dir.mkdir(exist_ok=True)
 
-    configure_result = _run_build_step(configure_cmd, cwd=str(build_dir))
-    if configure_result.returncode != 0:
+        # --- Configure ---
+        configure_cmd = [
+            "cmake", "..",
+            f"-DCMAKE_BUILD_TYPE=Release",
+        ]
+        if framework == "kokkos-serial" and cfg.kokkos_root:
+            configure_cmd.append(f"-DCMAKE_PREFIX_PATH={cfg.kokkos_root}")
+
+        configure_result = _run_build_step(configure_cmd, cwd=str(build_dir))
+        if configure_result.returncode != 0:
+            return RunResult(
+                returncode=configure_result.returncode,
+                stdout=configure_result.stdout,
+                stderr=configure_result.stderr,
+                journal_path=None,
+                work_dir=work_dir,
+                phase="configure",
+            )
+
+        # --- Build ---
+        build_result = _run_build_step(["cmake", "--build", ".", "-j"], cwd=str(build_dir))
+        if build_result.returncode != 0:
+            combined_stderr = configure_result.stderr + "\n" + build_result.stderr
+            return RunResult(
+                returncode=build_result.returncode,
+                stdout=build_result.stdout,
+                stderr=combined_stderr,
+                journal_path=None,
+                work_dir=work_dir,
+                phase="build",
+            )
+
+        # --- Run ---
+        # Wrapped in the module chain too: the binary is linked against the module
+        # gcc's libstdc++, so it needs that lib on LD_LIBRARY_PATH at runtime.
+        exe = build_dir / "micro_driver"
+        run_result = _run_build_step([str(exe)], cwd=str(work_dir))
+
+        # Tracked flushes a JSONL whose name is passed via journal::flush("<name>.jsonl").
+        # The driver is generated to write to work_dir/journal.jsonl.
+        journal_path = work_dir / "journal.jsonl"
+        if not journal_path.exists():
+            journal_path = None
+
+        # "ok" only when the binary exited cleanly AND produced a journal; any
+        # other runtime outcome is "run" (not retried — see PLAN_retry_loop.md).
+        phase = "ok" if (run_result.returncode == 0 and journal_path is not None) else "run"
+
         return RunResult(
-            returncode=configure_result.returncode,
-            stdout=configure_result.stdout,
-            stderr=configure_result.stderr,
-            journal_path=None,
+            returncode=run_result.returncode,
+            stdout=run_result.stdout,
+            stderr=run_result.stderr,
+            journal_path=journal_path,
             work_dir=work_dir,
-            phase="configure",
+            phase=phase,
         )
+    finally:
+        # Leave the library working copy pristine regardless of outcome.
+        if patched_tree is not None:
+            _git_checkout(patched_tree[0], patched_tree[1])
 
-    # --- Build ---
-    build_result = _run_build_step(["cmake", "--build", ".", "-j"], cwd=str(build_dir))
-    if build_result.returncode != 0:
-        combined_stderr = configure_result.stderr + "\n" + build_result.stderr
-        return RunResult(
-            returncode=build_result.returncode,
-            stdout=build_result.stdout,
-            stderr=combined_stderr,
-            journal_path=None,
-            work_dir=work_dir,
-            phase="build",
-        )
 
-    # --- Run ---
-    # Wrapped in the module chain too: the binary is linked against the module
-    # gcc's libstdc++, so it needs that lib on LD_LIBRARY_PATH at runtime.
-    exe = build_dir / "micro_driver"
-    run_result = _run_build_step([str(exe)], cwd=str(work_dir))
+# ---------------------------------------------------------------------------
+# C8 library-patch application (see agents/tracked_integrator)
+# ---------------------------------------------------------------------------
 
-    # Tracked flushes a JSONL whose name is passed via journal::flush("<name>.jsonl").
-    # The driver is generated to write to work_dir/journal.jsonl.
-    journal_path = work_dir / "journal.jsonl"
-    if not journal_path.exists():
-        journal_path = None
+def _find_repo_root(start: Path) -> Path | None:
+    """Walk up from ``start`` to the nearest directory containing ``.git``."""
+    start = Path(start).resolve()
+    for candidate in (start, *start.parents):
+        if (candidate / ".git").exists():
+            return candidate
+    return None
 
-    # "ok" only when the binary exited cleanly AND produced a journal; any
-    # other runtime outcome is "run" (not retried — see PLAN_retry_loop.md).
-    phase = "ok" if (run_result.returncode == 0 and journal_path is not None) else "run"
 
-    return RunResult(
-        returncode=run_result.returncode,
-        stdout=run_result.stdout,
-        stderr=run_result.stderr,
-        journal_path=journal_path,
-        work_dir=work_dir,
-        phase=phase,
+def _find_companion_patch(shim_path) -> Path | None:
+    """Locate the ``<app>.patch`` the integrator writes next to the shim, if any."""
+    if shim_path is None:
+        return None
+    matches = sorted(Path(shim_path).parent.glob("*.patch"))
+    return matches[0] if matches else None
+
+
+def _git_checkout(repo_root: Path, path: Path) -> subprocess.CompletedProcess:
+    """Reset ``path`` to its committed state (revert any working-tree edits)."""
+    return subprocess.run(
+        ["git", "checkout", "--", str(path)],
+        cwd=str(repo_root), capture_output=True, text=True,
+    )
+
+
+def _git_apply(repo_root: Path, patch_file: Path) -> subprocess.CompletedProcess:
+    """Apply a unified diff (``a/``,``b/`` labels → ``-p1``) from the repo root."""
+    return subprocess.run(
+        ["git", "apply", str(Path(patch_file).resolve())],
+        cwd=str(repo_root), capture_output=True, text=True,
     )
 
 
