@@ -1,6 +1,6 @@
 # PLAN: Implementation — whole-app characterization
 
-**Status:** Design discussed 2026-06-21. Implementation contracts locked 2026-06-28 (see §Implementation contracts at the bottom). Not yet implemented.
+**Status:** Design discussed 2026-06-21. Implementation contracts locked 2026-06-28 (see §Implementation contracts at the bottom). Stage 2 sweep complete 2026-07-14 (see §Stage 2 findings feeding characterization design). Phases 0–2 not yet implemented.
 
 **Repo:** `ReetBarik/Agentic-Mixed-Precision-Demo` (branch `langgraph-agents`), targeting `ReetBarik/qcdloop` as the first whole-app integration.
 
@@ -47,6 +47,136 @@ User: whole-app + build instructions + param ranges + integrals-of-interest
 ```
 
 All three phases run host-only Serial. All three are parallelizable within phase (leaves in Phase 1, integrals in Phase 2).
+
+---
+
+## Stage 2 findings feeding characterization design (2026-07-14)
+
+Stage 2 of the Tracked Datatype Integrator agent validated all 20 in-scope
+box integrals (B1–B12, B14–B16, BIN0–BIN4 + B13 from Stage 1) across the
+B0m/B1m/B2m/B3m/B4m families. Findings that reshape the characterization
+pipeline design below:
+
+### Three signal classes (not one)
+
+Record-level `rel_err` splits into three mechanistically distinct classes,
+each with a different remediation direction. Phase 2 bucketing and the
+Strategy Agent's per-integral profile must distinguish them, not collapse
+to a single max-cond or max-rel_err number.
+
+- **Log-near-root:** high cond (1e6–1e8), moderate rel_err (~1e-8). Seen
+  in B8/B9/B10/B12/B15 non-cascade hotspots. Every individual op condition
+  number is elevated. **Remediation direction: extended precision at the
+  op** (quadruple or extended double). Classic mixed-precision-target.
+- **Cancellation cascade:** low nominal per-op cond (1–62), rel_err
+  escalating through chained near-equal add/sub. B14→B15→BIN0→BIN1→BIN2
+  progression: 8084 → 1.23e7 → 1.46e21 → 7.27e23 → 4.67e38 (34 orders
+  of magnitude). Every individual op is well-conditioned; the accumulated
+  error explodes. **Remediation direction: Kahan / compensated summation
+  / algebraic reformulation upstream.** Per-op precision won't help — no
+  single op is the culprit.
+- **Local cancellation cond>1e15:** sub/add where mechanism is |a-b|→0,
+  driving the op's OWN condition number above 1e15. BIN0/BIN1/BIN2/BIN3/
+  BIN4/B16 gate-(b) records. 33–56% cluster at |val|<1e-30 to denormal.
+  **Remediation direction: likely quadruple precision or extended-format
+  Kahan.** Whether upstream reformulation helps depends on whether
+  |a-b|→0 is a physics zero or a computed near-cancellation — an open
+  question the Strategy Agent must answer per-hotspot, not a global
+  choice.
+
+Phase 2 sensitivity profiles emit **class-tagged hotspots**, not a flat
+rel_err ranking. Strategy Agent selection logic branches on class.
+
+### Validation gate final form (post-B14/BIN0 review)
+
+Stage 2 gate is now:
+
+> No `cond > 1e15` records except **(a)** documented library saturation
+> caps (currently `atan2` at 1/u = 2⁵³ for arguments on the positive real
+> axis where the derivative is undefined — Tracked `ops.hpp:127-129`,
+> invoked via `complex.hpp:208 arg(z) = atan2(im, re)`) AND **(b)**
+> genuine catastrophic-cancellation `sub`/`add` where mechanism is
+> |a-b|→0, which are the intended signal and must be reported per-target
+> (op, count, cond range, top hotspot with provenance trace), never
+> suppressed. Any OTHER `cond > 1e15` (`mul`/`div`/`log` outside
+> documented caps) remains a hard fail requiring investigation.
+
+Characterization pass analysis must **filter gate-(a) records** before
+computing per-target max-cond / max-rel_err statistics (they'd swamp
+genuine signal at 2⁵³). Gate-(b) records are the raw material for the
+local-cancellation class; count and range them per-target, don't drop
+them.
+
+### Analysis bucketing
+
+Original design (single cond band) replaced by `{cond band} × {rel_err
+band}` two-dimensional bucketing. Per-record classification into one of
+the three signal classes is derived from the bucket + op-type + operand
+values (near-equal for cancellation, small |val| for local cond>1e15).
+
+### C8 metric per target
+
+Integer↔Tracked crossings patched by the C8 deterministic mapper are a
+per-target metric. Reported alongside record counts, vocab delta, and
+hotspot: `c8_sites_patched: {kind: (a|b|c), count: N, files: [...]}`. For
+qcdloop's B3m/B4m dispatch this is 9 sites (3a + 5b + 1c), byte-identical
+across B16/BIN3/BIN4. For other applications the number and breakdown
+reveal how much library-side boundary annotation the integration required
+— useful for methodology reporting.
+
+### Execution model for characterization runs
+
+- **Serial Kokkos backend, agent-level chunk parallelism.** ~4 spawned
+  build_agents × ~25k samples per chunk per target. OpenMP inside
+  chunks is out (journal is `thread_local` in
+  `tracked::journal::detail::buf`; `flush()` from the main thread
+  returns empty under OpenMP without per-thread fan-in choreography).
+  Serial + chunk-across-agents avoids the whole issue.
+- **Sample count 50k–100k per target**, ceiling 100k. Total ~2M records
+  per target at B3m/B4m journal density scaling from Stage 2's 256-sample
+  probes.
+- **Parquet output**, not JSONL. Each chunk writes Parquet directly (or
+  JSONL→Parquet at end of chunk). Downstream analysis is Parquet-native.
+- **Per-chunk metadata JSON**: record count, class-tagged max cond,
+  hotspot, op vocab, wall time, backend, seed, c8_sites_patched. Reduces
+  cleanly across chunks for the final per-target summary.
+- **Per-chunk files as first-class artifacts.** Don't consolidate into
+  one giant file. Directory of chunks is easier to iterate on.
+- Journal-shape numbers from Stage 2 (max cond ~2K for B1, ~86K for B2,
+  ~14K for B3, ~1e7 for B15 non-cascade, 4.67e38 cascade for BIN2 at
+  256 samples) are input-space samples — some targets may surface
+  additional gate-(b) records at 100k. That's the point.
+
+### Deterministic input recipes
+
+Use `boxGPU_test.cc` in `ReetBarik/qcdloop@master/examples/boxGPU_test.cc`
+as the input recipe source: `srand(12345)`-seeded recipes for every B
+integral (BIN0–BIN4, B1–B16) that deterministically route `ql::BO()` to
+the target integral. Copy verbatim (with `batch_size` scaled to per-chunk
+sample count) rather than fabricate inputs. Standard probe: `mu2 = 91.2²`
+(Z-mass squared), momentum range `(low, up) = (100, 1_000_000)` GeV².
+
+### Wall-clock budget
+
+OpenMP pure-double timing on 128-thread AMD EPYC 7532 measured 2026-07-14
+(via `boxGPU_test 0 100000`): ~1 sec total for all 21 targets at 100k
+samples. With Tracked instrumentation (typical 50–200× slowdown) and
+Serial backend:
+- Per-target Tracked run: ~1–3 min
+- 21 targets × 4-chunk agent parallelism: **~30–60 min wall clock**
+
+Same agent-chunk-parallelism pattern applies to Phase 0 (range
+discovery) since it uses the same driver+library at similar scale.
+
+### Remaining boundary: none
+
+Stage 2 originally identified B16/BIN3/BIN4 (3-/4-mass boxes) as
+out-of-scope due to qcdloop's `ir12/ir14/ir24` int-flag pattern colliding
+with Tracked's explicit type discipline. C8 rule (deterministic
+compiler-error-driven library patch, not an LLM prompt rule) retired
+this boundary the same day. C8 lives in the build pipeline, not the LLM
+prompt, so it does not invalidate the shim generation cache and does
+not require a full-sweep regeneration. All 20 targets validated.
 
 ---
 
