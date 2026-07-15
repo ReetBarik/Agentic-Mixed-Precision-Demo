@@ -533,6 +533,19 @@ App source (e.g. qcdloop) stays **external** — `run_config.json` carries an
 `app_source_path` field, Phase 0's build step clones / references it. Keeps the
 workflow app-agnostic.
 
+> **Current `runs/` layout (consolidation, 2026-07-15).** The above
+> `per_dependency/` / `whole_app/` tree is the Phase 0–3 target. Today, after
+> retiring the Stage-2 per-target scaffolding, `runs/` holds:
+> - `runs/qcdloop/` — the consolidated application driver: one
+>   `boxGPU_tracked` main() dispatching all 21 box integrals (B1–B16,
+>   BIN0–BIN4) through `ql::BO()`, one shim, one C8 patch (byte-identical to the
+>   Stage-2 patch), scope-tagged `journal.jsonl` + `journal_meta.json`. See
+>   `runs/qcdloop/VALIDATION.md`.
+> - `runs/qcdloop_headers_full/` — vendored upstream headers it builds against.
+> - `runs/archive/stage2/` — the 21 retired per-target scaffolds (B1–B16,
+>   BIN0–BIN4), including the Stage-1 lock `B13` with its committed journal
+>   snapshots and analysis tooling. See `runs/README.md`.
+
 ### 8. Naming — workflow concepts vs qcdloop examples
 
 Schema field names stay generic: `kernel` (the unit being characterized),
