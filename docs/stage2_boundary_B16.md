@@ -114,3 +114,28 @@ upstream, not extended precision at the op.
   (shim + C8 library patch) — B1–B16 and BIN0–BIN4.
 - The B0m/B1m/B2m targets are unaffected by C8 (they compile clean, no patch);
   regression spot-checks B7/B12/BIN0 confirm byte-identical journal shapes.
+
+## Consolidation (2026-07-15): patch derived once, whole-app
+
+The per-target scaffolding is retired in favour of a single consolidated driver,
+`runs/qcdloop/` (`boxGPU_tracked`), which dispatches all 21 integrals through
+`ql::BO()` in one build. The integrator ran **once** against the whole
+un-pruned tree: the shim regenerated once and the C8 patch derived once from the
+whole-app compile diagnostics.
+
+- **The whole-app C8 patch is byte-identical to this 9-site patch** (`md5
+  f0726269…`) — B0m/B1m/B2m contribute no crossings, so the whole-app dispatch
+  reaches exactly the same B3m/B4m sites. STOP-#1 byte-identity gate passed.
+- **Whole-app scale exposed a C6 fragility Stage-2 masked:** a non-deterministic
+  shim generation classified `Sign → int` instead of `Sign → Tracked`, cascading
+  to ~32 errors across four files (Sign is reached from many box paths at
+  whole-app scale). A bounded retry (≤5, cache-bypassed) converged on attempt
+  1/5 to the correct `Sign → Tracked` shim + the byte-identical patch.
+- **All 21 integrals reproduce Stage-2 `max(cond)` bit-for-bit** and the same
+  `cond>1e15` gate (atan2 saturation at `2^53` + genuine cancellation only).
+  Op-count parity is *not* the consolidation gate — the per-target shims are
+  mutually inconsistent in complex-op decomposition, so no single shim matches
+  all 21 by op count; the value/cond/hotspot bit-identity gate is what holds.
+  Full detail in `runs/qcdloop/VALIDATION.md`.
+
+The retired per-target directories are archived under `runs/archive/stage2/`.
