@@ -1,7 +1,8 @@
 # Build artifacts
 build/
 
-# Only the spike journal at sample_count=256 is small enough to commit;
-# Phase 0 runs (100k+) should regenerate locally and stay out of git.
-# Uncomment when scaling up:
-# journal.jsonl
+# Phase 0 runs (100k+) regenerate locally from the committed driver + shim;
+# keep the journal and its compressed snapshots (and run.log) out of git.
+journal.jsonl
+journal*.jsonl.gz
+run.log
