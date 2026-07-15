@@ -1,0 +1,142 @@
+// runs/BIN4/src/micro_driver.cpp
+//
+// Stage 2 leaf validation (post-C8): instantiate ql::BO routing by kinematics
+// to the 4-internal-mass box branch (the B4m family). BIN4 is the n_masses=4
+// point of the boxGPU_test.cc BIN sweep. B4m is statically instantiated
+// alongside B3m; the C8 int<->Tracked boundary annotations the integrator emits
+// cover the crossings in box/B3m.h AND box/B4m.h (B4m.h:172 is the pattern-(c)
+// site), so this target exercises the 4-mass dispatch through B4m -> BIN4().
+//
+// Recipe copied from examples/boxGPU_test.cc's "// Trigger BIN0 - BIN4" loop
+// (boxGPU_test.cc:189) at n_masses = 4: all four internal masses are 10 (so
+// massive == 4 -> B4m). External legs p1=p2=p3=p4=rs(low,up) (all four SIGNED
+// uniform), p5=r(low,up), p6=r(low,up). Each array slot is tracked as an
+// independent input carrying its numeric value (10.0 for all four massive
+// slots), preserving per-slot provenance — the same convention the rest of the
+// sweep uses.
+//
+// Structure mirrors runs/B13/src/micro_driver.cpp: same Views, same 256-sample
+// batch, same host-loop execution model (tracked ops are host-only, so no
+// Kokkos::parallel_for), same per-sample scope, same mt19937(12345) draws.
+//
+// The qcdloop headers come from the UN-PRUNED shared tree
+// runs/qcdloop_headers_full/ (B3m/B4m restored), not B13's pruned tree.
+
+#include <Kokkos_Core.hpp>
+#include <Kokkos_Complex.hpp>
+
+#include <tracked/tracked.hpp>
+#include <tracked/ops.hpp>
+#include <tracked/complex.hpp>
+#include <tracked/journal.hpp>
+
+#include <cstdlib>
+#include <iostream>
+#include <random>
+#include <string>
+
+// ql_tracked_interop.hpp must come FIRST (see B13/BIN2 drivers).
+#include "ql_tracked_interop.hpp"
+#include "kokkosMaths.h"
+#include "kokkosUtils.h"
+#include "boxGPU.h"
+
+using T       = double;
+using TScale  = tracked::Tracked<T>;
+using TMass   = tracked::Tracked<T>;
+using TOutput = tracked::Complex<T>;
+
+namespace {
+
+// Kinematic ranges from boxGPU_test.cc (low=100, up=1000000).
+constexpr double kLow = 100.0;
+constexpr double kUp  = 1'000'000.0;
+constexpr double kMu2 = 91.2 * 91.2;
+
+// BIN-sweep internal-mass value (boxGPU_test.cc:189 loop sets the first
+// n_masses internal masses to 10). BIN4 sets all four.
+constexpr double kMassVal = 10.0;
+
+double r_uniform(std::mt19937& rng, double lo, double hi) {
+    std::uniform_real_distribution<double> d(lo, hi);
+    return d(rng);
+}
+
+// Signed uniform, matching boxGPU_test.cc rs(low,up). BIN4 uses it for all
+// four invariants p1..p4, which can therefore be negative and steer the box
+// dispatcher into a discriminant branch.
+double r_signed(std::mt19937& rng, double lo, double hi) {
+    double v = r_uniform(rng, lo, hi);
+    std::uniform_real_distribution<double> s(0.0, 1.0);
+    return s(rng) < 0.5 ? -v : v;
+}
+
+// Wrap a bare double as a tracked scalar with a stable id so the journal
+// preserves per-input provenance across the batch.
+TMass make_mass(const char* stem, int i, double v) {
+    std::string id = std::string(stem) + "[" + std::to_string(i) + "]";
+    return tracked::track<T>(id, v);
+}
+
+} // namespace
+
+int main(int argc, char* argv[]) {
+    Kokkos::initialize(argc, argv);
+    {
+        int sample_count = 256;
+        if (argc > 1) {
+            try {
+                sample_count = std::stoi(argv[1]);
+                if (sample_count <= 0) sample_count = 256;
+            } catch (...) {
+                sample_count = 256;
+            }
+        }
+        std::cout << "BIN4 spike: sample_count = " << sample_count << "\n";
+
+        using HostSpace = Kokkos::HostSpace;
+        Kokkos::View<TScale*,         HostSpace> mu2("mu2", sample_count);
+        Kokkos::View<TMass*   [4],    HostSpace> m  ("m",   sample_count);
+        Kokkos::View<TScale*  [6],    HostSpace> p  ("p",   sample_count);
+        Kokkos::View<TOutput* [3],    HostSpace> res("res", sample_count);
+
+        std::mt19937 rng(12345);
+
+        // BIN4 configuration (boxGPU_test.cc:189 loop at n_masses=4):
+        //   m1=m2=m3=m4=10; p1=p2=p3=p4=rs(low,up) [signed]; p5=r, p6=r.
+        for (int i = 0; i < sample_count; ++i) {
+            mu2(i) = tracked::track<T>("mu2[" + std::to_string(i) + "]", kMu2);
+
+            m(i, 0) = make_mass("m1", i, kMassVal);
+            m(i, 1) = make_mass("m2", i, kMassVal);
+            m(i, 2) = make_mass("m3", i, kMassVal);
+            m(i, 3) = make_mass("m4", i, kMassVal);
+
+            p(i, 0) = tracked::track<T>("p1[" + std::to_string(i) + "]", r_signed(rng, kLow, kUp));
+            p(i, 1) = tracked::track<T>("p2[" + std::to_string(i) + "]", r_signed(rng, kLow, kUp));
+            p(i, 2) = tracked::track<T>("p3[" + std::to_string(i) + "]", r_signed(rng, kLow, kUp));
+            p(i, 3) = tracked::track<T>("p4[" + std::to_string(i) + "]", r_signed(rng, kLow, kUp));
+            p(i, 4) = tracked::track<T>("p5[" + std::to_string(i) + "]", r_uniform(rng, kLow, kUp));
+            p(i, 5) = tracked::track<T>("p6[" + std::to_string(i) + "]", r_uniform(rng, kLow, kUp));
+        }
+
+        // Host loop, NOT Kokkos::parallel_for: tracked ops are host-only.
+        int printed = 0;
+        for (int i = 0; i < sample_count; ++i) {
+            tracked::scope sample_scope("sample=" + std::to_string(i));
+            ql::BO<TOutput, TMass, TScale>(res, mu2, m, p, i);
+
+            if (printed < 3) {
+                std::cout << "  BIN4[" << i << "] coeff0 = ("
+                          << res(i, 0).real().value() << ", "
+                          << res(i, 0).imag().value() << ")\n";
+                ++printed;
+            }
+        }
+
+        tracked::journal::flush("journal.jsonl");
+        std::cout << "wrote journal.jsonl\n";
+    }
+    Kokkos::finalize();
+    return 0;
+}
