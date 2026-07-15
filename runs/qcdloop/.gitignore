@@ -1,0 +1,14 @@
+# Build artifacts
+build/
+
+# Journals (100k+ runs regenerate locally from the committed driver + shim +
+# patch); keep the journal, its compressed snapshots, any Parquet exports, and
+# run.log out of git. Mirrors runs/B13/.gitignore.
+journal.jsonl
+journal*.jsonl.gz
+*.parquet
+run.log
+
+# journal_meta.json is a small build/run metadata sibling; regenerated on every
+# run alongside the journal, so it is also kept out of git.
+journal_meta.json
