@@ -125,7 +125,15 @@ int main(int argc, char* argv[]) {
     Kokkos::initialize(argc, argv);
     {
         // --sample-count N  (default 256, for Stage-2 parity; 100k later).
+        // --sample-offset O (default 0): dispatch global samples [O, O+N) instead
+        //   of [0, N).  Inputs for samples [0, O) are still filled so the mt19937
+        //   draw sequence and the per-input ids are byte-identical to a single
+        //   [0, O+N) run — but those samples emit NO ops (track() is recordless),
+        //   so the journal holds only this chunk.  This makes chunk [O, O+N)
+        //   bit-identical to the same samples in one big run, letting a 100k
+        //   characterization run in bounded-journal chunks that reduce in-process.
         int sample_count = 256;
+        int sample_offset = 0;
         for (int a = 1; a < argc; ++a) {
             std::string arg = argv[a];
             if (arg == "--sample-count" && a + 1 < argc) {
@@ -133,22 +141,30 @@ int main(int argc, char* argv[]) {
                     int n = std::stoi(argv[++a]);
                     if (n > 0) sample_count = n;
                 } catch (...) { /* keep default */ }
+            } else if (arg == "--sample-offset" && a + 1 < argc) {
+                try {
+                    int n = std::stoi(argv[++a]);
+                    if (n >= 0) sample_offset = n;
+                } catch (...) { /* keep default */ }
             }
         }
+        // Total samples to materialize (fill); only [sample_offset, total) dispatch.
+        const int total_samples = sample_offset + sample_count;
         std::cout << "qcdloop consolidated driver: sample_count = "
-                  << sample_count << " per integral, "
-                  << kIntegrals.size() << " integrals\n";
+                  << sample_count << " per integral, offset = " << sample_offset
+                  << " (global samples [" << sample_offset << ", " << total_samples
+                  << ")), " << kIntegrals.size() << " integrals\n";
 
         using HostSpace = Kokkos::HostSpace;
-        Kokkos::View<TScale*,      HostSpace> mu2("mu2", sample_count);
-        Kokkos::View<TMass*  [4],  HostSpace> m  ("m",   sample_count);
-        Kokkos::View<TScale* [6],  HostSpace> p  ("p",   sample_count);
-        Kokkos::View<TOutput*[3],  HostSpace> res("res", sample_count);
+        Kokkos::View<TScale*,      HostSpace> mu2("mu2", total_samples);
+        Kokkos::View<TMass*  [4],  HostSpace> m  ("m",   total_samples);
+        Kokkos::View<TScale* [6],  HostSpace> p  ("p",   total_samples);
+        Kokkos::View<TOutput*[3],  HostSpace> res("res", total_samples);
 
         // Fill mu2 once (constant across every integral and sample). mu2 ids are
         // bare; the value is identical to every Stage-2 driver.
         auto fill_mu2 = [&]() {
-            for (int i = 0; i < sample_count; ++i)
+            for (int i = 0; i < total_samples; ++i)
                 mu2(i) = make_scale("mu2", i, kMu2);
         };
 
@@ -163,11 +179,14 @@ int main(int argc, char* argv[]) {
                                 const std::function<void(int, std::mt19937&)>& fill) {
             std::mt19937 rng(kSeedBase);
             fill_mu2();
-            for (int i = 0; i < sample_count; ++i) fill(i, rng);
+            // Fill [0, total): replays the rng draws and input ids for the skipped
+            // prefix exactly (track() emits nothing), so dispatched samples match a
+            // single [0, total) run bit-for-bit.
+            for (int i = 0; i < total_samples; ++i) fill(i, rng);
 
             tracked::scope integral_scope("integral=" + name);
             bool printed = false;
-            for (int i = 0; i < sample_count; ++i) {
+            for (int i = sample_offset; i < total_samples; ++i) {
                 tracked::scope sample_scope("sample=" + std::to_string(i));
                 ql::BO<TOutput, TMass, TScale>(res, mu2, m, p, i);
                 if (!printed) {
@@ -402,6 +421,7 @@ int main(int argc, char* argv[]) {
             }
             meta << "],\n";
             meta << "  \"sample_count_per_integral\": " << sample_count << ",\n";
+            meta << "  \"sample_offset\": " << sample_offset << ",\n";
             meta << "  \"seed_base\": " << kSeedBase << ",\n";
             meta << "  \"backend\": \"Kokkos::Serial\",\n";
             meta << "  \"shim_source_hash\": \"" << QCDLOOP_SHIM_SHA << "\",\n";

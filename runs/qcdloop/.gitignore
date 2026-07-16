@@ -12,3 +12,8 @@ run.log
 # journal_meta.json is a small build/run metadata sibling; regenerated on every
 # run alongside the journal, so it is also kept out of git.
 journal_meta.json
+
+# Chunked-runner transient shards and consolidated reports (run_chunked.py):
+# regenerated locally from the committed driver + shim + patches.
+shards/
+report_*.json
