@@ -83,6 +83,7 @@ def build_and_run(
     use_tracked: bool = False,
     target_library_headers: Path | None = None,
     existing_shim: Path | None = None,
+    inject_line_scopes: bool = False,
 ) -> RunResult:
     """Write driver_source to a temp directory, cmake-build, and execute.
 
@@ -98,6 +99,14 @@ def build_and_run(
     place — any caller that opts in benefits automatically (task revision #2,
     option (a)).  With ``use_tracked`` False (the default) the flow is exactly
     the pre-existing compile/run path, so current characterizer callers are
+    unaffected.
+
+    When ``inject_line_scopes`` is True (requires ``use_tracked`` + a git-tracked
+    header tree), a successful build is followed by a per-statement ``line=``
+    scope injection pass (``tracked_integrator.line_injector``): it patches the
+    on-disk (post-C8) headers so operator ops attribute to source lines, then
+    rebuilds once.  The scopes are value-neutral; the tree is reset in the
+    ``finally`` like the C8 patch.  Off by default so existing callers are
     unaffected.
     """
 
@@ -213,6 +222,50 @@ def build_and_run(
                 phase="build",
             )
 
+        # --- Per-line attribution (optional) ---
+        # With a clean build in hand, inject a `line=<basename>:<N>` scope around
+        # every value-producing statement in the target headers so operator ops
+        # (which carry no source location) attribute to a source line.  Generated
+        # against the CURRENT on-disk tree — i.e. AFTER any C8 patch — so the two
+        # patches compose; applied, then the driver is rebuilt once.  Scopes are
+        # value-neutral, so the numeric journal is unchanged (see qcdloop
+        # VALIDATION.md's 256-sample bit-exactness gate).
+        if (inject_line_scopes and tracked_integrator is not None
+                and repo_root is not None and shim_path is not None):
+            from agents.tracked_integrator import line_injector  # noqa: PLC0415
+
+            patch_text, _stats = line_injector.build_line_patch(
+                driver_source=driver_cpp,
+                headers_dir=headers_path,
+                tracked_include=Path(cfg.tracked_root) / "include",
+                repo_root=repo_root,
+                kokkos_include=(Path(cfg.kokkos_root) if cfg.kokkos_root else None),
+                cxx_standard=cfg.cxx_standard,
+                system_include_dirs=_module_gcc_search_dirs(),
+            )
+            if patch_text:
+                lines_patch = _companion_lines_patch_path(shim_path)
+                lines_patch.write_text(patch_text, encoding="utf-8")
+                apply_lines = _git_apply(repo_root, lines_patch)
+                if apply_lines.returncode != 0:
+                    return RunResult(
+                        returncode=apply_lines.returncode,
+                        stdout=apply_lines.stdout,
+                        stderr=f"line= patch apply failed ({lines_patch}):\n{apply_lines.stderr}",
+                        journal_path=None, work_dir=work_dir, phase="build",
+                    )
+                patched_tree = (repo_root, headers_path)
+                build_result = _run_build_step(
+                    ["cmake", "--build", ".", "-j"], cwd=str(build_dir)
+                )
+                if build_result.returncode != 0:
+                    return RunResult(
+                        returncode=build_result.returncode,
+                        stdout=build_result.stdout,
+                        stderr="line= instrumented rebuild failed:\n" + build_result.stderr,
+                        journal_path=None, work_dir=work_dir, phase="build",
+                    )
+
         # --- Run ---
         # Wrapped in the module chain too: the binary is linked against the module
         # gcc's libstdc++, so it needs that lib on LD_LIBRARY_PATH at runtime.
@@ -278,6 +331,35 @@ def _git_apply(repo_root: Path, patch_file: Path) -> subprocess.CompletedProcess
         ["git", "apply", str(Path(patch_file).resolve())],
         cwd=str(repo_root), capture_output=True, text=True,
     )
+
+
+def _companion_lines_patch_path(shim_path: Path) -> Path:
+    """The ``<app>_lines.patch`` (line= injection) written next to the shim."""
+    shim_path = Path(shim_path)
+    name = shim_path.name
+    app = name[: -len("_interop.hpp")] if name.endswith("_interop.hpp") else shim_path.stem
+    return shim_path.with_name(f"{app}_lines.patch")
+
+
+def _module_gcc_search_dirs() -> list[str]:
+    """The active toolchain's ``#include <...>`` dirs, resolved under the module
+    chain (this Python process has no module env, so a bare ``g++`` would be the
+    wrong compiler or absent).  Handed to the line injector's libclang parse."""
+    r = _run_build_step(["g++", "-x", "c++", "-E", "-v", "-"], cwd=".")
+    out = (r.stderr or "") + (r.stdout or "")
+    dirs: list[str] = []
+    grab = False
+    for ln in out.splitlines():
+        if "#include <...> search starts here:" in ln:
+            grab = True
+            continue
+        if "End of search list." in ln:
+            break
+        if grab:
+            d = ln.strip().split(" (")[0]
+            if d and Path(d).is_dir():
+                dirs.append(d)
+    return dirs
 
 
 # ---------------------------------------------------------------------------

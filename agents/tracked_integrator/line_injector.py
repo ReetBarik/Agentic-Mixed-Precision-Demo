@@ -145,10 +145,12 @@ def gcc_search_dirs(cxx: str = "g++") -> list[str]:
 
 
 def _parse_args(headers_dir: Path, tracked_include: Path, driver_dir: Path,
-                kokkos_include: Path | None, cxx_standard: int) -> list[str]:
+                kokkos_include: Path | None, cxx_standard: int,
+                system_include_dirs: list[str] | None = None) -> list[str]:
     args = [f"-std=c++{cxx_standard}", "-x", "c++", "-ferror-limit=0",
             "-nostdinc++"]
-    for d in gcc_search_dirs():
+    dirs = system_include_dirs if system_include_dirs is not None else gcc_search_dirs()
+    for d in dirs:
         args += ["-isystem", d]
     args += [
         f"-I{tracked_include}",
@@ -297,6 +299,7 @@ def build_line_patch(
     kokkos_include: Path | None = None,
     target_basenames: set[str] | None = None,
     cxx_standard: int = 17,
+    system_include_dirs: list[str] | None = None,
 ) -> tuple[str | None, dict]:
     """Parse ``driver_source`` and emit a ``line=`` injection patch.
 
@@ -316,7 +319,8 @@ def build_line_patch(
     repo_root = Path(repo_root).resolve()
 
     args = _parse_args(headers_dir, Path(tracked_include).resolve(),
-                       driver_source.parent, kokkos_include, cxx_standard)
+                       driver_source.parent, kokkos_include, cxx_standard,
+                       system_include_dirs=system_include_dirs)
     index = C.Index.create()
     tu = index.parse(str(driver_source), args=args)
 
