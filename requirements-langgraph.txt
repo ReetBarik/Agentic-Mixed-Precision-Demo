@@ -2,3 +2,6 @@ anthropic
 langgraph
 pydantic
 pyyaml
+# Per-statement line= scope injector (agents/tracked_integrator/line_injector.py).
+# The wheel bundles its own libclang.so — no system clang needed.
+libclang

@@ -76,3 +76,44 @@ baseline; op-count divergence documented as benign.
 regenerated locally and gitignored. Rebuild: apply `src/ql_tracked.patch` to
 `runs/qcdloop_headers_full`, `cmake`/build, run `./build/boxGPU_tracked
 --sample-count 256`, then reset the header tree.
+
+## Per-line attribution (`line=` scope injection)
+
+C++ operator ops carry no source location, so per-*line* attribution comes from
+`line=<basename>:<N>` scopes injected around every value-producing statement
+across the arithmetic closure (`box/*.h`, `box_common.h`, `kokkosMaths.h`,
+`kokkosUtils.h`, and the `boxGPU.h` dispatch). The injector
+(`agents/tracked_integrator/line_injector.py`) walks the libclang AST of
+`boxGPU_tracked.cpp`, selects statements structurally (subtree bears an
+operator/call — not by name; the box functions are templates so types are
+dependent), and emits `src/ql_tracked_lines.patch` (1089 sites). Declarations
+wrap with `tracked::push_scope/pop_scope` (a lexical block would scope the name
+out); other statements wrap with an RAII `{ tracked::scope … ; <stmt>; }`.
+
+Regenerate (composes with the C8 patch — applied to the tree, then reset):
+
+```
+module use /soft/modulefiles && module load gcc/13.3.0 cmake/3.28.3
+python -m agents.tracked_integrator.line_injector \
+  --driver runs/qcdloop/src/boxGPU_tracked.cpp \
+  --headers runs/qcdloop_headers_full \
+  --tracked-include third_party/tracked/include \
+  --kokkos-include $HOME/kokkos-install/include \
+  --repo-root . --c8-patch runs/qcdloop/src/ql_tracked.patch \
+  --out runs/qcdloop/src/ql_tracked_lines.patch
+```
+
+Build with attribution: apply `src/ql_tracked.patch` **then**
+`src/ql_tracked_lines.patch`, build, run, reset the tree.
+
+### Bit-exactness gate (256 samples, 2026-07-16) — PASS
+
+Scopes are value-neutral by construction; proven empirically by comparing a
+C8-only build to a C8+`line=` build at 256 samples:
+
+- **`coeff0` bit-identical** across all 21 integrals (`diff` of run logs).
+- **`max(cond)` and per-integral op counts bit-identical** (`==`) for all 21
+  integrals (reducer over both journals).
+- **Attribution works:** the reducer now yields **35–102 `line=` regions per
+  integral** (vs one `""` bucket in the C8-only journal), no `line=` value
+  contains `/`.
