@@ -207,8 +207,15 @@ def main(argv: list[str] | None = None) -> int:
         if failures:
             raise RuntimeError(f"{len(failures)} chunk(s) failed; aborting merge")
 
-        shards = [json.loads(Path(p).read_text()) for p in shard_paths]
-        report = sr.finalize_report(sr.merge_reports(shards))
+        # Fold shards one at a time instead of materializing all of them at
+        # once: merge_reports is associative/order-free, so this is bit-identical
+        # to merging the full list, but peak memory stays ~2 shards instead of
+        # N (a 200-shard 100k run would otherwise hold 150-300 GB resident).
+        merged = None
+        for p in shard_paths:
+            shard = json.loads(Path(p).read_text())
+            merged = shard if merged is None else sr.merge_reports([merged, shard])
+        report = sr.finalize_report(merged)
         sr._write_json(report, args.out)
         print(f"wrote consolidated report: {args.out} "
               f"(total wall {time.monotonic()-t0:.0f}s)", flush=True)
