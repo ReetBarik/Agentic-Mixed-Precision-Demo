@@ -258,6 +258,40 @@ def test_line_scope_regions_and_cross_boundary_amp(tmp_path):
     assert "direction" not in acc
 
 
+def test_line_scope_value_must_be_basename_no_slash(tmp_path):
+    """Pin the hard constraint on the ``line=`` value: it MUST be a basename
+    (``B2m.h:84``), never a path (``box/B2m.h:84``).
+
+    ``current_scope_suffix`` joins the scope stack with ``/`` and ``_parse_scope``
+    splits on ``/``, so a ``/`` inside a ``line=`` value is read as a scope
+    boundary: ``line=box/B2m.h:84`` parses as ``{"line": "box"}`` plus a stray
+    ``B2m.h:84`` part with no ``=`` (discarded).  The region then collapses to the
+    directory name ``box`` — every box header would alias together, destroying
+    per-line attribution.  The per-statement injector emits basenames; this test
+    fails loudly if that invariant is ever broken (in the injector or by a change
+    to the scope separator).
+    """
+    # Unit level: _region_key on the two id shapes.
+    slashed = f"sub@?#1@integral=B2/sample=0/line=box/B2m.h:84"
+    basename = f"sub@?#1@integral=B2/sample=0/line=B2m.h:84"
+    assert sr._region_key({"id": slashed}) == "box"          # truncated — WRONG
+    assert sr._region_key({"id": basename}) == "B2m.h:84"    # correct
+
+    # Reduce level: a slashed line scope buckets under the bare directory, so two
+    # distinct source lines in different headers would alias; basenames don't.
+    j_bad = write_journal(tmp_path / "slash.jsonl", [
+        rec("sub", "", slashed, ["e", "f"], 1.0, 1e6, 1e-9, prov_vars=["e", "f"]),
+    ])
+    regions_bad = sr.reduce_journal(j_bad)["integrals"]["B2"]["regions"]
+    assert "box" in regions_bad and "B2m.h:84" not in regions_bad
+
+    j_ok = write_journal(tmp_path / "base.jsonl", [
+        rec("sub", "", basename, ["e", "f"], 1.0, 1e6, 1e-9, prov_vars=["e", "f"]),
+    ])
+    regions_ok = sr.reduce_journal(j_ok)["integrals"]["B2"]["regions"]
+    assert "B2m.h:84" in regions_ok and "box" not in regions_ok
+
+
 # ---------------------------------------------------------------------------
 # merge associativity
 # ---------------------------------------------------------------------------
