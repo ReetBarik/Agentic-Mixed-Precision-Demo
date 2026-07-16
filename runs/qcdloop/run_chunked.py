@@ -133,7 +133,12 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--keep-shards", action="store_true")
     ap.add_argument("--no-prepare", action="store_true",
                     help="assume the tree is already patched+built")
+    ap.add_argument("--resume", action="store_true",
+                    help="reuse any already-written, valid shard in --shard-dir "
+                         "(skip recomputing those chunks); implies --keep-shards")
     args = ap.parse_args(argv)
+    if args.resume:
+        args.keep_shards = True
 
     shard_dir = Path(args.shard_dir)
     shard_dir.mkdir(exist_ok=True)
@@ -144,11 +149,32 @@ def main(argv: list[str] | None = None) -> int:
           f"({len(offsets)} chunks) workers={workers} "
           f"est. peak journal on disk ≈ {peak_gb:.0f} GB -> {args.out}", flush=True)
 
-    tasks = [
+    def _valid_shard(p: Path) -> bool:
+        """A shard is reusable only if it parses (guards against a shard whose
+        write was interrupted by a hard kill mid-run)."""
+        try:
+            json.loads(p.read_text())
+            return True
+        except Exception:  # noqa: BLE001
+            return False
+
+    all_tasks = [
         {"offset": off, "count": min(args.chunk, args.total - off),
          "shard_path": str(shard_dir / f"shard_{off:08d}.json")}
         for off in offsets
     ]
+    done_shard_paths: list[str] = []
+    tasks = all_tasks
+    if args.resume:
+        tasks = []
+        for t in all_tasks:
+            sp = Path(t["shard_path"])
+            if sp.is_file() and _valid_shard(sp):
+                done_shard_paths.append(t["shard_path"])
+            else:
+                tasks.append(t)
+        print(f"resume: {len(done_shard_paths)} shard(s) reused, "
+              f"{len(tasks)} chunk(s) to run", flush=True)
 
     prepared = False
     try:
@@ -158,7 +184,7 @@ def main(argv: list[str] | None = None) -> int:
             build()
             print("prepared tree (C8 + line=) and built", flush=True)
 
-        shard_paths: list[str] = []
+        shard_paths: list[str] = list(done_shard_paths)
         failures: list[dict] = []
         t0 = time.monotonic()
         done = 0
