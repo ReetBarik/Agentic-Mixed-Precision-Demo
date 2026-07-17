@@ -8,6 +8,11 @@ build_logs/
 # Generated agent outputs (per-target, ephemeral verification artifacts)
 experiments/*/generated/
 
+# Validator run artifacts (baseline caches + persisted precise-digits arrays)
+runs/qcdloop/validator/cache/
+runs/qcdloop/validator/*/
+!runs/qcdloop/validator/.gitkeep
+
 # Python caches
 **/__pycache__/
 *.py[cod]
