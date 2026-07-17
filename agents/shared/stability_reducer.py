@@ -55,6 +55,13 @@ from typing import Iterable, Iterator
 
 U_DOUBLE = 2.0 ** -53          # ~1.11e-16
 U_FLOAT = 2.0 ** -24           # ~5.96e-8
+# float-float (double-single) unit roundoff.  ff carries ~2x float's mantissa
+# (48 nominal bits), but the error-free-transformation emulation loses ~2 bits to
+# the residual terms, so the *empirical* precision floor is ~2**-46 (~1.42e-14,
+# the ~14 documented digits) rather than the nominal 2**-48.  Used for the
+# policy-neutral ``predicted_rel_err_if_ff`` prediction the Strategy speedup queue
+# compares to its margin (unlocks double->ff speedups at high tolerance).
+U_FF = 2.0 ** -46              # ~1.42e-14
 FLT_MIN_NORMAL = 1.1754943508222875e-38
 FLT_MAX = 3.4028234663852886e38
 ATAN2_SATURATION = 2.0 ** 53   # documented gate-(a) cap (ops.hpp atan2 at 1/u)
@@ -627,6 +634,7 @@ def _classify_region(reg: dict, cfg: ReducerConfig) -> dict:
         "max_amp": reg.get("max_amp", 0.0),
         "max_sensitivity": sens,                 # cond * amp (forward cone)
         "predicted_rel_err_if_float": U_FLOAT * sens,   # measured prediction
+        "predicted_rel_err_if_ff": U_FF * sens,         # measured prediction (ff)
         "abs_val_min": reg.get("abs_val_min"),
         "abs_val_max": reg.get("abs_val_max"),
         "value_range_ok_for_float": _range_ok_for_float(reg),
@@ -642,6 +650,7 @@ def _classify_variable(var: dict, cfg: ReducerConfig) -> dict:
         "max_amp": var.get("max_amp", 0.0),
         "max_sensitivity": sens,
         "predicted_rel_err_if_float": U_FLOAT * sens,   # measured prediction
+        "predicted_rel_err_if_ff": U_FF * sens,         # measured prediction (ff)
         "n_consumers": var.get("n_consumers", 0),
         "is_source_var": var.get("is_source_var", False),
         # source values are not journaled by track(); float range guard N/A here.

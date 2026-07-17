@@ -113,6 +113,9 @@ def test_early_benign_node_high_amp(tmp_path):
     # large predicted float error. Strategy applies its own margin to this number.
     assert early["max_amp"] == pytest.approx(1e12)
     assert early["predicted_rel_err_if_float"] == pytest.approx(sr.U_FLOAT * 1e12)
+    # ff prediction is the same measurement at ff's tighter unit roundoff — the
+    # Strategy speedup queue compares this to its margin to queue double->ff.
+    assert early["predicted_rel_err_if_ff"] == pytest.approx(sr.U_FF * 1e12)
     # the reducer emits no direction/verdict — that is Strategy's job
     assert "direction" not in early
     assert "downcast_safe" not in early
@@ -143,6 +146,10 @@ def test_stable_region_emits_measurements_not_verdict(tmp_path):
     assert stable["value_range_ok_for_float"] is True
     # cond*amp == 1 here, so the predicted float error is just float's own u
     assert stable["predicted_rel_err_if_float"] == pytest.approx(sr.U_FLOAT)
+    # ...and the ff prediction is ff's own u (~1.4e-14), which clears a 10-digit
+    # margin where float cannot — this is exactly what unblocks the ff speedup queue
+    assert stable["predicted_rel_err_if_ff"] == pytest.approx(sr.U_FF)
+    assert stable["predicted_rel_err_if_ff"] < 1e-10 < stable["predicted_rel_err_if_float"]
     # policy-neutral: no direction/verdict — Strategy owns that
     assert "downcast_safe" not in stable
     assert "direction" not in stable
