@@ -15,8 +15,14 @@ correct decimal digits the candidate retains versus a double-double ground truth
 Per output component (coeff0/1/2, real+imag independent), across all samples and
 all 21 integrals, it computes precise-digits vs the DD reference (see
 :mod:`agents.validator.precise_digits`), takes the min for both candidate and
-current, and emits the verdict contract.  The Validator is stateless — Strategy
-owns the accumulated accepted-patch state (passed in via ``base_state``).
+current, and emits the verdict contract.  Components that are effectively zero
+against their sample's characteristic magnitude (numeric/physics zeros — e.g. the
+imaginary part of a purely-real integral) are reported at the cap rather than as
+spurious 0-digit noise, and counted in ``zeroed_components``.  The gate is
+**delta-primary**: a patch that does not regress the global-min vs the current
+baseline is accepted, regardless of the absolute floor (double is inherently
+~9-digit on the ill-conditioned integrals).  The Validator is stateless —
+Strategy owns the accumulated accepted-patch state (passed in via ``base_state``).
 
 ``base_state`` schema (v1)::
 
@@ -47,7 +53,9 @@ from agents.integrator_base import cache as _hashcache
 from agents.dd_integrator import agent as dd_integrator
 from agents.validator import runner
 from agents.validator.coeffs import COMPONENT_LABELS, N_COMPONENTS
-from agents.validator.precise_digits import MAX_DIGITS_F, precise_digits_fast
+from agents.validator.precise_digits import (
+    MAX_DIGITS_F, effectively_zero, precise_digits_fast,
+)
 
 _REPO = Path(__file__).resolve().parents[2]
 _DEFAULT_VANILLA = _REPO / "runs" / "qcdloop_headers_full"
@@ -61,15 +69,26 @@ _CACHE_DIR = _VALIDATOR_ROOT / "cache"
 # Public API
 # ---------------------------------------------------------------------------
 
-def validate(base_state: dict, candidate_patch: str | None, tolerance: float = 10.0,
-             snapshot: dict | None = None, *, chunk: int = 0, workers: int = 1,
+def validate(base_state: dict, candidate_patch: str | None, tolerance: float = 0.5,
+             snapshot: dict | None = None, *, floor: float | None = None,
+             chunk: int = 0, workers: int = 1,
              run_id: str | None = None, persist: bool = True) -> dict:
     """Precision-loss acceptance test for one ``candidate_patch``.
 
     Returns the verdict object (see module docstring / the task contract).
-    Stateless: no memory of prior calls.  ``chunk``/``workers`` tune the chunked
-    run (0 chunk → single [0, total) run).  ``run_id`` names the persisted
-    per-sample precise-digits artifact; auto-derived if omitted.
+    Stateless: no memory of prior calls.
+
+    The verdict is **delta-primary**: ``tolerance`` is the maximum acceptable
+    regression (in precise digits) of the candidate's global-min vs the current
+    baseline — accept iff ``(candidate_min - current_min) >= -tolerance``.  This
+    is robust to double precision being inherently limited on the ill-conditioned
+    integrals: a patch that preserves the existing precision passes regardless of
+    the absolute floor.  ``floor`` optionally adds an absolute expectation for the
+    candidate (a rewrite meant to reach N digits) → reason ``insufficient_fix``.
+
+    ``chunk``/``workers`` tune the chunked run (0 chunk → single [0, total) run).
+    ``run_id`` names the persisted per-sample precise-digits artifact;
+    auto-derived if omitted.
     """
     snapshot = snapshot or {"seed": 12345, "sample_count": 100000}
     seed = int(snapshot.get("seed", 12345))
@@ -128,11 +147,13 @@ def validate(base_state: dict, candidate_patch: str | None, tolerance: float = 1
                         out_dir if persist else None)
 
     verdict, reason = _decide(cand_stats["min_precise_digits"],
-                              curr_stats["min_precise_digits"], tolerance)
+                              curr_stats["min_precise_digits"], tolerance, floor)
 
     return {
         "verdict": verdict,
-        "threshold": float(tolerance),
+        "gate": "delta",
+        "threshold": float(tolerance),      # max acceptable regression (digits)
+        "floor": None if floor is None else float(floor),
         "candidate": cand_stats,
         "current": curr_stats,
         "delta": round(cand_stats["min_precise_digits"] - curr_stats["min_precise_digits"], 6),
@@ -147,14 +168,29 @@ def validate(base_state: dict, candidate_patch: str | None, tolerance: float = 1
 # Verdict logic
 # ---------------------------------------------------------------------------
 
-def _decide(cand_min: float, curr_min: float, tol: float) -> tuple[str, str]:
-    """Verdict + reason from the two minima and the threshold."""
-    if cand_min >= tol:
-        return "accept", "accept"
-    # candidate failed the threshold; distinguish regression vs insufficient fix.
-    if curr_min >= tol:
+def _decide(cand_min: float, curr_min: float, max_regression: float,
+            floor: float | None = None) -> tuple[str, str]:
+    """Delta-primary verdict + reason.
+
+    The gate is the candidate's regression against the *current* baseline, not an
+    absolute floor: double precision is inherently limited on the ill-conditioned
+    integrals (~9 digits on the BIN cancellation cascade), so a patch that simply
+    preserves the existing precision must pass.  Accept iff the candidate loses no
+    more than ``max_regression`` digits of global-min vs current::
+
+        accept  ⇔  (cand_min - curr_min) >= -max_regression
+
+    ``floor`` is an optional absolute expectation for the *candidate* (e.g. a
+    rewrite meant to reach N digits): when given and the candidate does not
+    regress but still falls below it, the reason is ``insufficient_fix`` rather
+    than ``accept``.  Left ``None`` in pure delta mode.
+    """
+    delta = cand_min - curr_min
+    if delta < -max_regression:
         return "reject", "regression"
-    return "reject", "insufficient_fix"
+    if floor is not None and cand_min < floor:
+        return "reject", "insufficient_fix"
+    return "accept", "accept"
 
 
 # ---------------------------------------------------------------------------
@@ -166,13 +202,20 @@ def _score(cand: runner.CoeffArrays, ref: runner.CoeffArrays, label: str,
     """Min precise-digits of ``cand`` vs DD ``ref`` + its hotspot; persist array.
 
     Iterates every (integral, sample, component); tracks the global minimum and
-    the component that realized it.  When ``out_dir`` is given, writes a JSONL
+    the component that realized it.  Each sample's ``ref_scale`` is the max
+    |DD reference component| across that sample's six coeffs — components that
+    are effectively zero against it (numeric/physics zeros, see
+    :func:`~agents.validator.precise_digits.effectively_zero`) report at the cap
+    rather than as spurious 0-digit noise.  ``zeroed_components`` counts them so
+    the min is never silently inflated.  When ``out_dir`` is given, writes a JSONL
     row per (integral, sample) with the six component digits to
     ``<out_dir>/<label>_precise_digits.jsonl``.
     """
     integrals = sorted(ref.keys())
     best_min = MAX_DIGITS_F
     hot = None
+    zeroed = 0
+    total_components = 0
 
     writer = None
     if out_dir is not None:
@@ -192,11 +235,24 @@ def _score(cand: runner.CoeffArrays, ref: runner.CoeffArrays, label: str,
             n_samples = len(r_hi) // N_COMPONENTS
             for s in range(n_samples):
                 base = s * N_COMPONENTS
+                # Per-sample characteristic magnitude: the largest |DD coeff|.
+                ref_scale = 0.0
+                for c in range(N_COMPONENTS):
+                    j = base + c
+                    m = abs(r_hi[j] + r_lo[j])
+                    if m > ref_scale:
+                        ref_scale = m
                 row_digits = []
                 for c in range(N_COMPONENTS):
                     j = base + c
-                    d = precise_digits_fast(c_hi[j], c_lo[j], r_hi[j], r_lo[j])
+                    d = precise_digits_fast(c_hi[j], c_lo[j], r_hi[j], r_lo[j],
+                                            ref_scale=ref_scale)
                     row_digits.append(d)
+                    total_components += 1
+                    err = abs((c_hi[j] - r_hi[j]) + (c_lo[j] - r_lo[j]))
+                    true = abs(r_hi[j] + r_lo[j])
+                    if err != 0.0 and effectively_zero(true, err, ref_scale):
+                        zeroed += 1
                     if d < best_min:
                         best_min = d
                         hot = {
@@ -218,7 +274,12 @@ def _score(cand: runner.CoeffArrays, ref: runner.CoeffArrays, label: str,
 
     if hot is not None:
         hot["precise_digits"] = round(hot["precise_digits"], 4)
-    return {"min_precise_digits": round(best_min, 4), "hotspot": hot}
+    return {
+        "min_precise_digits": round(best_min, 4),
+        "hotspot": hot,
+        "zeroed_components": zeroed,
+        "total_components": total_components,
+    }
 
 
 # ---------------------------------------------------------------------------

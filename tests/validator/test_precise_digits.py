@@ -44,12 +44,37 @@ def test_ten_digit_error_reads_ten():
 
 
 def test_ref_scale_effectively_zero_is_max():
-    # both |true| and |err| below 1e-30 * ref_scale -> treated as zero -> max
+    # both |true| and |err| below ZERO_REL_TOL * ref_scale -> zero -> max
     d = precise_digits(_D("1e-50"), _D("2e-50"), ref_scale=_D("1.0"))
     assert d == MAX_DIGITS
     # without ref_scale, the same near-zero terms read as ~0.3 noise digits
     # (rel err 0.5) — which is exactly the _ieps50 artifact ref_scale rescues.
     assert precise_digits(_D("1e-50"), _D("2e-50")) < 1
+
+
+def test_per_sample_zero_band_maxes_numeric_zero():
+    # The real BIN0 case: coeff0.imag is a numeric zero (DD ~1e-42, double
+    # roundoff ~1e-28) against a sample whose scale (coeff0.real) is ~1.7e-11.
+    # Both magnitudes sit far inside 1e-15 * ref_scale -> reported at the cap,
+    # not as spurious 0-digit noise.
+    d = precise_digits_fast(1.261977e-28, 0.0, -1.952999e-42, 0.0,
+                            ref_scale=1.673558e-11)
+    assert d == MAX_DIGITS_F
+    # Without the per-sample scale it reads 0 digits — the artifact we fixed.
+    assert precise_digits_fast(1.261977e-28, 0.0, -1.952999e-42, 0.0) == 0.0
+
+
+def test_per_sample_zero_band_spares_genuine_small_signal():
+    # A component genuinely small but ABOVE the band (1e-6 of scale) carrying
+    # 5 correct digits must keep its digit count, not be swallowed as zero.
+    scale = 1.0e-11
+    ref = 1.0e-17                      # 1e-6 of scale — real signal, not zero
+    cand = ref * (1 + 1e-5)            # 5 digits correct
+    d = precise_digits_fast(cand, 0.0, ref, 0.0, ref_scale=scale)
+    assert abs(d - 5.0) < 1e-6
+    # And a value AT scale that is genuinely 2 digits wrong is never maxed.
+    d2 = precise_digits_fast(1.01e-11, 0.0, 1.00e-11, 0.0, ref_scale=scale)
+    assert abs(d2 - 2.0) < 1e-6
 
 
 def test_max_digits_value():
