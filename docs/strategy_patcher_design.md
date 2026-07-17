@@ -461,9 +461,10 @@ separate `intent` field.
 ```
 kind                    dispatch path              intent typically
 ───────────────────────────────────────────────────────────────
+float-to-ff             regional-integrator (ff)   correctness   [added 2026-07-17]
+float-to-double         plain-type-edit            correctness
 double-to-ff            regional-integrator (ff)   correctness OR speedup
 double-to-dd            regional-integrator (dd)   correctness
-float-to-double         plain-type-edit            correctness
 ff-to-double            git-revert (strip ff)      correctness (rare)
 ff-to-dd                composite: revert ff, install dd  correctness
 double-to-float         plain-type-edit            speedup
@@ -473,11 +474,22 @@ reformulate-kahan       llm-rewrite                correctness
 reformulate-identity    llm-rewrite (identity picked by Strategy)  correctness
 ```
 
+**Amendment 2026-07-17 (post-Cluster-Claude Strategy impl).** Original
+table had 8 transition kinds and missed `float-to-ff` — needed for the
+single-step up-walk from a float baseline. Added.
+
+**Latent edge (not resolved):** `float-to-dd` is NOT in the vocabulary.
+A fully general correctness walk from float would need it; today the
+walk from a float baseline caps at `double` (walk status `exhausted`
+if double still doesn't clear). Doesn't fire in the fixed-report
+workflow (correctness baselines are always `double`), so latent, not
+live. Revisit if a float-baseline correctness case ever surfaces.
+
 ### Four dispatch paths (not ten)
 
-1. **Regional-integrator** — `double-to-ff`, `double-to-dd`.
-   Install a regional shim + boundary patch. `ff-to-dd` is composite
-   (revert ff first, then install dd).
+1. **Regional-integrator** — `float-to-ff`, `double-to-ff`,
+   `double-to-dd`. Install a regional shim + boundary patch.
+   `ff-to-dd` is composite (revert ff first, then install dd).
 2. **Plain-type-edit** — `float-to-double`, `double-to-float`.
    Mechanical AST edit inside the region. Both types are native
    scalars; implicit conversion handles crossings.
