@@ -165,9 +165,18 @@ Patcher return:
       "line_end": 360,
       "variables": ["wlogsmu", "cs"],
       "precision": "ff",
+      "required_by": [],
       "rationale_id": "iter_23"
     },
-    {"file": "B0m.h", "line_start": 230, "line_end": 230, "variables": ["lm"], "precision": "dd", "rationale_id": "iter_41"}
+    {
+      "file": "B0m.h",
+      "line_start": 230,
+      "line_end": 230,
+      "variables": ["lm"],
+      "precision": "dd",
+      "required_by": ["cascade_B14_47_v3", "cascade_B15_12_v1"],
+      "rationale_id": "iter_41"
+    }
   ],
   "correctness_summary": {
     "regions_at_threshold": 1362,
@@ -840,6 +849,79 @@ generator) live as private module-level helpers in
 `agents/dd_integrator/`, or lift into `agents/integrator_base/` if
 `ff_integrator` needs them too. Refactor decision at implementation
 time, not a design lock.
+
+---
+
+## Cascade chain regions (LOCKED 2026-07-17, post-Strategy impl)
+
+**Amendment to P1 region schema for `cancellation_cascade` only.**
+Regular non-cascade regions keep the single-span shape
+`{file, line_start, line_end, variables}`. Cascades emit **chain
+region records** — the cascade signal is a property of a chain of
+near-equal add/sub ops that spans multiple source lines (potentially
+multi-file), so a single-span region is the wrong shape.
+
+### Chain region schema (Option A)
+
+```json
+{
+  "kind": "cascade_chain",
+  "chain_id": "cascade_<integral>_<sample_hash>_<victim_hash>",
+  "chain": [
+    {"file": "B2m.h", "line_start": 355, "line_end": 355},
+    {"file": "B2m.h", "line_start": 412, "line_end": 412},
+    {"file": "B0m.h", "line_start": 230, "line_end": 230}
+  ],
+  "signal_class": "cancellation_cascade",
+  "non_localizable": false,
+  "max_rel_err": 3.2e-6,
+  "region_local_vars": [...],
+  ...standard region fields...
+}
+```
+
+- `chain_id` stable across runs (deterministic hash of victim id +
+  sample + integral).
+- `chain` is a list. Multi-file allowed. Not necessarily contiguous.
+  Single-line sub-regions have `line_start == line_end`.
+- **Chains that share lines are NOT merged upstream.** Each cascade
+  emits its own chain-region; Strategy handles per-line overlap via
+  `required_by` bookkeeping.
+
+### Chain promotion semantics (Strategy-side)
+
+When a chain-region is promoted in correctness mode, each line in the
+chain gets `required_by` extended with that chain's `chain_id` at the
+promoted precision.
+
+**Overlap rule — max precision wins.** If line L is in chain X
+(promoted to dd) and chain Y (promoted to ff), L is assigned dd (the
+max). Both `chain_id`s appear in `required_by`. Extra precision can
+only help chain Y — safe upper bound.
+
+**Speedup floor rule.** Before demoting line L in speedup mode, check
+the max precision required by any chain still claiming L. Don't drop
+below that.
+
+### Cascade localization (characterizer-side)
+
+Current `stability_reducer.py` marks cascades `non_localizable: True`
+with empty region key — tier 2 is dead code on real data. Localization
+algorithm (post-processing over the existing reduced report; no 100k
+re-run):
+
+1. Identify cascade victims per sample (final values with high
+   rel_err + low per-op cond — already classified).
+2. Walk `prov_vars` DAG backward from each victim.
+3. Filter ancestors to add/sub ops with small `|a-b|/(|a|+|b|)`
+   (starter threshold: 0.1 — documented as a constant).
+4. Map contributing op ids back to source lines via `line=` scope.
+5. Emit chain-region record with union of contributing lines.
+
+## Cascade region schema, `predicted_rel_err_if_ff`, and region-local
+variables all pending characterizer post-processing pass (task queued
+as of 2026-07-17). Chain regions and `required_by` bookkeeping are
+locked but not yet implemented in Strategy.
 
 ---
 
