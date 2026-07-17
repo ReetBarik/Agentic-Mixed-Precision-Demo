@@ -44,7 +44,7 @@ def test_ten_digit_error_reads_ten():
 
 
 def test_ref_scale_effectively_zero_is_max():
-    # both |true| and |err| below ZERO_REL_TOL * ref_scale -> zero -> max
+    # |true| below ZERO_REF_TOL * ref_scale -> analytic zero -> max
     d = precise_digits(_D("1e-50"), _D("2e-50"), ref_scale=_D("1.0"))
     assert d == MAX_DIGITS
     # without ref_scale, the same near-zero terms read as ~0.3 noise digits
@@ -52,29 +52,39 @@ def test_ref_scale_effectively_zero_is_max():
     assert precise_digits(_D("1e-50"), _D("2e-50")) < 1
 
 
-def test_per_sample_zero_band_maxes_numeric_zero():
-    # The real BIN0 case: coeff0.imag is a numeric zero (DD ~1e-42, double
-    # roundoff ~1e-28) against a sample whose scale (coeff0.real) is ~1.7e-11.
-    # Both magnitudes sit far inside 1e-15 * ref_scale -> reported at the cap,
-    # not as spurious 0-digit noise.
-    d = precise_digits_fast(1.261977e-28, 0.0, -1.952999e-42, 0.0,
-                            ref_scale=1.673558e-11)
+def test_analytic_zero_maxed_regardless_of_roundoff_size():
+    # The real BIN0 s639 case (1k smoke): coeff0.imag is an analytic zero
+    # (DD ref -1.925e-40 = 1.1e-29 of the sample scale 1.738e-11) whose double
+    # roundoff (2.389e-26) is ~1.4e-15 of scale — a full ulp, LARGER in relative
+    # terms than the genuine BIN1 hotspot's error below.  The reference decides
+    # zero-ness; the roundoff size is irrelevant -> reported at the cap.
+    d = precise_digits_fast(-2.389e-26, 0.0, -1.925e-40, 0.0, ref_scale=1.738e-11)
     assert d == MAX_DIGITS_F
+    # And the n=20 BIN0 case (smaller roundoff) too.
+    d2 = precise_digits_fast(1.261977e-28, 0.0, -1.952999e-42, 0.0,
+                             ref_scale=1.673558e-11)
+    assert d2 == MAX_DIGITS_F
     # Without the per-sample scale it reads 0 digits — the artifact we fixed.
     assert precise_digits_fast(1.261977e-28, 0.0, -1.952999e-42, 0.0) == 0.0
 
 
-def test_per_sample_zero_band_spares_genuine_small_signal():
-    # A component genuinely small but ABOVE the band (1e-6 of scale) carrying
-    # 5 correct digits must keep its digit count, not be swallowed as zero.
+def test_genuine_small_signal_scored_despite_same_roundoff():
+    # The real BIN1 s3 case (the genuine 9.2-digit hotspot): coeff0.imag is a
+    # true signal (DD ref -4.992e-17 = 8.6e-6 of scale 5.819e-12) whose error
+    # (3.137e-26 = 5.4e-15 of scale) is the SAME order as the analytic zero
+    # above — proving the error can't discriminate.  ref/scale >> ZERO_REF_TOL,
+    # so it is scored, not maxed.
+    d = precise_digits_fast(-4.992e-17 + 3.137e-26, 0.0, -4.992e-17, 0.0,
+                            ref_scale=5.819e-12)
+    assert 8.0 < d < 11.0            # a real, finite digit count (~9.2)
+    # A component 1e-6 of scale carrying 5 correct digits keeps them.
     scale = 1.0e-11
-    ref = 1.0e-17                      # 1e-6 of scale — real signal, not zero
-    cand = ref * (1 + 1e-5)            # 5 digits correct
-    d = precise_digits_fast(cand, 0.0, ref, 0.0, ref_scale=scale)
-    assert abs(d - 5.0) < 1e-6
-    # And a value AT scale that is genuinely 2 digits wrong is never maxed.
-    d2 = precise_digits_fast(1.01e-11, 0.0, 1.00e-11, 0.0, ref_scale=scale)
-    assert abs(d2 - 2.0) < 1e-6
+    ref = 1.0e-17
+    d2 = precise_digits_fast(ref * (1 + 1e-5), 0.0, ref, 0.0, ref_scale=scale)
+    assert abs(d2 - 5.0) < 1e-6
+    # A value AT scale that is genuinely 2 digits wrong is never maxed.
+    d3 = precise_digits_fast(1.01e-11, 0.0, 1.00e-11, 0.0, ref_scale=scale)
+    assert abs(d3 - 2.0) < 1e-6
 
 
 def test_max_digits_value():

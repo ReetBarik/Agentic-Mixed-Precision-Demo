@@ -203,13 +203,14 @@ def _score(cand: runner.CoeffArrays, ref: runner.CoeffArrays, label: str,
 
     Iterates every (integral, sample, component); tracks the global minimum and
     the component that realized it.  Each sample's ``ref_scale`` is the max
-    |DD reference component| across that sample's six coeffs — components that
-    are effectively zero against it (numeric/physics zeros, see
-    :func:`~agents.validator.precise_digits.effectively_zero`) report at the cap
-    rather than as spurious 0-digit noise.  ``zeroed_components`` counts them so
-    the min is never silently inflated.  When ``out_dir`` is given, writes a JSONL
-    row per (integral, sample) with the six component digits to
-    ``<out_dir>/<label>_precise_digits.jsonl``.
+    |DD reference component| across that sample's six coeffs — a component whose
+    DD reference is an analytic zero against it (see
+    :func:`~agents.validator.precise_digits.effectively_zero`) reports at the cap
+    rather than as spurious 0-digit noise.  ``zeroed_components`` counts the
+    analytic zeros that carried a nonzero double roundoff (the ones the band
+    actually rescued) so the min is never silently inflated.  When ``out_dir`` is
+    given, writes a JSONL row per (integral, sample) with the six component
+    digits to ``<out_dir>/<label>_precise_digits.jsonl``.
     """
     integrals = sorted(ref.keys())
     best_min = MAX_DIGITS_F
@@ -251,7 +252,7 @@ def _score(cand: runner.CoeffArrays, ref: runner.CoeffArrays, label: str,
                     total_components += 1
                     err = abs((c_hi[j] - r_hi[j]) + (c_lo[j] - r_lo[j]))
                     true = abs(r_hi[j] + r_lo[j])
-                    if err != 0.0 and effectively_zero(true, err, ref_scale):
+                    if err != 0.0 and effectively_zero(true, ref_scale):
                         zeroed += 1
                     if d < best_min:
                         best_min = d
