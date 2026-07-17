@@ -13,6 +13,10 @@ runs/qcdloop/validator/cache/
 runs/qcdloop/validator/*/
 !runs/qcdloop/validator/.gitkeep
 
+# Strategy run artifacts (per-run report + iteration log + cumulative diff)
+runs/qcdloop/strategy/*/
+!runs/qcdloop/strategy/.gitkeep
+
 # Python caches
 **/__pycache__/
 *.py[cod]
