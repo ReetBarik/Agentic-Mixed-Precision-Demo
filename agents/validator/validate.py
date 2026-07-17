@@ -18,11 +18,14 @@ all 21 integrals, it computes precise-digits vs the DD reference (see
 current, and emits the verdict contract.  Components that are effectively zero
 against their sample's characteristic magnitude (numeric/physics zeros — e.g. the
 imaginary part of a purely-real integral) are reported at the cap rather than as
-spurious 0-digit noise, and counted in ``zeroed_components``.  The gate is
-**delta-primary**: a patch that does not regress the global-min vs the current
-baseline is accepted, regardless of the absolute floor (double is inherently
-~9-digit on the ill-conditioned integrals).  The Validator is stateless —
-Strategy owns the accumulated accepted-patch state (passed in via ``base_state``).
+spurious 0-digit noise, and counted in ``zeroed_components``.  The verdict has
+two gates: a **regression guard** (reject if the candidate loses more than
+``max_regression`` digits of global-min vs current — a precision-preserving patch
+always passes this, since double is inherently ~9-digit on the ill-conditioned
+integrals) and an **absolute threshold** (``tolerance``, default 8 digits; a
+non-regressing candidate below it is ``insufficient_fix``).  The Validator is
+stateless — Strategy owns the accumulated accepted-patch state (passed in via
+``base_state``).
 
 ``base_state`` schema (v1)::
 
@@ -69,8 +72,8 @@ _CACHE_DIR = _VALIDATOR_ROOT / "cache"
 # Public API
 # ---------------------------------------------------------------------------
 
-def validate(base_state: dict, candidate_patch: str | None, tolerance: float = 0.5,
-             snapshot: dict | None = None, *, floor: float | None = None,
+def validate(base_state: dict, candidate_patch: str | None, tolerance: float = 8.0,
+             snapshot: dict | None = None, *, max_regression: float = 0.5,
              chunk: int = 0, workers: int = 1,
              run_id: str | None = None, persist: bool = True) -> dict:
     """Precision-loss acceptance test for one ``candidate_patch``.
@@ -78,13 +81,16 @@ def validate(base_state: dict, candidate_patch: str | None, tolerance: float = 0
     Returns the verdict object (see module docstring / the task contract).
     Stateless: no memory of prior calls.
 
-    The verdict is **delta-primary**: ``tolerance`` is the maximum acceptable
-    regression (in precise digits) of the candidate's global-min vs the current
-    baseline — accept iff ``(candidate_min - current_min) >= -tolerance``.  This
-    is robust to double precision being inherently limited on the ill-conditioned
-    integrals: a patch that preserves the existing precision passes regardless of
-    the absolute floor.  ``floor`` optionally adds an absolute expectation for the
-    candidate (a rewrite meant to reach N digits) → reason ``insufficient_fix``.
+    Two gates, evaluated in order:
+
+    * **regression guard** (delta) — reject with reason ``regression`` if the
+      candidate loses more than ``max_regression`` digits of global-min vs the
+      current baseline (``cand_min - curr_min < -max_regression``).  Robust to
+      double precision being inherently limited on the ill-conditioned integrals:
+      a patch that merely preserves the existing precision never trips this.
+    * **absolute threshold** — ``tolerance`` is the precise-digit bar the
+      candidate must clear (default 8).  If it does not regress but still falls
+      below ``tolerance``, the reason is ``insufficient_fix``.
 
     ``chunk``/``workers`` tune the chunked run (0 chunk → single [0, total) run).
     ``run_id`` names the persisted per-sample precise-digits artifact;
@@ -147,13 +153,13 @@ def validate(base_state: dict, candidate_patch: str | None, tolerance: float = 0
                         out_dir if persist else None)
 
     verdict, reason = _decide(cand_stats["min_precise_digits"],
-                              curr_stats["min_precise_digits"], tolerance, floor)
+                              curr_stats["min_precise_digits"],
+                              max_regression, floor=tolerance)
 
     return {
         "verdict": verdict,
-        "gate": "delta",
-        "threshold": float(tolerance),      # max acceptable regression (digits)
-        "floor": None if floor is None else float(floor),
+        "threshold": float(tolerance),          # absolute precise-digit accept bar
+        "max_regression": float(max_regression),  # delta guard vs current baseline
         "candidate": cand_stats,
         "current": curr_stats,
         "delta": round(cand_stats["min_precise_digits"] - curr_stats["min_precise_digits"], 6),
@@ -170,20 +176,20 @@ def validate(base_state: dict, candidate_patch: str | None, tolerance: float = 0
 
 def _decide(cand_min: float, curr_min: float, max_regression: float,
             floor: float | None = None) -> tuple[str, str]:
-    """Delta-primary verdict + reason.
+    """Verdict + reason from the two gates, regression first then floor.
 
-    The gate is the candidate's regression against the *current* baseline, not an
-    absolute floor: double precision is inherently limited on the ill-conditioned
-    integrals (~9 digits on the BIN cancellation cascade), so a patch that simply
-    preserves the existing precision must pass.  Accept iff the candidate loses no
-    more than ``max_regression`` digits of global-min vs current::
+    1. **regression guard** — the candidate must not lose more than
+       ``max_regression`` digits of global-min vs the *current* baseline::
 
-        accept  ⇔  (cand_min - curr_min) >= -max_regression
+           reject/regression  ⇔  (cand_min - curr_min) < -max_regression
 
-    ``floor`` is an optional absolute expectation for the *candidate* (e.g. a
-    rewrite meant to reach N digits): when given and the candidate does not
-    regress but still falls below it, the reason is ``insufficient_fix`` rather
-    than ``accept``.  Left ``None`` in pure delta mode.
+       Double precision is inherently limited on the ill-conditioned integrals
+       (~9 digits on the BIN cancellation cascade), so this delta guard lets a
+       precision-preserving patch through regardless of the absolute bar.
+    2. **absolute threshold** — ``floor`` is the precise-digit bar the candidate
+       must clear.  A candidate that does not regress but still falls below
+       ``floor`` is ``reject/insufficient_fix``.  ``None`` disables this gate
+       (pure regression mode, used in some unit tests).
     """
     delta = cand_min - curr_min
     if delta < -max_regression:

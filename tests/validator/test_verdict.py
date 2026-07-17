@@ -26,9 +26,20 @@ def test_improvement_accepts():
     assert verdict == "accept" and reason == "accept"
 
 
-def test_delta_primary_ignores_absolute_floor_by_default():
-    # low absolute min but no regression -> accept (floor is None in delta mode).
+def test_floor_none_disables_absolute_gate():
+    # floor=None (pure regression mode): low absolute min but no regression
+    # -> accept.  Used in unit tests; validate() always passes floor=tolerance.
     verdict, reason = _decide(2.0, 2.0, 0.5)
+    assert verdict == "accept" and reason == "accept"
+
+
+def test_default_floor_8_rejects_below_bar():
+    # The default validate() bar (tolerance=8): a non-regressing candidate that
+    # sits below 8 digits is insufficient_fix.
+    verdict, reason = _decide(7.5, 7.5, 0.5, floor=8.0)
+    assert verdict == "reject" and reason == "insufficient_fix"
+    # at/above the bar with no regression -> accept.
+    verdict, reason = _decide(8.5, 8.5, 0.5, floor=8.0)
     assert verdict == "accept" and reason == "accept"
 
 
