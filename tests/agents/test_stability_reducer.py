@@ -349,3 +349,54 @@ def test_prov_vars_populated_in_report(tmp_path):
     report = sr.report_from_journals([j])
     early = report["integrals"]["CASC"]["regions"]["k.cpp:cscf:1"]
     assert early["prov_vars"] == ["e", "f"]
+
+
+# ---------------------------------------------------------------------------
+# region-local variables (reads in-scope) — the tight peer of prov_vars
+# ---------------------------------------------------------------------------
+
+def test_region_local_vars_are_direct_reads_not_transitive_union(tmp_path):
+    j = write_journal(tmp_path / "casc.jsonl", _cascade_records())
+    report = sr.report_from_journals([j])
+    regions = report["integrals"]["CASC"]["regions"]
+
+    # early node reads both leaf source vars directly → both are region-local
+    early = regions["k.cpp:cscf:1"]
+    assert early["region_local_vars"] == ["e", "f"]
+
+    # the sink reads (produced-node a, leaf g): only g is a direct source-var read.
+    # prov_vars is the TRANSITIVE union [e, f, g] (e, f flow in via a) — the wrong
+    # input for a regional promotion; region_local_vars is the tight subset [g].
+    sink = regions["k.cpp:cscf:2"]
+    assert sink["prov_vars"] == ["e", "f", "g"]
+    assert sink["region_local_vars"] == ["g"]
+    assert set(sink["region_local_vars"]) <= set(sink["prov_vars"])
+
+
+def test_region_local_vars_merge_is_union(tmp_path):
+    # same region across two samples reading disjoint leaf vars → union on merge
+    r0 = [rec("sub", "m.cpp:f:1", opid("sub", "m.cpp", 1, 1, "integral=U/sample=0"),
+              ["a", "b"], 1.0, 10.0, 1e-12, prov_vars=["a", "b"])]
+    r1 = [rec("sub", "m.cpp:f:1", opid("sub", "m.cpp", 1, 1, "integral=U/sample=1"),
+              ["a", "c"], 1.0, 10.0, 1e-12, prov_vars=["a", "c"])]
+    j0 = write_journal(tmp_path / "u0.jsonl", r0)
+    j1 = write_journal(tmp_path / "u1.jsonl", r1)
+    report = sr.finalize_report(
+        sr.merge_reports([sr.reduce_journal(j0), sr.reduce_journal(j1)]))
+    region = report["integrals"]["U"]["regions"]["m.cpp:f:1"]
+    assert region["region_local_vars"] == ["a", "b", "c"]
+
+
+def test_region_local_vars_excludes_consts_and_literals(tmp_path):
+    # a leaf operand that is a named const (prov_consts) or literal is NOT a
+    # source var, so it must not appear in region_local_vars.
+    scope = "integral=K/sample=0"
+    m = opid("mul", "s.cpp", 1, 1, scope)
+    records = [
+        rec("mul", "s.cpp:f:1", m, ["p", "PI", "_lit@1"], 1.0, 1.0, 1e-16,
+            prov_vars=["p"], prov_consts=["PI"]),
+    ]
+    j = write_journal(tmp_path / "k.jsonl", records)
+    report = sr.report_from_journals([j])
+    region = report["integrals"]["K"]["regions"]["s.cpp:f:1"]
+    assert region["region_local_vars"] == ["p"]        # PI, _lit@1 excluded

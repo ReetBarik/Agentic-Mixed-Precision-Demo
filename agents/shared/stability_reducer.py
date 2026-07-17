@@ -203,6 +203,29 @@ def _prov_vars(rec: dict) -> list[str]:
     return list(rec.get("prov") or rec.get("provenance") or [])
 
 
+def _region_local_reads(rec: dict, source_ids: set[str],
+                        prov_var_names: set[str]) -> list[str]:
+    """Source variables *read directly* in the record's code region.
+
+    ``prov_vars`` is a transitive provenance union (every source root that flows
+    into the value, computed on any earlier line), which is the wrong input for a
+    *regional* precision promotion — it names whole-app inputs seeded far upstream.
+    The region-local set we CAN recover from the journal is the source variables
+    the region's ops read as **direct leaf operands** (``in`` ids that have no
+    producing record and appear in some record's ``prov_vars``): the named inputs
+    textually used at this source line.  It is by construction a subset of
+    ``prov_vars`` — the "filter to in-scope variables" the region contract wants.
+
+    Caveat (see HANDOFF.md): the journal has no LHS/assignment-target field and
+    ``track()`` emits no record, so the *declared/assigned* (written) variable of
+    a region — the intermediate ff_integrator ultimately stores — is not
+    nameable.  This is the tightest region-scoped *named* variable set the data
+    supports (region-local reads), not the write set.
+    """
+    return [o for o in rec.get("in", [])
+            if o in source_ids and o in prov_var_names]
+
+
 def _prov_all(rec: dict) -> list[str]:
     if "prov_vars" in rec or "prov_consts" in rec:
         return list(rec.get("prov_vars") or []) + list(rec.get("prov_consts") or [])
@@ -391,11 +414,12 @@ def _new_region() -> dict:
         "abs_val_min": None,
         "abs_val_max": None,
         "prov_vars": set(),
+        "region_local_vars": set(),
     }
 
 
 def _update_region(reg: dict, rec: dict, amp_v: float, sens_v: float,
-                   cfg: ReducerConfig) -> None:
+                   cfg: ReducerConfig, local_vars: Iterable[str] = ()) -> None:
     reg["n"] += 1
     op = rec.get("op", "unknown")
     reg["ops"][op] = reg["ops"].get(op, 0) + 1
@@ -431,6 +455,7 @@ def _update_region(reg: dict, rec: dict, amp_v: float, sens_v: float,
             reg["abs_val_max"] = val
 
     reg["prov_vars"].update(_prov_vars(rec))
+    reg["region_local_vars"].update(local_vars)
 
 
 def reduce_journal(path, cfg: ReducerConfig | None = None) -> dict:
@@ -457,7 +482,8 @@ def reduce_journal(path, cfg: ReducerConfig | None = None) -> dict:
         for rid, r in nodes.items():
             loc = _region_key(r)
             reg = I["regions"].setdefault(loc, _new_region())
-            _update_region(reg, r, amp[rid], node_sens[rid], cfg)
+            local_vars = _region_local_reads(r, source_ids, prov_var_names)
+            _update_region(reg, r, amp[rid], node_sens[rid], cfg, local_vars)
 
         for sid, sens in source_sens.items():
             var = I["variables"].setdefault(
@@ -485,6 +511,7 @@ def _integral_to_json(data: dict) -> dict:
         r = dict(reg)
         r["rel_err_hist"] = reg["rel_err_hist"].to_dict()
         r["prov_vars"] = sorted(reg["prov_vars"])
+        r["region_local_vars"] = sorted(reg["region_local_vars"])
         regions[loc] = r
     return {"regions": regions, "variables": data["variables"]}
 
@@ -528,7 +555,8 @@ def _new_region_json() -> dict:
     return {"ops": {}, "n": 0, "max_cond": 0.0, "gate_a_count": 0,
             "max_rel_err": 0.0, "rel_err_hist": {"buckets": {}, "total": 0},
             "max_sensitivity": 0.0, "max_amp": 0.0,
-            "abs_val_min": None, "abs_val_max": None, "prov_vars": []}
+            "abs_val_min": None, "abs_val_max": None, "prov_vars": [],
+            "region_local_vars": []}
 
 
 def _new_variable_json() -> dict:
@@ -551,6 +579,8 @@ def _merge_region(dst: dict, src: dict) -> None:
     dst["abs_val_min"] = _min_opt(dst["abs_val_min"], src.get("abs_val_min"))
     dst["abs_val_max"] = _max_opt(dst["abs_val_max"], src.get("abs_val_max"))
     dst["prov_vars"] = sorted(set(dst["prov_vars"]) | set(src.get("prov_vars", [])))
+    dst["region_local_vars"] = sorted(
+        set(dst["region_local_vars"]) | set(src.get("region_local_vars", [])))
 
 
 def _merge_variable(dst: dict, src: dict) -> None:
@@ -641,6 +671,10 @@ def _classify_region(reg: dict, cfg: ReducerConfig) -> dict:
         "n": reg.get("n", 0),
         "ops": reg.get("ops", {}),
         "prov_vars": reg.get("prov_vars", []),
+        # Peer of prov_vars: source vars READ in-scope at this region's line(s)
+        # (subset of prov_vars).  The region-scoped input for ff/dd_integrator;
+        # Strategy migrates off the prov_vars passthrough to this in a follow-up.
+        "region_local_vars": reg.get("region_local_vars", []),
     }
 
 
