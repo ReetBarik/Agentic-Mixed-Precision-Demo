@@ -675,8 +675,10 @@ def finalize_report(merged: dict, cfg: ReducerConfig | None = None) -> dict:
             "class_counts": class_counts,
             "top_regions_by_rel_err": [
                 {"location": loc, **regions[loc]}
-                for loc in sorted(regions, key=lambda l: regions[l]["max_rel_err"],
-                                  reverse=True)
+                # deterministic: severity desc, then location asc to break ties,
+                # so the list does not depend on merge/insertion order.
+                for loc in sorted(regions,
+                                  key=lambda l: (-regions[l]["max_rel_err"], l))
             ][:10],
             "regions": regions,
             "variables": variables,

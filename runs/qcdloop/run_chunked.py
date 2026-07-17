@@ -64,6 +64,7 @@ _BYTES_PER_SAMPLE = 10_000_000
 
 sys.path.insert(0, str(REPO))
 from agents.shared import stability_reducer as sr  # noqa: E402
+from agents.shared import fast_merge  # noqa: E402
 
 
 def _git(*args) -> subprocess.CompletedProcess:
@@ -207,19 +208,15 @@ def main(argv: list[str] | None = None) -> int:
         if failures:
             raise RuntimeError(f"{len(failures)} chunk(s) failed; aborting merge")
 
-        # Fold shards one at a time instead of materializing all of them at
-        # once: merge_reports is associative/order-free, so this is bit-identical
-        # to merging the full list, but peak memory stays ~2 shards instead of
-        # N (a 200-shard 100k run would otherwise hold 150-300 GB resident).
-        merged = None
-        for p in shard_paths:
-            shard = json.loads(Path(p).read_text())
-            merged = shard if merged is None else sr.merge_reports([merged, shard])
-        report = sr.finalize_report(merged)
-        sr._write_json(report, args.out)
+        # Parallel, partition-by-integral merge (see agents/shared/fast_merge).
+        # Merges + finalizes + serializes each integral in its own worker so no
+        # process ever builds the full multi-million-variable structure; a 100k
+        # (200-shard) run merges in ~2 min instead of hours. The merge picks its
+        # own worker count (min(32, cpu)); it is independent of the chunk
+        # --workers used during the compute phase.
+        seen = fast_merge.merge_shard_files(shard_paths, args.out)
         print(f"wrote consolidated report: {args.out} "
               f"(total wall {time.monotonic()-t0:.0f}s)", flush=True)
-        seen = report.get("samples_seen", {})
         print(f"samples_seen (should all be {args.total}): "
               f"{sorted(set(seen.values()))}", flush=True)
         if not args.keep_shards:

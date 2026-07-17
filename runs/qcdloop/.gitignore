@@ -18,3 +18,4 @@ journal_meta.json
 # regenerated locally from the committed driver + shim + patches.
 shards/
 report_*.json
+report_*.json.gz
