@@ -300,6 +300,97 @@ def test_line_scope_value_must_be_basename_no_slash(tmp_path):
 
 
 # ---------------------------------------------------------------------------
+# cascade-chain localization
+# ---------------------------------------------------------------------------
+
+def _cascade_chain_records():
+    """A two-contributor cascade: two near-cancelling subs on different source
+    lines feed a low-cond, high-rel_err accumulation sink (the victim).
+
+    - c1 (B2m.h:355): x - y with x,y produced → val-based cancellation ratio.
+    - c2 (B0m.h:230): p - q with p,q leaf source vars → cond-fallback ratio.
+    - v: c1 + c2, low local cond (1.0) but high accumulated rel_err → victim.
+    """
+    base = "integral=CASC/sample=0"
+    L1 = base + "/line=B2m.h:355"
+    L2 = base + "/line=B0m.h:230"
+    x = opid("mul", "?", 0, 1, base)
+    y = opid("mul", "?", 0, 2, base)
+    c1 = f"sub@?#1@{L1}"
+    c2 = f"sub@?#2@{L2}"
+    v = opid("add", "?", 0, 3, base)
+    return [
+        rec("mul", "", x, ["e", "f"], 1.0000001, 1.0, 1e-16, prov_vars=["e", "f"]),
+        rec("mul", "", y, ["g", "h"], 1.0, 1.0, 1e-16, prov_vars=["g", "h"]),
+        # near cancellation, operands have vals → ratio ~5e-8 < 0.1
+        rec("sub", "", c1, [x, y], 1e-7, 2.0e7, 1e-16),
+        # leaf operands (no val) → cond-fallback: 1/100 = 0.01 < 0.1
+        rec("sub", "", c2, ["p", "q"], 1e-7, 100.0, 1e-16, prov_vars=["p", "q"]),
+        # victim: low local cond, high accumulated rel_err, DAG sink
+        rec("add", "", v, [c1, c2], 2e-7, 1.0, 1e-4),
+    ], v
+
+
+def test_cascade_chain_localizes_contributing_lines(tmp_path):
+    records, _victim = _cascade_chain_records()
+    j = write_journal(tmp_path / "casc_chain.jsonl", records)
+    report = sr.report_from_journals([j])
+    chains = report["integrals"]["CASC"]["cascade_chains"]
+    assert len(chains) == 1
+    chain = chains[0]
+
+    assert chain["kind"] == "cascade_chain"
+    assert chain["signal_class"] == "cancellation_cascade"
+    assert chain["non_localizable"] is False
+    # union of the two contributing source lines, deterministic (file, line) order
+    assert chain["chain"] == [
+        {"file": "B0m.h", "line_start": 230, "line_end": 230},
+        {"file": "B2m.h", "line_start": 355, "line_end": 355},
+    ]
+    assert chain["max_rel_err"] == pytest.approx(1e-4)   # the victim's accumulated err
+    assert chain["n"] == 2                                # two contributors
+    assert chain["ops"] == {"sub": 2}
+    # leaf source vars read by the cond-fallback contributor land in local vars
+    assert chain["region_local_vars"] == ["p", "q"]
+
+
+def test_cascade_chain_id_is_stable_across_runs(tmp_path):
+    records, _ = _cascade_chain_records()
+    j = write_journal(tmp_path / "casc_chain.jsonl", records)
+    id1 = sr.report_from_journals([j])["integrals"]["CASC"]["cascade_chains"][0]["chain_id"]
+    id2 = sr.report_from_journals([j])["integrals"]["CASC"]["cascade_chains"][0]["chain_id"]
+    assert id1 == id2                                    # deterministic hash
+    assert id1.startswith("cascade_CASC_")
+
+
+def test_cascade_chain_survives_merge_unmerged(tmp_path):
+    # two DISJOINT samples each produce their own cascade victim; the chains are
+    # carried through merge as distinct records (never merged, even if they shared
+    # lines — here they differ by sample hash so both survive).
+    r0, _ = _cascade_chain_records()
+    r1 = []
+    for rr in r0:
+        rr = dict(rr)
+        rr["id"] = rr["id"].replace("sample=0", "sample=1")
+        rr["in"] = [i.replace("sample=0", "sample=1") for i in rr["in"]]
+        r1.append(rr)
+    j0 = write_journal(tmp_path / "s0.jsonl", r0)
+    j1 = write_journal(tmp_path / "s1.jsonl", r1)
+    report = sr.finalize_report(
+        sr.merge_reports([sr.reduce_journal(j0), sr.reduce_journal(j1)]))
+    chains = report["integrals"]["CASC"]["cascade_chains"]
+    assert len(chains) == 2
+    assert len({c["chain_id"] for c in chains}) == 2     # distinct ids
+
+
+def test_non_cascade_sample_emits_no_chain(tmp_path):
+    # a well-conditioned sample (no high-rel_err sink) yields no cascade chains
+    j = write_journal(tmp_path / "stab.jsonl", _stable_records())
+    report = sr.report_from_journals([j])
+    assert report["integrals"]["STAB"]["cascade_chains"] == []
+
+
+# ---------------------------------------------------------------------------
 # merge associativity
 # ---------------------------------------------------------------------------
 

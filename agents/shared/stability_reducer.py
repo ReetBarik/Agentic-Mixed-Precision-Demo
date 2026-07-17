@@ -43,6 +43,7 @@ forward-cone signal (and a note).
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import math
 from dataclasses import dataclass, field
@@ -86,6 +87,11 @@ class ReducerConfig:
     cascade_rel_err: float = 1e-6        # rel_err>this with low cond => cancellation cascade
     cascade_cond_ceiling: float = 1e3    # "low per-op cond" ceiling for cascade detection
     gate_a_rel_tol: float = 1e-9         # |cond - 2**53| / 2**53 tolerance for gate-(a)
+    # An add/sub op is a *cancellation contributor* to a cascade chain when its
+    # operands nearly cancel: |a-b| / (|a|+|b|) < this.  0.1 (~1 lost decimal
+    # digit) is the starter bar from the design; it is the reciprocal of the op's
+    # own condition number, so the val-based test and a cond>1/ratio fallback agree.
+    cascade_cancel_ratio: float = 0.1
 
 
 SCHEMA_VERSION = 1
@@ -398,6 +404,188 @@ def _cond_eff(rec: dict) -> float:
 
 
 # ---------------------------------------------------------------------------
+# Cascade-chain localization (per sample, backward over the value DAG)
+# ---------------------------------------------------------------------------
+#
+# A cancellation *cascade* is accumulated error: the final value carries a large
+# rel_err even though no single op is ill-conditioned (each per-op cond is low).
+# A single-span region is the wrong shape for it — the error is a property of a
+# *chain* of near-equal add/sub ops that can span many source lines.  So instead
+# of the (empty-key, non_localizable) region the old classifier produced, we walk
+# the value DAG backward from each cascade *victim* (a final value = DAG sink with
+# high rel_err + low per-op cond), collect the add/sub ancestors whose operands
+# nearly cancel, and emit ONE ``cascade_chain`` record per victim with the union
+# of their source lines (design "Cascade chain regions", Option A).  Chains that
+# share a line are NOT merged here — Strategy resolves per-line overlap via
+# ``required_by`` bookkeeping.
+
+_ADD_SUB = ("add", "sub")
+
+
+def _rel_err(rec: dict) -> float:
+    try:
+        r = float(rec.get("rel_err", 0.0))
+    except (TypeError, ValueError):
+        return 0.0
+    return r if math.isfinite(r) and r > 0.0 else 0.0
+
+
+def _cancellation_ratio(rec: dict, nodes: dict[str, dict]) -> float | None:
+    """``|a-b| / (|a|+|b|)`` for a binary add/sub op, or None if unknowable.
+
+    The op's own ``val`` is the result magnitude ``|a±b|``; operand magnitudes
+    come from the producing records.  A leaf operand (source var/const/literal)
+    has no journaled value, so if either operand's magnitude is unavailable this
+    returns None and the caller falls back to the recorded cond (which, for
+    add/sub, is definitionally ``(|a|+|b|)/|result|`` = the reciprocal ratio).
+    """
+    ins = rec.get("in", [])
+    if len(ins) != 2:
+        return None
+    denom = 0.0
+    for o in ins:
+        src = nodes.get(o)
+        if src is None:
+            return None
+        try:
+            denom += abs(float(src.get("val", 0.0)))
+        except (TypeError, ValueError):
+            return None
+    if denom <= 0.0 or not math.isfinite(denom):
+        return None
+    try:
+        result = abs(float(rec.get("val", 0.0)))
+    except (TypeError, ValueError):
+        return None
+    return result / denom
+
+
+def _is_cascade_contributor(rec: dict, nodes: dict[str, dict],
+                            cfg: ReducerConfig) -> bool:
+    """True for an add/sub op whose operands nearly cancel (chain contributor)."""
+    if rec.get("op") not in _ADD_SUB:
+        return False
+    ratio = _cancellation_ratio(rec, nodes)
+    if ratio is not None:
+        return ratio < cfg.cascade_cancel_ratio
+    # val-based ratio unavailable (leaf operand): fall back to the op's own cond,
+    # which for add/sub equals (|a|+|b|)/|result| = 1/ratio.
+    cond = _cond(rec)
+    if cond <= 0.0 or _is_gate_a(cond, cfg):
+        return False
+    return (1.0 / cond) < cfg.cascade_cancel_ratio
+
+
+def _cascade_victims(nodes: dict[str, dict], children: dict[str, list[str]],
+                     cfg: ReducerConfig) -> list[str]:
+    """Final values (DAG sinks) with high rel_err + low per-op cond."""
+    victims = []
+    for rid, r in nodes.items():
+        if children.get(rid):            # has an internal consumer → not final
+            continue
+        cond = _cond(r)
+        if _is_gate_a(cond, cfg):
+            continue
+        if _rel_err(r) >= cfg.cascade_rel_err and cond < cfg.cascade_cond_ceiling:
+            victims.append(rid)
+    return victims
+
+
+def _ancestors(victim_id: str, nodes: dict[str, dict]) -> set[str]:
+    """All internal-node ancestors of ``victim_id`` via ``in`` edges (iterative)."""
+    seen: set[str] = set()
+    stack = [victim_id]
+    while stack:
+        nid = stack.pop()
+        for o in nodes[nid].get("in", []):
+            if o in nodes and o not in seen:
+                seen.add(o)
+                stack.append(o)
+    return seen
+
+
+def _short_hash(s: str) -> str:
+    return hashlib.sha1(s.encode("utf-8")).hexdigest()[:8]
+
+
+def _parse_region_span(region_key: str) -> dict | None:
+    """``"B2m.h:355"`` -> ``{"file": "B2m.h", "line_start": 355, "line_end": 355}``.
+
+    Returns None for a non-localizable key (empty, or no numeric line).
+    """
+    if not region_key or ":" not in region_key:
+        return None
+    file, _, line = region_key.rpartition(":")
+    if not file or not line.isdigit():
+        return None
+    return {"file": file, "line_start": int(line), "line_end": int(line)}
+
+
+def _extract_cascade_chains(nodes: dict[str, dict], amp: dict[str, float],
+                            node_sens: dict[str, float], source_ids: set[str],
+                            prov_var_names: set[str], integral: str,
+                            sample_key: str, cfg: ReducerConfig) -> dict[str, dict]:
+    """One ``cascade_chain`` record per localizable victim, keyed by chain_id."""
+    children: dict[str, list[str]] = {rid: [] for rid in nodes}
+    for rid, r in nodes.items():
+        for o in r.get("in", []):
+            if o in nodes:
+                children[o].append(rid)
+
+    chains: dict[str, dict] = {}
+    for victim in _cascade_victims(nodes, children, cfg):
+        candidates = _ancestors(victim, nodes)
+        candidates.add(victim)
+        contributors = [c for c in candidates
+                        if _is_cascade_contributor(nodes[c], nodes, cfg)]
+        if not contributors:
+            continue
+
+        # union of contributing source lines (skip unlocalizable contributors)
+        spans: dict[tuple, dict] = {}
+        for c in contributors:
+            span = _parse_region_span(_region_key(nodes[c]))
+            if span is not None:
+                spans[(span["file"], span["line_start"], span["line_end"])] = span
+        if not spans:
+            continue                       # no contributor carries a source line
+
+        local_vars: set[str] = set()
+        max_cond = 0.0
+        max_sens = 0.0
+        ops: dict[str, int] = {}
+        for c in contributors:
+            rc = nodes[c]
+            local_vars.update(_region_local_reads(rc, source_ids, prov_var_names))
+            cond = _cond(rc)
+            if not _is_gate_a(cond, cfg) and cond > max_cond:
+                max_cond = cond
+            if node_sens.get(c, 0.0) > max_sens:
+                max_sens = node_sens[c]
+            ops[rc.get("op", "unknown")] = ops.get(rc.get("op", "unknown"), 0) + 1
+        max_sens = max(max_sens, node_sens.get(victim, 0.0))
+
+        chain_id = (f"cascade_{integral}_{_short_hash(sample_key)}"
+                    f"_{_short_hash(victim)}")
+        chains[chain_id] = {
+            "kind": "cascade_chain",
+            "chain_id": chain_id,
+            "chain": [spans[k] for k in sorted(spans)],
+            "signal_class": "cancellation_cascade",
+            "non_localizable": False,
+            "max_rel_err": _rel_err(nodes[victim]),
+            "max_cond": max_cond,
+            "max_sensitivity": max_sens,
+            "predicted_rel_err_if_float": U_FLOAT * max_sens,
+            "predicted_rel_err_if_ff": U_FF * max_sens,
+            "n": len(contributors),
+            "ops": ops,
+            "region_local_vars": sorted(local_vars),
+        }
+    return chains
+
+
+# ---------------------------------------------------------------------------
 # Aggregation (the mergeable shard report)
 # ---------------------------------------------------------------------------
 
@@ -473,7 +661,8 @@ def reduce_journal(path, cfg: ReducerConfig | None = None) -> dict:
             continue
 
         samples_seen[integral] = samples_seen.get(integral, 0) + 1
-        I = integrals.setdefault(integral, {"regions": {}, "variables": {}})
+        I = integrals.setdefault(
+            integral, {"regions": {}, "variables": {}, "cascade_chains": {}})
 
         prov_var_names: set[str] = set()
         for r in nodes.values():
@@ -496,6 +685,10 @@ def reduce_journal(path, cfg: ReducerConfig | None = None) -> dict:
             var["n_consumers"] += 1
             var["is_source_var"] = var["is_source_var"] or (sid in prov_var_names)
 
+        I["cascade_chains"].update(_extract_cascade_chains(
+            nodes, amp, node_sens, source_ids, prov_var_names,
+            integral, scope, cfg))
+
     return {
         "schema_version": SCHEMA_VERSION,
         "kind": "stability_shard_report",
@@ -513,7 +706,8 @@ def _integral_to_json(data: dict) -> dict:
         r["prov_vars"] = sorted(reg["prov_vars"])
         r["region_local_vars"] = sorted(reg["region_local_vars"])
         regions[loc] = r
-    return {"regions": regions, "variables": data["variables"]}
+    return {"regions": regions, "variables": data["variables"],
+            "cascade_chains": data.get("cascade_chains", {})}
 
 
 # ---------------------------------------------------------------------------
@@ -536,11 +730,15 @@ def merge_reports(reports: list[dict]) -> dict:
         for name, cnt in rep.get("samples_seen", {}).items():
             out_samples[name] = out_samples.get(name, 0) + cnt
         for name, idata in rep.get("integrals", {}).items():
-            dst = out_integrals.setdefault(name, {"regions": {}, "variables": {}})
+            dst = out_integrals.setdefault(
+                name, {"regions": {}, "variables": {}, "cascade_chains": {}})
             for loc, reg in idata.get("regions", {}).items():
                 _merge_region(dst["regions"].setdefault(loc, _new_region_json()), reg)
             for vid, var in idata.get("variables", {}).items():
                 _merge_variable(dst["variables"].setdefault(vid, _new_variable_json()), var)
+            # cascade chains are per-(sample, victim) — union by chain_id, never
+            # merged even when they share lines (design: Strategy owns overlap).
+            dst.setdefault("cascade_chains", {}).update(idata.get("cascade_chains", {}))
 
     return {
         "schema_version": SCHEMA_VERSION,
@@ -713,6 +911,12 @@ def finalize_report(merged: dict, cfg: ReducerConfig | None = None) -> dict:
         for r in regions.values():
             class_counts[r["signal_class"]] = class_counts.get(r["signal_class"], 0) + 1
 
+        # cascade chains: emitted as a list, deterministic (chain_id asc), never
+        # merged.  Each is a localized replacement for a non_localizable cascade
+        # region — Strategy's correctness tier 2 consumes these.
+        chains = idata.get("cascade_chains", {})
+        cascade_chains = [chains[cid] for cid in sorted(chains)]
+
         out_integrals[name] = {
             "samples": merged.get("samples_seen", {}).get(name, 0),
             "class_counts": class_counts,
@@ -725,6 +929,7 @@ def finalize_report(merged: dict, cfg: ReducerConfig | None = None) -> dict:
             ][:10],
             "regions": regions,
             "variables": variables,
+            "cascade_chains": cascade_chains,
         }
 
     return {
