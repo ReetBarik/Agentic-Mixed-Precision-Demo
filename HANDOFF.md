@@ -143,3 +143,103 @@ Mocks live in the tests; no dependency on the real Patcher (stub) or Validator.
   (ambiguity 6).
 - **Downstream-leverage ranking tiebreaker** — design-deferred, not implemented.
 - **Re-characterization** — locked fixed-report-only (N=large); no infra built.
+
+---
+
+# Characterizer post-processing pass (2026-07-17)
+
+Closes HANDOFF items 3, 4, 6 above. Four commits, post-processing only over the
+existing reduced report — **no 100k re-run**. Full suite 134 → **148 passing**.
+
+## What landed
+
+| commit | change |
+|---|---|
+| `characterizer: add predicted_rel_err_if_ff` | Change 1 — unblocks item 6 |
+| `characterizer: add region_local_vars` | Change 2 — addresses item 3 (with a data caveat, below) |
+| `characterizer: localize cancellation cascades as chain regions` | Change 3 — unblocks item 4 |
+| `strategy: required_by bookkeeping for cascade-chain promotions` | Change 4 |
+
+**Change 1 — `predicted_rel_err_if_ff`.** `U_FF = 2**-46` (~1.42e-14, the
+empirical float-float floor: nominal 2**-48 minus ~2 bits lost to the EFT
+residual). Emitted in `_classify_region` + `_classify_variable` as a peer of
+`predicted_rel_err_if_float`. Derived from `max_sensitivity` at finalize, so no
+merge/shard-schema change. Strategy's speedup gate can now queue `double→ff` at
+tolerance 10 (float never clears it; ff does).
+
+**Change 2 — `region_local_vars`.** New peer of `prov_vars` in the report; the
+source variables read as **direct leaf operands** by a region's ops. `prov_vars`
+stays (full transitive union, for consumers that want it). Merges as a set union.
+
+**Change 3 — `cascade_chain` records.** Per sample, walk the value DAG backward
+from each victim (final-value DAG sink, high rel_err + low per-op cond), collect
+add/sub ancestors whose operands nearly cancel, emit ONE chain record per victim
+spanning the union of their source lines (multi-file allowed). Contributor test:
+`|a-b|/(|a|+|b|) < cascade_cancel_ratio` (0.1, on `ReducerConfig`); val-based
+from operand records, with a cond fallback (`1/cond`) for leaf operands with no
+journaled value. `chain_id = cascade_<integral>_<sample_hash>_<victim_hash>`,
+deterministic. Carried through merge/finalize **unmerged** (union by chain_id).
+Additive — the old per-region cascade classification is untouched.
+
+**Change 4 — Strategy `required_by`.** `load_chains` + `ChainRecord`; chains are
+tier 2, drained before speedup. Each promoted chain's precision is distributed
+across all its lines through a required_by ledger. `precision_assignment` entries
+gain `required_by`; overlap resolves to one entry at max precision with all
+chain_ids. `RetryWalk` gains a `floor` param enforcing the speedup floor rule.
+
+## Where journal data was insufficient (Change 2 — READ THIS)
+
+**`region_local_vars` is region-local *reads*, NOT declares/assigns.** The task
+asked to "filter `prov_vars` to variables declared or assigned in-scope." That is
+**not recoverable from the journal**, confirmed against the schema
+(`third_party/tracked/include/tracked/journal.hpp`, `docs/PROVENANCE.md`):
+
+1. **No LHS/output field.** A record's `id` is a synthesized op id
+   (`<op>@<file>:<line>#<n>@<scope>`); the C++ assignment target (`k12` in
+   `const TMass k12 = …`) appears nowhere. There is no `out`/`lhs`/`dst` field.
+2. **`track()` emits no record.** Only ops emit; the declaration/assignment point
+   of a source variable is simply not in the data.
+3. **`prov_vars` entries carry no scope.** A `track()`-seeded source variable's
+   id *is* its bare name (bypasses `make_id`, so no `line=` suffix). In the
+   qcdloop pipeline they are whole-app inputs (`p1..p6`, `m1..m4`, `mu2`) seeded
+   once at top level — essentially never per-line locals. A locality *filter* on
+   `prov_vars` would therefore be almost always empty.
+
+What **is** derivable (and is a true subset of `prov_vars`): the source vars a
+region's ops read as **direct leaf operands** — the named inputs textually used
+at the source line. That is what `region_local_vars` emits. Derived DAG values
+*are* line-attributable (each carries its own `line=` scope), but they are
+**unnamed**, so they can't populate a variable *name* list.
+
+**Decision (flagging, per the task):** shipped reads-in-region as the honest,
+tight, deterministic replacement for the `prov_vars` passthrough. If ff/dd
+regional promotion needs the *written* variable set, the fix is characterizer-
+upstream: add an LHS-name field to the journal record, or journal `track()` with
+the active scope. Not doable in post-processing.
+
+## Test coverage
+
+- `tests/agents/test_stability_reducer.py` 14 → **21**: `predicted_rel_err_if_ff`
+  (cascade + stable), `region_local_vars` (direct-reads-not-union, merge union,
+  const/literal exclusion), cascade chains (localizes the right lines,
+  deterministic chain_id, survives merge unmerged, no-chain on stable sample).
+- `tests/strategy/` 49 → **56**: speedup floor (blocks below floor / allows down
+  to floor / no-floor sanity), `load_chains` (multi-line record + rep target,
+  empty when absent), e2e chain overlap (F.h:9 in two chains → one dd entry with
+  both chain_ids; free stable region demotes; floor protects the overlap line),
+  ledger max-precision unit (dd vs ff → dd, both ids).
+
+## Punts from this pass
+
+- **Real multi-line chain intents for Patcher.** Change 4 drives the retry walk
+  on the chain's *representative* line (`ChainRecord.walk_record()`) and
+  distributes the result to all chain lines. A real Patcher promoting a whole
+  chain atomically (multi-region intent) is deferred with the rest of Patcher.
+- **`region_local_vars` = reads, not writes** — see the data caveat above; the
+  write set needs a journal schema change, out of scope for post-processing.
+- **Strategy still reads `prov_vars`** for `RegionTarget.variables`
+  (`characterization._one_record`); migrating single-span regions to consume
+  `region_local_vars` is the follow-up noted in Change 2's brief.
+- **Cascade victim = DAG sink.** Non-sink intermediates meeting the cascade
+  criteria are not treated as separate victims (avoids a chain per intermediate);
+  revisit if a real cascade's victim is consumed downstream.

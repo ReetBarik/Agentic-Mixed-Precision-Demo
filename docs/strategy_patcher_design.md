@@ -919,9 +919,17 @@ re-run):
 5. Emit chain-region record with union of contributing lines.
 
 ## Cascade region schema, `predicted_rel_err_if_ff`, and region-local
-variables all pending characterizer post-processing pass (task queued
-as of 2026-07-17). Chain regions and `required_by` bookkeeping are
-locked but not yet implemented in Strategy.
+variables — **IMPLEMENTED 2026-07-17** (characterizer post-processing pass;
+see HANDOFF.md). `cascade_chain` records, `predicted_rel_err_if_ff`, and
+`region_local_vars` land in `agents/shared/stability_reducer.py`; chain
+consumption + `required_by` bookkeeping (chain promotion, overlap→max
+precision, speedup floor) land in `agents/strategy/`.
+
+**Caveat on `region_local_vars`:** it is region-local *reads* (source vars
+used as direct leaf operands at the line), NOT declares/assigns. The journal
+has no LHS/output field and `track()` emits no record, so the *written*
+variable of a region is not nameable from journal data — a schema change would
+be required. See HANDOFF.md "Where journal data was insufficient".
 
 ---
 
