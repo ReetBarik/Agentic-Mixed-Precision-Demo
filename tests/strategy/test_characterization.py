@@ -2,7 +2,7 @@
 
 import json
 
-from agents.strategy.characterization import load_regions
+from agents.strategy.characterization import load_chains, load_regions
 
 
 def _report(tmp_path, integrals):
@@ -70,3 +70,36 @@ def test_op_count_from_ops_sum(tmp_path):
     integrals = {"A": {"regions": {"f.h:10": _region("stable", ops={"mul": 3, "add": 4})}}}
     regs, _ = load_regions(_report(tmp_path, integrals))
     assert regs[0].op_count == 7
+
+
+# ---------------------------------------------------------------------------
+# cascade chains
+# ---------------------------------------------------------------------------
+
+def _chain(chain_id, spans, cond=1e6, rel=1e-3, ops=None, lv=("v",)):
+    return {"kind": "cascade_chain", "chain_id": chain_id,
+            "chain": [{"file": f, "line_start": l, "line_end": l} for f, l in spans],
+            "signal_class": "cancellation_cascade", "non_localizable": False,
+            "max_cond": cond, "max_rel_err": rel, "predicted_rel_err_if_float": 1e-2,
+            "ops": ops or {"sub": 2}, "n": 2, "region_local_vars": list(lv)}
+
+
+def test_load_chains_builds_multiline_records(tmp_path):
+    integrals = {"IX": {"regions": {}, "cascade_chains": [
+        _chain("cascade_IX_a_1", [("B2m.h", 355), ("B0m.h", 230)])]}}
+    chains, meta = load_chains(_report(tmp_path, integrals))
+    assert meta["n_chains"] == 1
+    c = chains[0]
+    assert c.chain_id == "cascade_IX_a_1"
+    assert c.signal_class == "cancellation_cascade"
+    assert [ (t.file, t.line_start, t.line_end) for t in c.lines ] == [
+        ("B2m.h", 355, 355), ("B0m.h", 230, 230)]
+    assert c.op_count == 2
+    # walk_record's representative target is the first chain line
+    assert c.walk_record().target.location == "B2m.h:355"
+
+
+def test_load_chains_empty_when_absent(tmp_path):
+    integrals = {"A": {"regions": {"f.h:10": _region("stable")}}}
+    chains, meta = load_chains(_report(tmp_path, integrals))
+    assert chains == [] and meta["n_chains"] == 0

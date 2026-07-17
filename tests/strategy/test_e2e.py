@@ -171,3 +171,131 @@ def test_e2e_three_region_run(repo, report_path, tmp_path):
     assert "A.h" in diff and "B.h" in diff and "C.h" in diff
     md = Path(res["report_md_path"]).read_text()
     assert "Ceiling regions" in md and "dd_ceiling" in md
+
+
+# --------------------------------------------------------------------------
+# cascade-chain required_by: overlap (max precision) + speedup floor
+# --------------------------------------------------------------------------
+
+@pytest.fixture
+def chain_repo(tmp_path):
+    root = tmp_path / "ctree"
+    (root / "headers").mkdir(parents=True)
+    for name in ("D.h", "F.h", "G.h", "H.h"):
+        (root / "headers" / name).write_text(
+            "\n".join(f"line {i}" for i in range(1, 11)) + "\n")
+    _git(root, "init", "-q")
+    _git(root, "config", "user.email", "t@t.t")
+    _git(root, "config", "user.name", "t")
+    _git(root, "config", "commit.gpgsign", "false")
+    _git(root, "add", "-A")
+    _git(root, "commit", "-q", "-m", "base")
+    return root, _git(root, "rev-parse", "HEAD").stdout.strip()
+
+
+@pytest.fixture
+def chain_report_path(tmp_path):
+    def chain(cid, spans):
+        return {"kind": "cascade_chain", "chain_id": cid,
+                "chain": [{"file": f, "line_start": l, "line_end": l} for f, l in spans],
+                "signal_class": "cancellation_cascade", "non_localizable": False,
+                "max_cond": 1e6, "max_rel_err": 1e-3,
+                "predicted_rel_err_if_float": 1e-2, "ops": {"sub": 2}, "n": 2,
+                "region_local_vars": ["v"]}
+
+    def stable(pred_float, ops):
+        return {"signal_class": "stable", "max_cond": 10.0, "max_rel_err": 1e-16,
+                "predicted_rel_err_if_float": pred_float, "prov_vars": ["v"],
+                "ops": ops, "n": 100, "non_localizable": False}
+
+    report = {
+        "kind": "stability_report", "schema_version": 1, "no_id_records": 0,
+        "samples_seen": {}, "integrals": {
+            # two chains that OVERLAP on headers/F.h:9
+            "IX": {"class_counts": {}, "regions": {}, "cascade_chains": [
+                chain("cascade_IX_a_1", [("headers/D.h", 5), ("headers/F.h", 9)])]},
+            "IY": {"class_counts": {}, "regions": {}, "cascade_chains": [
+                chain("cascade_IY_b_2", [("headers/F.h", 9), ("headers/G.h", 3)])]},
+            # a stable region ON the overlap line (speedup floor must protect it)
+            "IF": {"class_counts": {}, "regions": {
+                "headers/F.h:9": stable(1e-8, {"mul": 5})}, "cascade_chains": []},
+            # a free stable region (no chain) — demotes unimpeded
+            "IH": {"class_counts": {}, "regions": {
+                "headers/H.h:2": stable(1e-8, {"mul": 9})}, "cascade_chains": []},
+        }}
+    p = tmp_path / "chain_report.json"
+    p.write_text(json.dumps(report))
+    return p
+
+
+def _chain_validator(repo_root):
+    def validator(candidate_sha, ctx):
+        msg = _git(repo_root, "log", "-1", "--format=%s", candidate_sha).stdout.strip()
+        kind, loc = msg.split()[1], msg.split()[2]
+        # chains promote to dd (reps on D.h / F.h); H.h demotes to ff then stops
+        if kind == "double-to-dd":
+            verdict, digits = "accept", 15.0
+        elif "H.h" in loc and kind == "double-to-ff":
+            verdict, digits = "accept", 9.0
+        else:
+            verdict, digits = "reject", 5.0
+        return {"verdict": verdict, "candidate": {"min_precise_digits": digits},
+                "current": {"min_precise_digits": 5.0}}
+    return validator
+
+
+def test_e2e_chain_overlap_required_by_and_floor(chain_repo, chain_report_path, tmp_path):
+    root, start = chain_repo
+    state = {
+        "characterization_report_path": str(chain_report_path),
+        "strategy_repo_path": str(root),
+        "strategy_starting_sha": start,
+        "strategy_config": StrategyConfig(
+            tolerance=6.0, runs_root=tmp_path / "runs",
+            budget=StrategyBudget(max_iters=500, max_wall_clock_sec=600, max_llm_tokens=10**9),
+            diminishing_returns_k=50),
+        "patcher_fn": make_patcher(root),
+        "validator_fn": _chain_validator(root),
+    }
+    delta = strategy_agent.run(state)
+    report = json.loads(Path(delta["strategy_result"]["report_json_path"]).read_text())
+
+    by_line = {(a["file"], a["line_start"]): a for a in report["precision_assignment"]}
+
+    # overlap line F.h:9 is claimed by BOTH chains → single dd entry, both ids
+    overlap = by_line[("headers/F.h", 9)]
+    assert overlap["precision"] == "dd"
+    assert overlap["required_by"] == ["cascade_IX_a_1", "cascade_IY_b_2"]
+
+    # the other chain lines: each required by exactly its one chain, at dd
+    assert by_line[("headers/D.h", 5)]["required_by"] == ["cascade_IX_a_1"]
+    assert by_line[("headers/G.h", 3)]["required_by"] == ["cascade_IY_b_2"]
+
+    # speedup floor: the stable region on F.h:9 was NOT demoted below dd
+    # (no separate ff/float assignment for F.h:9 exists)
+    f_entries = [a for a in report["precision_assignment"]
+                 if (a["file"], a["line_start"]) == ("headers/F.h", 9)]
+    assert len(f_entries) == 1 and f_entries[0]["precision"] == "dd"
+
+    # the FREE stable region demoted normally (double->ff), required_by empty
+    h = by_line[("headers/H.h", 2)]
+    assert h["precision"] == "ff" and h["required_by"] == []
+
+
+def test_required_by_overlap_takes_max_precision(tmp_path):
+    # unit-level: a line required by chain X at dd and chain Y at ff resolves to
+    # the MAX precision (dd) with BOTH chain_ids in required_by (design overlap rule).
+    from agents.strategy.agent import StrategyRun
+    run = StrategyRun({
+        "characterization_report_path": str(tmp_path / "unused.json"),
+        "strategy_config": StrategyConfig(runs_root=tmp_path / "runs"),
+        "patcher_fn": lambda i, c: {}, "validator_fn": lambda s, c: {},
+    })
+    key = ("B2m.h", 355, 355)
+    run._require_line(key, "cascade_Y_ff", "ff", "iter_2")
+    run._require_line(key, "cascade_X_dd", "dd", "iter_1")
+    run._emit_chain_assignments()
+    entry = run.precision_assignment[0]
+    assert entry["precision"] == "dd"                       # max wins
+    assert entry["required_by"] == ["cascade_X_dd", "cascade_Y_ff"]   # both, sorted
+    assert entry["rationale_id"] == "iter_1"                # the dd (floor-setting) one

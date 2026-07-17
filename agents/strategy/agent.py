@@ -28,12 +28,12 @@ from pathlib import Path
 
 from agents.config import StrategyConfig
 from agents.state import PipelineState
-from agents.strategy.characterization import load_regions
+from agents.strategy.characterization import load_chains, load_regions
 from agents.strategy.dispatch import dispatch
 from agents.strategy.gitops import GitRepo
 from agents.strategy.iteration_log import IterationLogger
 from agents.strategy.models import INTENT_CORRECTNESS, INTENT_SPEEDUP, LADDER
-from agents.strategy.ranking import build_queues
+from agents.strategy.ranking import build_queues, error_threshold
 from agents.strategy.report import write_reports
 from agents.strategy.walk import RetryWalk
 
@@ -93,10 +93,23 @@ class StrategyRun:
         self.region_final: dict[tuple, str] = {}
         self.region_status: dict[tuple, str] = {}
 
+        # -- required_by ledger (cascade-chain per-line precision floor) --
+        # keyed by line target key (file, line_start, line_end):
+        #   chain_ids   -> the chain_id(s) requiring this line
+        #   floor_idx   -> the max ladder index any chain requires (max precision)
+        #   rationale   -> the rationale_id that set the floor
+        self.line_chain_ids: dict[tuple, set[str]] = {}
+        self.line_floor_idx: dict[tuple, int] = {}
+        self.line_rationale: dict[tuple, str] = {}
+        self._retain_rationale: str | None = None   # set per walk iteration on retain
+
     # ------------------------------------------------------------------
     def execute(self) -> dict:
         regions, meta = load_regions(self.report_path)
+        chains, chain_meta = load_chains(self.report_path)
+        meta.update(chain_meta)
         correctness_q, speedup_q = build_queues(regions, self.tolerance)
+        chain_q = self._rank_chains(chains)
 
         # every localizable region starts at the double baseline
         for r in regions:
@@ -104,15 +117,23 @@ class StrategyRun:
             self.region_status[r.key] = "baseline_ok"
         for r in correctness_q:
             self.region_status[r.key] = "unworked"
+        for c in chain_q:
+            self.region_status[c.chain_id] = "unworked"
 
         if self.repo and self.starting_sha:
             self.repo.create_branch(self.branch, self.starting_sha)
 
-        # -- correctness mode drains first --
+        # -- correctness mode drains first: tier-1/3/4 regions, then the cascade
+        #    chains (tier 2's concrete population).  All finish before speedup, so
+        #    the required_by ledger is fully populated when speedup consults it. --
         for record in correctness_q:
             if self.stop_status:
                 break
             self._process_target(record, INTENT_CORRECTNESS)
+        for chain in chain_q:
+            if self.stop_status:
+                break
+            self._process_chain(chain)
 
         # -- speedup mode second (only if correctness fully drained) --
         if not self.stop_status:
@@ -124,12 +145,44 @@ class StrategyRun:
         status = self.stop_status or "success"
         return self._finalize(status, meta, len(correctness_q))
 
+    def _rank_chains(self, chains) -> list:
+        """Tier-2 population: cascade chains above the tolerance bar, worst
+        conditioning first (chain_id breaks ties for determinism)."""
+        thr = error_threshold(self.tolerance)
+        eligible = [c for c in chains if c.max_rel_err > thr]
+        return sorted(eligible, key=lambda c: (-c.max_cond, c.chain_id))
+
     # ------------------------------------------------------------------
     def _process_target(self, record, mode: str) -> None:
-        """Drive one target's retry walk to termination (or until a stop fires)."""
-        walk = RetryWalk(record, mode, self.tolerance, baseline="double")
+        """Drive one region target's retry walk to termination."""
+        floor = self._floor_for(record.key) if mode == INTENT_SPEEDUP else None
+        walk = RetryWalk(record, mode, self.tolerance, baseline="double", floor=floor)
+        stopped, walk_digits = self._drive_walk(walk, record, chain=None)
+        if stopped:
+            self.region_final[record.key] = walk.installed
+            self.region_status[record.key] = "unresolved"
+            return
+        self._finish_walk(record, walk.result(), walk_digits)
+
+    def _process_chain(self, chain) -> None:
+        """Drive one cascade chain's correctness walk; distribute the promoted
+        precision across every line in the chain via the required_by ledger."""
+        record = chain.walk_record()
+        walk = RetryWalk(record, INTENT_CORRECTNESS, self.tolerance, baseline="double")
+        stopped, walk_digits = self._drive_walk(walk, record, chain=chain)
+        if stopped:
+            return
+        self._finish_chain(chain, walk.result(), walk_digits)
+
+    def _drive_walk(self, walk, record, chain) -> tuple[bool, float | None]:
+        """Run a walk to termination (or until a stop fires).
+
+        Returns ``(stopped, walk_digits)`` — ``stopped`` True if a budget/DR stop
+        interrupted the walk mid-flight (result not available).
+        """
         walk_digits: float | None = None
         timed_out_kinds: set[str] = set()
+        self._retain_rationale = None
 
         while True:
             intent = walk.propose("")
@@ -151,7 +204,7 @@ class StrategyRun:
                     log_tag=entry.log_tag, rationale="commit_failed → internal_error",
                     extra={"candidate_sha": resp.get("candidate_sha")})
                 self.stop_status = "internal_error"
-                return
+                return True, walk_digits
 
             patcher_ok = status == "ok"
             validator_verdict = None
@@ -175,7 +228,8 @@ class StrategyRun:
                 self.repo.reset_hard(resp["parent_sha"])
 
             # ---- record accepted / retained remediations for the report ----
-            self._record_remediation(intent, accepted, genuine_reject, is_rewrite, is_dd_promo)
+            self._record_remediation(intent, accepted, genuine_reject, is_rewrite,
+                                     is_dd_promo, chain=chain)
 
             # ---- iteration log ----
             self.logger.write(
@@ -201,12 +255,9 @@ class StrategyRun:
 
             # ---- stopping conditions (checked every iteration) ----
             if self._check_stops():
-                # walk interrupted mid-flight: leave region provisional
-                self.region_final[record.key] = walk.installed
-                self.region_status[record.key] = "unresolved"
-                return
+                return True, walk_digits     # walk interrupted mid-flight
 
-        self._finish_walk(record, walk.result(), walk_digits)
+        return False, walk_digits
 
     # ------------------------------------------------------------------
     def _invoke_patcher(self, intent, iter_id: int, timed_out_kinds: set) -> dict:
@@ -235,22 +286,29 @@ class StrategyRun:
                 "parent_sha": self.repo.head() if self.repo else None,
                 "run_dir": str(self.run_dir), "iter_id": iter_id}
 
-    def _record_remediation(self, intent, accepted, genuine_reject, is_rewrite, is_dd_promo):
-        if accepted and not is_rewrite:
+    def _record_remediation(self, intent, accepted, genuine_reject, is_rewrite,
+                            is_dd_promo, chain=None):
+        retain_precision = accepted and not is_rewrite
+        ceiling_retain = genuine_reject and is_dd_promo
+        if (retain_precision or ceiling_retain) and chain is not None:
+            # A chain's precision is distributed across all its lines from the
+            # ledger at _finish_chain — remember which iteration drove it here.
+            self._retain_rationale = intent.rationale_id
+        elif retain_precision:
             level = intent.kind.split("-to-")[-1]
             self.precision_assignment.append(
                 {**intent.target.as_dict(), "precision": level,
-                 "rationale_id": intent.rationale_id})
+                 "required_by": [], "rationale_id": intent.rationale_id})
         elif accepted and is_rewrite:
             self.rewrites.append(
                 {**intent.target.as_dict(), "kind": intent.kind,
                  "identity": intent.identity, "rationale_id": intent.rationale_id,
                  "accepted": True})
-        elif genuine_reject and is_dd_promo:
+        elif ceiling_retain:
             # DD retained on the branch as the ceiling candidate (Q2 / P6a)
             self.precision_assignment.append(
                 {**intent.target.as_dict(), "precision": "dd",
-                 "rationale_id": intent.rationale_id})
+                 "required_by": [], "rationale_id": intent.rationale_id})
 
     def _finish_walk(self, record, res, walk_digits) -> None:
         self.region_final[record.key] = res.final_precision
@@ -278,6 +336,67 @@ class StrategyRun:
             })
         else:  # exhausted
             self.region_status[record.key] = "unresolved"
+
+    def _finish_chain(self, chain, res, walk_digits) -> None:
+        """Distribute a chain's promoted precision across its lines (required_by)."""
+        precision = res.final_precision
+        rationale = self._retain_rationale or ""
+        # register the floor only if the chain was promoted above the baseline
+        if LADDER.index(precision) > LADDER.index("double"):
+            for line in chain.lines:
+                self._require_line(line.key, chain.chain_id, precision, rationale)
+
+        loc = f"{chain.integral} {chain.chain_id}"
+        if res.status == "cleared":
+            self.region_status[chain.chain_id] = "cleared"
+        elif res.status == "dd_ceiling":
+            self.region_status[chain.chain_id] = "dd_ceiling"
+            self.ceiling_regions.append({
+                "location": loc, "final_min_digits": walk_digits,
+                "signal_class": chain.signal_class, "ceiling_kind": "dd_ceiling",
+                "attempted_rewrites": list(res.attempted_rewrites),
+                "chain_id": chain.chain_id})
+        elif res.status == "dd_untested":
+            self.region_status[chain.chain_id] = "dd_untested"
+            self.ceiling_regions.append({
+                "location": loc, "final_min_digits": None,
+                "signal_class": chain.signal_class, "ceiling_kind": "dd_untested",
+                "reason": "Patcher failure at the double-to-dd rung (P6a)",
+                "chain_id": chain.chain_id})
+        else:  # exhausted
+            self.region_status[chain.chain_id] = "unresolved"
+
+    # -- required_by ledger --------------------------------------------
+    def _require_line(self, key: tuple, chain_id: str, precision: str,
+                      rationale: str) -> None:
+        self.line_chain_ids.setdefault(key, set()).add(chain_id)
+        idx = LADDER.index(precision)
+        if idx > self.line_floor_idx.get(key, -1):     # max precision wins
+            self.line_floor_idx[key] = idx
+            self.line_rationale[key] = rationale
+
+    def _floor_for(self, key: tuple) -> str | None:
+        idx = self.line_floor_idx.get(key)
+        return LADDER[idx] if idx is not None else None
+
+    def _emit_chain_assignments(self) -> None:
+        """One resolved precision_assignment per chain-claimed line (deterministic).
+
+        Overlap rule: a line in chains X (dd) and Y (ff) gets ONE entry at the max
+        precision (dd) with both chain_ids in required_by (design "Overlap rule").
+        """
+        for key in sorted(self.line_chain_ids):
+            file, ls, le = key
+            precision = LADDER[self.line_floor_idx[key]]
+            self.precision_assignment.append({
+                "file": file, "line_start": ls, "line_end": le,
+                "precision": precision,
+                "required_by": sorted(self.line_chain_ids[key]),
+                "rationale_id": self.line_rationale.get(key, "")})
+            # reflect the floor in the per-line final precision (distribution)
+            cur = self.region_final.get(key)
+            if cur is None or LADDER.index(cur) < self.line_floor_idx[key]:
+                self.region_final[key] = precision
 
     # ------------------------------------------------------------------
     def _check_stops(self) -> bool:
@@ -326,6 +445,10 @@ class StrategyRun:
                 diff_path.write_text(f"# diff unavailable: {exc}\n")
         elif not diff_path.exists():
             diff_path.write_text("")
+
+        # resolve cascade-chain per-line assignments (required_by + overlap) and
+        # reflect their precision floor in region_final before the distribution.
+        self._emit_chain_assignments()
 
         dist = {p: 0 for p in LADDER}
         for prec in self.region_final.values():

@@ -125,6 +125,41 @@ def test_speedup_all_the_way_to_float():
     assert res.final_precision == "float"
 
 
+# ---- speedup required_by floor (cascade-chain overlap) ----
+
+def test_speedup_floor_blocks_demotion_below_floor():
+    # a promoted chain requires this line at dd → speedup must not demote at all
+    rec = make_region("B1", "f.h", 10, "stable", pred_float=1e-30)
+    walk = RetryWalk(rec, "speedup", tolerance=10.0, baseline="double", floor="dd")
+    intent = walk.propose("iter_0")
+    assert intent is None                       # double-to-ff would drop below dd
+    assert walk.result().status == "settled"
+    assert walk.result().final_precision == "double"
+
+
+def test_speedup_floor_allows_demotion_down_to_floor():
+    # floor ff: double may demote to ff (accepted) but not below to float
+    rec = make_region("B1", "f.h", 10, "stable", pred_float=1e-30)
+    walk = RetryWalk(rec, "speedup", tolerance=10.0, baseline="double", floor="ff")
+    first = walk.propose("iter_0")
+    assert first.kind == "double-to-ff"
+    walk.resolve(accepted=True)                 # demoted to ff
+    assert walk.propose("iter_1") is None        # ff-to-float would breach the floor
+    res = walk.result()
+    assert res.status == "settled" and res.final_precision == "ff"
+
+
+def test_speedup_no_floor_demotes_to_float():
+    # sanity: without a floor the same region walks all the way to float
+    rec = make_region("B1", "f.h", 10, "stable", pred_float=1e-30)
+    walk = RetryWalk(rec, "speedup", tolerance=10.0, baseline="double")
+    i = 0
+    while (intent := walk.propose(f"iter_{i}")) is not None:
+        walk.resolve(accepted=True)
+        i += 1
+    assert walk.result().final_precision == "float"
+
+
 # ---- float-baseline edge (float-to-dd unsupported) ----
 
 def test_float_baseline_exhausts_without_dd():

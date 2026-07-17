@@ -31,6 +31,46 @@ _SEVERITY = {
 
 
 @dataclass
+class ChainRecord:
+    """A localized ``cancellation_cascade`` spanning multiple source lines.
+
+    The characterizer emits one ``cascade_chain`` per victim (see
+    stability_reducer): a list of contributing sub-region lines (multi-file
+    allowed) that together accumulate the cancellation.  A chain is promoted as a
+    unit; the resulting precision floor is distributed across every line in
+    ``lines`` via ``required_by`` bookkeeping (design "Chain promotion
+    semantics").  ``chain_id`` is stable across runs.
+    """
+
+    integral: str
+    chain_id: str
+    lines: list[RegionTarget]
+    signal_class: str
+    max_cond: float
+    max_rel_err: float
+    predicted_rel_err_if_float: float
+    op_count: int
+    n: int
+    variables: list[str] = field(default_factory=list)
+
+    def walk_record(self) -> "RegionRecord":
+        """A single-target ``RegionRecord`` the retry walk drives on.
+
+        The walk/Patcher intent is region-shaped (single span); the chain's first
+        sub-region is the representative target.  The promoted precision is
+        distributed to ALL ``lines`` afterward — the representative is a driver
+        for the walk, not the assignment scope.  (Real multi-line chain intents
+        for Patcher are deferred; see HANDOFF.md.)
+        """
+        rep = self.lines[0]
+        return RegionRecord(
+            integral=self.integral, target=rep, signal_class=self.signal_class,
+            max_cond=self.max_cond, max_rel_err=self.max_rel_err,
+            predicted_rel_err_if_float=self.predicted_rel_err_if_float,
+            op_count=self.op_count, n=self.n, integrals=[self.integral])
+
+
+@dataclass
 class RegionRecord:
     """One localizable characterization *code region* + the fields ranking reads.
 
@@ -103,6 +143,44 @@ def load_regions(report_path: str | Path, *, merge: bool = True,
         "merged": merge,
     }
     return records, meta
+
+
+def load_chains(report_path: str | Path) -> tuple[list[ChainRecord], dict]:
+    """Parse the report's ``cascade_chain`` records into ``ChainRecord``s.
+
+    These are the concrete population of correctness tier 2 (cancellation
+    cascade): the localized replacement for the non-localizable cascade regions
+    that ``load_regions`` skips.  Chains are NOT merged (each victim is its own
+    chain); Strategy resolves per-line overlap via ``required_by`` bookkeeping.
+    Returns ``(chains, meta)`` with ``meta['n_chains']``.
+    """
+    data = json.loads(Path(report_path).read_text())
+    chains: list[ChainRecord] = []
+    for integral, idata in data.get("integrals", {}).items():
+        for chain in idata.get("cascade_chains", []) or []:
+            lines = []
+            for span in chain.get("chain", []) or []:
+                lines.append(RegionTarget(
+                    file=span["file"],
+                    line_start=int(span["line_start"]),
+                    line_end=int(span["line_end"]),
+                    variables=list(chain.get("region_local_vars", []) or [])))
+            if not lines:
+                continue
+            ops = chain.get("ops", {}) or {}
+            chains.append(ChainRecord(
+                integral=integral,
+                chain_id=chain["chain_id"],
+                lines=lines,
+                signal_class=chain.get("signal_class", "cancellation_cascade"),
+                max_cond=float(chain.get("max_cond", 0.0) or 0.0),
+                max_rel_err=float(chain.get("max_rel_err", 0.0) or 0.0),
+                predicted_rel_err_if_float=float(
+                    chain.get("predicted_rel_err_if_float", 0.0) or 0.0),
+                op_count=int(sum(ops.values())),
+                n=int(chain.get("n", 0) or 0),
+                variables=list(chain.get("region_local_vars", []) or [])))
+    return chains, {"n_chains": len(chains)}
 
 
 def _one_record(integral: str, region: dict, file: str, line: int) -> RegionRecord:

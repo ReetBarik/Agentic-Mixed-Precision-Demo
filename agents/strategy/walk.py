@@ -42,6 +42,10 @@ from agents.strategy.models import (
     RemediationIntent, TRANSITION_KINDS, next_down,
 )
 
+
+def _ladder_index(precision: str) -> int:
+    return LADDER.index(precision)
+
 _DD = "dd"
 
 
@@ -69,7 +73,7 @@ def _rewrites_for(signal_class: str) -> list[tuple[str, str | None]]:
 
 class RetryWalk:
     def __init__(self, record: RegionRecord, mode: str, tolerance: float,
-                 baseline: str = "double"):
+                 baseline: str = "double", floor: str | None = None):
         if mode not in (INTENT_CORRECTNESS, INTENT_SPEEDUP):
             raise ValueError(f"unknown walk mode {mode!r}")
         self.record = record
@@ -77,6 +81,10 @@ class RetryWalk:
         self.tolerance = tolerance
         self.baseline = baseline
         self.installed = baseline
+        # Speedup floor (design "Speedup floor rule"): the lowest precision this
+        # region may be demoted to, because a promoted cascade chain still claims
+        # one of its lines at that precision.  None → no floor (down to float).
+        self.floor = floor
 
         # correctness: higher rungs reachable from baseline via a supported kind
         base_i = LADDER.index(baseline)
@@ -137,6 +145,12 @@ class RetryWalk:
     def _propose_speedup(self, rationale_id: str) -> RemediationIntent | None:
         target_level = next_down(self.installed)
         if target_level is None or f"{self.installed}-to-{target_level}" not in TRANSITION_KINDS:
+            self._result = WalkResult(status="settled", final_precision=self.installed)
+            return None
+        # required_by floor: never demote a line below the precision a promoted
+        # cascade chain still requires of it (safe upper bound — extra precision
+        # can only help).  Settle at the current rung rather than dropping through.
+        if self.floor is not None and _ladder_index(target_level) < _ladder_index(self.floor):
             self._result = WalkResult(status="settled", final_precision=self.installed)
             return None
         self._pending_is_dd = False
