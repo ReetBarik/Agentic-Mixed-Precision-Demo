@@ -224,3 +224,127 @@ def test_real_llm_previously_failing_region_has_clean_includes(loc, tmp_path):
     from agents.integrator_base import regional as _r
     bad = _r._lint_include_set(shim, _r._allowed_include_set(dd._SPEC))
     assert bad is None, f"{loc}: {bad}"
+
+
+# --------------------------------------------------------------------------- #
+# Gap B (source-derivable constants) — real-LLM reproduction of the _ieps50 R4.
+# --------------------------------------------------------------------------- #
+
+# A minimal kokkosMaths-shaped header defining _ieps50 as a source double literal,
+# co-located so the derivation helper can resolve its RHS (as in the full tree).
+_IEPS50_HEADER = (
+    "#pragma once\n"
+    "namespace ql {\n"
+    "template<class T> struct Constants {\n"
+    "  static constexpr T _one() { return T(1); }\n"
+    "  template<class TOutput, class TMass, class TScale>\n"
+    "  static TOutput _ieps50() { return TOutput{Constants<TScale>::_zero(), TScale(1e-50)}; }\n"
+    "};\n"
+    "template<class T> T kAbs(T const& x);\n"
+    "template<class T> T Max(T const& a, T const& b);\n"
+    "}\n"
+)
+
+_IEPS50_REGION_LINE = (
+    "        const TOutput k34c = TOutput(k34 - ql::Max(ql::kAbs(k34), "
+    "TMass(ql::Constants<TMass>::_one())) * "
+    "ql::Constants<TScale>::template _ieps50<TOutput, TMass, TScale>()) / k13c;"
+)
+
+
+@pytest.mark.llm
+@pytest.mark.skipif(not os.environ.get("ANTHROPIC_AUTH_TOKEN"),
+                    reason="requires the Argo LLM proxy")
+def test_real_llm_ieps50_derived_not_r4(tmp_path):
+    """B0m.h:69 / B2m.h:65 shape: the region reads `_ieps50` (source `1e-50`).
+
+    Pre-Gap-B this tripped the Rule R4 #error (and even guessed wrong bits).  With
+    the R3 cascade + the pre-derived hint, the shim must generate cleanly (no
+    #error) and carry the CORRECT double-double bits for 1e-50 (hi 0x358d…, lo 0).
+    """
+    root = tmp_path / "cand"
+    root.mkdir()
+    (root / "kokkosMaths.h").write_text(_IEPS50_HEADER)
+    (root / "region.h").write_text("#pragma once\n" + _IEPS50_REGION_LINE + "\n")
+    _git(root, "init", "-q")
+    _git(root, "config", "user.email", "t@t.t")
+    _git(root, "config", "user.name", "t")
+    _git(root, "add", "-A")
+    _git(root, "commit", "-q", "-m", "base")
+    sha = _git(root, "rev-parse", "HEAD").stdout.strip()
+
+    res = dd.integrate_region(
+        file="region.h", line_start=2, line_end=2, variables=[],
+        working_tree=sha, out_dir=tmp_path / "shims",
+        repo_path=str(root), llm_fn=None,
+    )
+    assert res.ok, res.error
+    shim = Path(res.shim_paths[0]).read_text()
+    assert "#error" not in shim, f"still hit R4:\n{shim}"
+    # the exact bits the model previously got wrong — proof the derivation was used
+    assert "358dee7a4ad4b81f" in shim.lower()
+
+
+@pytest.mark.llm
+@pytest.mark.skipif(not os.environ.get("ANTHROPIC_AUTH_TOKEN"),
+                    reason="requires the Argo LLM proxy")
+def test_real_llm_synthetic_derivable_constant_no_r4(tmp_path):
+    """Non-qcdloop Gap B: a plain `constexpr double MY_TINY = 1e-40` must derive,
+    never R4 — exercises the generic path with zero qcdloop symbols."""
+    root = tmp_path / "cand"
+    root.mkdir()
+    (root / "consts.h").write_text("#pragma once\nconstexpr double MY_TINY = 1e-40;\n")
+    (root / "kernel.h").write_text(
+        '#pragma once\n#include "consts.h"\n'
+        "double g(double a) {\n    double c = MY_TINY * a;\n    return c;\n}\n")
+    _git(root, "init", "-q")
+    _git(root, "config", "user.email", "t@t.t")
+    _git(root, "config", "user.name", "t")
+    _git(root, "add", "-A")
+    _git(root, "commit", "-q", "-m", "base")
+    sha = _git(root, "rev-parse", "HEAD").stdout.strip()
+
+    res = dd.integrate_region(
+        file="kernel.h", line_start=4, line_end=4, variables=["a"],
+        working_tree=sha, out_dir=tmp_path / "shims",
+        repo_path=str(root), llm_fn=None,
+    )
+    assert res.ok, res.error
+    shim = Path(res.shim_paths[0]).read_text()
+    assert "#error" not in shim, f"unexpected R4:\n{shim}"
+
+
+# --------------------------------------------------------------------------- #
+# Gap A (namespace-qualified bridge) — real-LLM synthetic std::sqrt(promoted).
+# --------------------------------------------------------------------------- #
+
+@pytest.mark.llm
+@pytest.mark.skipif(not os.environ.get("ANTHROPIC_AUTH_TOKEN"),
+                    reason="requires the Argo LLM proxy")
+def test_real_llm_qualified_call_gets_bridge(tmp_path):
+    """A namespace-qualified `std::sqrt(x)` on a promoted read must get a bridge
+    overload in `namespace std` (or a using-decl) — otherwise the C3 bridge lint
+    would have flipped the result to llm_failed.  Generic, no qcdloop symbols."""
+    root = tmp_path / "cand"
+    root.mkdir()
+    (root / "kernel.h").write_text(
+        "#pragma once\n#include <cmath>\n"
+        "double g(double x) {\n    double r = std::sqrt(x) + std::fabs(x);\n"
+        "    return r;\n}\n")
+    _git(root, "init", "-q")
+    _git(root, "config", "user.email", "t@t.t")
+    _git(root, "config", "user.name", "t")
+    _git(root, "add", "-A")
+    _git(root, "commit", "-q", "-m", "base")
+    sha = _git(root, "rev-parse", "HEAD").stdout.strip()
+
+    res = dd.integrate_region(
+        file="kernel.h", line_start=4, line_end=4, variables=["x"],
+        working_tree=sha, out_dir=tmp_path / "shims",
+        repo_path=str(root), llm_fn=None,
+    )
+    assert res.ok, res.error
+    shim = Path(res.shim_paths[0]).read_text()
+    from agents.integrator_base import regional as _r
+    region_line = "double r = std::sqrt(x) + std::fabs(x);"
+    assert _r._lint_qualified_bridges(region_line, shim, frozenset({"x", "r"})) is None, shim

@@ -1,0 +1,174 @@
+"""Engine-level offline tests for Gap A (namespace-qualified bridge) and Gap B
+(source-derivable constants) through agents.integrator_base.regional.
+
+No LLM and no compiler: a canned ``llm_fn`` captures the user turn and returns a
+shim we control, so we can assert (1) the deterministic hints reach the model and
+(2) the lints flip a bad shim to a retryable ``llm_failed``.  The synthetic cases
+(``std::sqrt(promoted)`` / ``constexpr double MY_TINY = 1e-40``) exercise the
+generic path with zero qcdloop symbols.
+"""
+
+from __future__ import annotations
+
+import subprocess
+from pathlib import Path
+
+import pytest
+
+from agents.dd_integrator import agent as dd
+from agents.integrator_base import regional
+
+
+def _git(root, *args):
+    return subprocess.run(["git", "-C", str(root), *args],
+                          capture_output=True, text=True, check=True)
+
+
+def _init_repo(root: Path, files: dict[str, str]) -> str:
+    root.mkdir(parents=True, exist_ok=True)
+    for rel, text in files.items():
+        p = root / rel
+        p.parent.mkdir(parents=True, exist_ok=True)
+        p.write_text(text)
+    _git(root, "init", "-q")
+    _git(root, "config", "user.email", "t@t.t")
+    _git(root, "config", "user.name", "t")
+    _git(root, "add", "-A")
+    _git(root, "commit", "-q", "-m", "base")
+    return _git(root, "rev-parse", "HEAD").stdout.strip()
+
+
+class _CapturingLLM:
+    """Returns a fixed shim; records the (system, user) turns it was given."""
+
+    def __init__(self, shim: str):
+        self.shim = shim
+        self.calls: list[tuple[str, str, int]] = []
+
+    def __call__(self, system, user, attempt):
+        self.calls.append((system, user, attempt))
+        return self.shim
+
+
+_CLEAN_SHIM = (
+    "#pragma once\n// SOURCE_HASH: PENDING\n"
+    "#include <dd_math.hpp>\n#include <dd_complex.hpp>\n"
+)
+
+
+# --------------------------------------------------------------------------- #
+# Gap A — synthetic std::sqrt(promoted)
+# --------------------------------------------------------------------------- #
+
+_GAPA_FILE = (
+    "#pragma once\n"
+    "double g(double x) {\n"
+    "    double r = std::sqrt(x);\n"   # line 3 — qualified math call on a promoted read
+    "    return r;\n"
+    "}\n"
+)
+
+
+def _run_gapa(tmp_path, shim):
+    root = tmp_path / "cand"
+    sha = _init_repo(root, {"kernel.h": _GAPA_FILE})
+    llm = _CapturingLLM(shim)
+    res = dd.integrate_region(
+        file="kernel.h", line_start=3, line_end=3, variables=["x"],
+        working_tree=sha, out_dir=tmp_path / "shims", repo_path=str(root), llm_fn=llm,
+    )
+    return res, llm
+
+
+def test_gapa_user_message_lists_qualified_call(tmp_path):
+    _, llm = _run_gapa(tmp_path, _CLEAN_SHIM + "namespace std { }\n")
+    user = llm.calls[0][1]
+    assert "Namespace-qualified calls needing a bridge" in user
+    assert "std::sqrt" in user
+
+
+def test_gapa_missing_bridge_rejected_as_misgen(tmp_path):
+    # shim provides only ADL overloads in quad::ddfun -> no std:: bridge -> reject
+    bad = _CLEAN_SHIM + "namespace quad { namespace ddfun { } }\n"
+    res, _ = _run_gapa(tmp_path, bad)
+    assert not res.ok and res.status == "llm_failed"
+    assert "C3 bridge lint" in (res.error or "")
+    assert "std::sqrt" in (res.error or "")
+    # a rejected shim is not persisted into the tree
+    assert not list((tmp_path / "cand").glob("kernel_dd_*.h"))
+
+
+def test_gapa_with_bridge_accepted(tmp_path):
+    good = _CLEAN_SHIM + (
+        "namespace std {\n"
+        "  quad::ddfun::ddouble sqrt(quad::ddfun::ddouble x){ return quad::ddfun::sqrt(x); }\n"
+        "}\n")
+    res, _ = _run_gapa(tmp_path, good)
+    assert res.ok, res.error
+
+
+# --------------------------------------------------------------------------- #
+# Gap B — synthetic constexpr double MY_TINY = 1e-40
+# --------------------------------------------------------------------------- #
+
+_GAPB_KERNEL = (
+    "#pragma once\n"
+    '#include "consts.h"\n'
+    "double g(double a) {\n"
+    "    double c = MY_TINY * a;\n"     # line 4 — reads the derivable constant
+    "    return c;\n"
+    "}\n"
+)
+_GAPB_CONSTS = "#pragma once\nconstexpr double MY_TINY = 1e-40;\n"
+
+
+def test_gapb_user_message_carries_derived_constant(tmp_path):
+    root = tmp_path / "cand"
+    sha = _init_repo(root, {"kernel.h": _GAPB_KERNEL, "consts.h": _GAPB_CONSTS})
+    llm = _CapturingLLM(_CLEAN_SHIM)
+    dd.integrate_region(
+        file="kernel.h", line_start=4, line_end=4, variables=["a"],
+        working_tree=sha, out_dir=tmp_path / "shims", repo_path=str(root), llm_fn=llm,
+    )
+    user = llm.calls[0][1]
+    # the dynamic hint section (not the static constant_note mention)
+    assert "## Source-derivable constants (Rule R3, step 3)" in user
+    assert "MY_TINY" in user
+    assert "1e-40" in user
+    # the derived value is a real make_dd pair with a zero low word (source literal)
+    assert "quad::ddfun::make_dd(0x" in user
+    assert "0x0000000000000000ULL" in user
+
+
+def test_gapb_no_hint_when_constant_not_derivable(tmp_path):
+    # a runtime value (no visible literal definition) must not fabricate a hint
+    kernel = ("#pragma once\ndouble g(double a){\n"
+              "  double c = runtime_lookup() * a;\n  return c;\n}\n")
+    root = tmp_path / "cand"
+    sha = _init_repo(root, {"kernel.h": kernel})
+    llm = _CapturingLLM(_CLEAN_SHIM)
+    dd.integrate_region(
+        file="kernel.h", line_start=3, line_end=3, variables=["a"],
+        working_tree=sha, out_dir=tmp_path / "shims", repo_path=str(root), llm_fn=llm,
+    )
+    assert "## Source-derivable constants (Rule R3, step 3)" not in llm.calls[0][1]
+
+
+# --------------------------------------------------------------------------- #
+# derive_region_constants helper (directly)
+# --------------------------------------------------------------------------- #
+
+def test_derive_region_constants_composite_complex():
+    # qcdloop-shaped: a complex constant {0, 1e-50} accessor
+    region = ("const TOutput k = ql::Constants<TScale>::template "
+              "_ieps50<TOutput, TMass, TScale>();")
+    sources = [
+        region,
+        "template<class A,class B,class C>\n"
+        "static TOutput _ieps50() { return TOutput{Constants<TScale>::_zero(), "
+        "TScale(1e-50)}; }\n",
+    ]
+    got = regional.derive_region_constants(region, sources, "dd")
+    entry = next(c for c in got if c["name"] == "_ieps50")
+    lit_exprs = " ".join(l["expr"] for l in entry["literals"])
+    assert "358dee7a4ad4b81f" in lit_exprs   # correct 1e-50 hi bits

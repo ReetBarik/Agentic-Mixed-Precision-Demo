@@ -30,6 +30,7 @@ from pathlib import Path
 
 from agents.integrator_base import boundary, cache, llm
 from agents.integrator_base.region import RegionIntegrationResult
+from agents.shared import constant_derive as cderive
 from agents.shared.region_scan import RegionScanError, extract_region_writes
 
 # Max output tokens for a regional shim.  A regional shim is far smaller than the
@@ -58,6 +59,241 @@ _STDLIB_HEADERS = frozenset({
 # ``#include <foo>`` / ``#include "foo"`` as a real preprocessor directive (first
 # non-whitespace token is ``#include``, so a ``//``-commented line never matches).
 _INCLUDE_RE = re.compile(r'^\s*#\s*include\s*[<"]([^>"]+)[>"]')
+
+# --------------------------------------------------------------------------- #
+# Gap A — namespace-qualified math bridge
+# --------------------------------------------------------------------------- #
+# A namespace-qualified call ``Ns::fn(x)`` skips ADL: name lookup only searches
+# ``Ns`` (and its enclosing scopes), NOT the vendored ``quad::ffun`` / ``quad::ddfun``
+# namespace where the shim's ADL overloads live.  So when a *promoted* (extended-
+# typed) value flows into ``Ns::fn(...)`` and ``Ns`` is not the vendored namespace,
+# the shim must inject a bridging overload into ``Ns`` (or a using-declaration) or
+# the call falls back to the primary, which tries to narrow the extended value to a
+# built-in float and dies with ``cannot convert 'quad::ddfun::ddouble' to 'const
+# double'`` (the 2026-07-18 B0m.h:69 symptom).
+
+# Root namespaces the shim already reaches via ADL — never need a bridge.
+_VENDORED_NS_ROOTS = frozenset({"quad"})
+
+# Standard C++ <cmath>/<complex> free-function names.  Framework-agnostic: this is
+# the math library vocabulary, NOT a list of target frameworks — a qualified call
+# ``AnyNs::sqrt(promoted)`` needs a bridge regardless of which framework AnyNs is.
+# App-specific math wrappers (qcdloop's kAbs/kSqrt, etc.) are deliberately NOT here
+# — they are handled by the prompt + build gate, so the lint never guesses at names
+# it cannot know are math.
+_MATH_FN_NAMES = frozenset({
+    "abs", "fabs", "sqrt", "cbrt", "exp", "exp2", "expm1",
+    "log", "log2", "log10", "log1p", "pow", "hypot",
+    "sin", "cos", "tan", "asin", "acos", "atan", "atan2", "sincos",
+    "sinh", "cosh", "tanh", "asinh", "acosh", "atanh",
+    "erf", "erfc", "tgamma", "lgamma",
+    "floor", "ceil", "round", "trunc", "nearbyint", "rint",
+    "fmod", "remainder", "fmin", "fmax", "fdim", "copysign", "nextafter",
+    "conj", "real", "imag", "norm", "arg", "polar", "proj",
+})
+
+# ``Root::...::fn(`` — the full qualifier chain in group 1, the called function in
+# group 2.  A ``<`` after the name (``Ns::Type<...>``) is not matched (no ``(``),
+# so class-template accessors like ``Constants<T>::pi()`` are excluded here.
+_QUALIFIED_CALL_RE = re.compile(
+    r'(?<![\w:])((?:[A-Za-z_]\w*\s*::\s*)+)([A-Za-z_]\w*)\s*\(')
+
+
+def _balanced_args(text: str, open_paren: int) -> str:
+    """Return the argument text between ``text[open_paren] == '('`` and its match."""
+    depth = 0
+    i = open_paren
+    n = len(text)
+    while i < n:
+        c = text[i]
+        if c == "(":
+            depth += 1
+        elif c == ")":
+            depth -= 1
+            if depth == 0:
+                return text[open_paren + 1:i]
+        i += 1
+    return text[open_paren + 1:]
+
+
+def _contains_promoted(arg_text: str, promoted: frozenset[str]) -> bool:
+    """True if ``arg_text`` references a promoted identifier (whole-word)."""
+    if not promoted:
+        return False
+    for m in re.finditer(r'[A-Za-z_]\w*', arg_text):
+        if m.group(0) in promoted:
+            return True
+    return False
+
+
+def find_qualified_math_calls(region_text: str, promoted: frozenset[str]):
+    """Namespace-qualified math calls on promoted args that need a bridge (Gap A).
+
+    Returns a de-duplicated list of ``(qualifier_root, fn, full_qualifier)`` for
+    each ``Root::...::fn(<args with a promoted operand>)`` where ``fn`` is a
+    standard math function and ``Root`` is not the vendored namespace.  These are
+    exactly the calls whose extended-typed argument would otherwise be narrowed to
+    a built-in float by the primary overload.
+    """
+    found: list[tuple[str, str, str]] = []
+    seen: set[tuple[str, str]] = set()
+    for m in _QUALIFIED_CALL_RE.finditer(region_text):
+        chain = re.sub(r"\s+", "", m.group(1))       # e.g. "cuda::std::"
+        fn = m.group(2)
+        root = chain.split("::", 1)[0]
+        if fn not in _MATH_FN_NAMES or root in _VENDORED_NS_ROOTS:
+            continue
+        args = _balanced_args(region_text, m.end() - 1)
+        if not _contains_promoted(args, promoted):
+            continue
+        key = (root, fn)
+        if key in seen:
+            continue
+        seen.add(key)
+        found.append((root, fn, chain.rstrip(":")))
+    return found
+
+
+def _shim_bridges_qualifier(shim_body: str, root: str, fn: str) -> bool:
+    """True if the shim provides a bridge reachable from ``root::fn`` calls.
+
+    Accepts either injection into the qualifier namespace (``namespace root { …
+    fn … }``) or a using-declaration path (``using namespace root;`` /
+    ``using ns::fn;``) — the two remedies the prompt sanctions ((a) and (b)).
+    """
+    if re.search(r'\busing\s+namespace\s+' + re.escape(root) + r'\b', shim_body):
+        return True
+    if re.search(r'\busing\b[^;\n]*::\s*' + re.escape(fn) + r'\b', shim_body):
+        return True
+    # namespace <root> injected (possibly nested) AND fn defined somewhere in shim
+    if re.search(r'\bnamespace\s+' + re.escape(root) + r'\b', shim_body) and \
+            re.search(r'\b' + re.escape(fn) + r'\s*\(', shim_body):
+        return True
+    return False
+
+
+def _lint_qualified_bridges(region_text: str, shim_body: str,
+                            promoted: frozenset[str]) -> str | None:
+    """Reject a shim that omits a bridge for a namespace-qualified math call.
+
+    Deterministic safety net for Gap A (mirrors the C1 include lint): if the
+    region invokes ``Ns::fn(promoted)`` on a standard math function and the shim
+    injects no bridge into ``Ns`` (and no using-declaration for it), the call will
+    narrow the extended value to a float and break the build — so treat it as a
+    retryable misgeneration.  Returns ``None`` when every such call is bridged.
+    """
+    missing: list[str] = []
+    for root, fn, chain in find_qualified_math_calls(region_text, promoted):
+        if not _shim_bridges_qualifier(shim_body, root, fn):
+            missing.append(f"{chain}::{fn}")
+    if not missing:
+        return None
+    return (
+        "C3 bridge lint: region makes namespace-qualified math call(s) "
+        f"{missing} on promoted (extended-typed) operands, but the shim injects no "
+        "bridging overload into that namespace (and no using-declaration). A "
+        "qualified call skips ADL, so the vendored quad:: overloads are not found "
+        "and the extended value is narrowed to a built-in float (hard build "
+        "failure). Emit an overload in the qualifier namespace forwarding to the "
+        "vendored op (C3). Treating as a retryable misgeneration."
+    )
+
+
+# --------------------------------------------------------------------------- #
+# Gap B — source-derivable constants
+# --------------------------------------------------------------------------- #
+# R3's original cascade stopped at "vendored factory or memorized hex pair"; a
+# named constant with neither fell through to the Rule R4 #error even when its own
+# source definition made it trivially derivable (``_ieps50 = TScale(1e-50)``).  We
+# resolve such constants deterministically (agents.shared.constant_derive) and hand
+# the model the ready-made ``make_dd(...)`` / ``make_ff(...)`` value so it never
+# guesses bits or bails to R4.
+
+# A name read as a member/namespace accessor that leads a call or template-id:
+# ``::name(`` / ``::template name<…>``.  We capture the name and let the source
+# walk decide whether it is actually a constant (a type/method name that resolves
+# to no literal definition is silently dropped) — trying to skip the template-arg
+# list in the regex mis-spans nested ``<…>::…<…>`` and captures the wrong token.
+_ACCESSOR_CONST_RE = re.compile(r'::\s*(?:template\s+)?([A-Za-z_]\w*)\s*(?=[<(])')
+# A macro / ALL-CAPS constant read bare (``M_PI``, ``TWO_PI``, ``MY_TINY`` if caps).
+_MACRO_CONST_RE = re.compile(r'(?<![\w:.])(M_[A-Z0-9_]+|[A-Z][A-Z0-9_]{2,})\b')
+
+# Header extensions worth scanning for a constant's definition, and scan caps
+# (deterministic + bounded — a numeric kernel's constants live in a handful of
+# headers, never hundreds).
+_SOURCE_EXTS = (".h", ".hpp", ".hh", ".hxx", ".cuh", ".inl", ".ipp")
+_MAX_SOURCE_FILES = 400
+_MAX_SOURCE_BYTES = 512 * 1024
+
+
+def _find_constant_candidates(region_text: str) -> list[str]:
+    """Identifier names in the region that may denote a named constant (Gap B).
+
+    Union of accessor-style reads (``Constants<T>::_ieps50<…>()``) and bare
+    macro/ALL-CAPS reads.  Math free functions handled by the Gap-A bridge are
+    excluded; the real filter is downstream — only names that actually resolve to
+    a derivable source definition are surfaced.
+    """
+    names: list[str] = []
+    seen: set[str] = set()
+    for rx in (_ACCESSOR_CONST_RE, _MACRO_CONST_RE):
+        for m in rx.finditer(region_text):
+            nm = m.group(1)
+            if nm in _MATH_FN_NAMES or nm in seen:
+                continue
+            seen.add(nm)
+            names.append(nm)
+    return names
+
+
+def _gather_constant_sources(repo_path: str | None, region_src: str) -> list[str]:
+    """Source texts to search for a constant's definition: the region file first,
+    then scan-reachable repo headers (bounded)."""
+    sources = [region_src]
+    if not repo_path:
+        return sources
+    root = Path(repo_path)
+    if not root.is_dir():
+        return sources
+    count = 0
+    for p in sorted(root.rglob("*")):
+        if count >= _MAX_SOURCE_FILES:
+            break
+        if p.suffix.lower() not in _SOURCE_EXTS or not p.is_file():
+            continue
+        try:
+            if p.stat().st_size > _MAX_SOURCE_BYTES:
+                continue
+            sources.append(p.read_text(encoding="utf-8", errors="ignore"))
+            count += 1
+        except OSError:
+            continue
+    return sources
+
+
+def derive_region_constants(region_text: str, sources: list[str], scalar: str):
+    """Resolve + derive every source-derivable constant the region reads (Gap B).
+
+    ``scalar`` is ``"dd"`` or ``"ff"``.  Each entry is a dict with the constant
+    ``name``, the resolved source ``rhs``, and either a full ``expr`` (a scalar
+    constant derived whole) or ``literals`` (per-literal derivations for a
+    composite RHS the model must assemble, e.g. a complex ``{re, im}``).
+    """
+    out: list[dict] = []
+    for name in _find_constant_candidates(region_text):
+        rhs = cderive.resolve_constant_rhs(name, sources)
+        if rhs is None:
+            continue
+        whole = cderive.derive_from_rhs(name, rhs, scalar)
+        if whole is not None:
+            out.append({"name": name, "rhs": rhs, "expr": whole.expr,
+                        "how": whole.how, "literals": []})
+            continue
+        lits = cderive.derive_literals_in(rhs, scalar)
+        if lits:
+            out.append({"name": name, "rhs": rhs, "expr": None, "how": "composite",
+                        "literals": [{"lit": d.name, "expr": d.expr} for d in lits]})
+    return out
 
 
 @dataclass
@@ -141,9 +377,22 @@ def run_integrate_region(
         return RegionIntegrationResult(status="ok", shim_paths=[str(shim_out)],
                                        boundary_patch=patch, llm_tokens=0)
 
+    # 4a. Deterministic region analysis feeding the user turn (Gaps A + B).
+    #     - promoted-name set (shared with the boundary patch dataflow) tells us
+    #       which qualified math calls land on an extended-typed operand (Gap A);
+    #     - source-derivable constants are resolved + pre-derived so the model gets
+    #       ready-made make_dd/make_ff values instead of hitting Rule R4 (Gap B).
+    promoted = frozenset(boundary.compute_promoted_names(region_src, list(variables),
+                                                         list(writes)))
+    qualified_calls = find_qualified_math_calls(region_src, promoted)
+    sources = _gather_constant_sources(repo_path, src)
+    derived_constants = derive_region_constants(region_src, sources, spec.shim_prefix)
+
     # 5. Generate the shim (LLM).
     user_msg = _build_user_message(spec, file, region_src, variables, writes,
-                                   line_start, line_end, caller_type)
+                                   line_start, line_end, caller_type,
+                                   qualified_calls=qualified_calls,
+                                   derived_constants=derived_constants)
     if attempt > 0:
         user_msg += f"\n// regeneration attempt {attempt}\n"
 
@@ -169,6 +418,15 @@ def run_integrate_region(
     bad_include = _lint_include_set(shim_body, _allowed_include_set(spec))
     if bad_include is not None:
         return RegionIntegrationResult.failed(bad_include, llm_tokens=tokens)
+
+    # 5b. Deterministic namespace-qualified bridge lint (Gap A / C3 safety net).
+    #     A qualified math call on a promoted operand with no bridge overload in
+    #     the shim narrows the extended value to a float and breaks the build —
+    #     reject as a retryable misgen so the Patcher re-rolls (same semantics as
+    #     the C1 lint; never counts against the Strategy transition budget).
+    bad_bridge = _lint_qualified_bridges(region_src, shim_body, promoted)
+    if bad_bridge is not None:
+        return RegionIntegrationResult.failed(bad_bridge, llm_tokens=tokens)
 
     # 6. Stamp the SOURCE_HASH and persist (artifact copy + tree copy for the build).
     shim_text = cache.apply_source_hash(shim_body, cache_key)
@@ -289,8 +547,15 @@ def _git_show(repo_path: str | None, sha: str, file: str) -> str:
 
 def _build_user_message(spec: RegionalSpec, file: str, region_src: str,
                         variables: list[str], writes: list[str],
-                        line_start: int, line_end: int, caller_type: str) -> str:
-    """Assemble the user turn: region source + read/write sets + scalar + API."""
+                        line_start: int, line_end: int, caller_type: str,
+                        qualified_calls=None, derived_constants=None) -> str:
+    """Assemble the user turn: region source + read/write sets + scalar + API.
+
+    ``qualified_calls`` (Gap A) and ``derived_constants`` (Gap B) are deterministic
+    region-analysis hints: the former lists namespace-qualified math calls that
+    need a bridge overload, the latter hands the model ready-made make_dd/make_ff
+    values for source-derivable constants so they never reach Rule R4.
+    """
     parts: list[str] = []
     parts.append(
         f"Promote the code region below to the extended scalar type "
@@ -324,6 +589,13 @@ def _build_user_message(spec: RegionalSpec, file: str, region_src: str,
     if spec.constant_note:
         parts.append(spec.constant_note + "\n")
 
+    bridge_note = _format_qualified_calls(spec, qualified_calls)
+    if bridge_note:
+        parts.append(bridge_note)
+    const_note = _format_derived_constants(spec, derived_constants)
+    if const_note:
+        parts.append(const_note)
+
     parts.append(
         f"## Output\n"
         f"Emit ONLY the complete shim header contents — no prose, no markdown fences. "
@@ -335,3 +607,57 @@ def _build_user_message(spec: RegionalSpec, file: str, region_src: str,
         f"than guessing."
     )
     return "\n".join(parts)
+
+
+def _format_qualified_calls(spec: RegionalSpec, qualified_calls) -> str:
+    """Gap-A hint: namespace-qualified math calls that need a bridge overload."""
+    if not qualified_calls:
+        return ""
+    vendored_ns = spec.cpp_scalar.rsplit("::", 1)[0]   # e.g. quad::ddfun
+    lines = [
+        "## Namespace-qualified calls needing a bridge (C3)",
+        "These calls in the region are **namespace-qualified**, so they skip ADL "
+        f"and will NOT find your `{vendored_ns}` overloads. Each is invoked on a "
+        "promoted (extended-typed) operand, so the primary overload would narrow "
+        "the extended value to a built-in float (hard build failure). For EACH, "
+        "inject a bridging overload into that namespace forwarding to the vendored "
+        "op (preferred), or a using-declaration if injecting there is forbidden:",
+    ]
+    for root, fn, chain in qualified_calls:
+        lines.append(
+            f"- `{chain}::{fn}(...)` → e.g. "
+            f"`namespace {root} {{ ... {fn}({spec.cpp_scalar} x) {{ "
+            f"return {vendored_ns}::{fn}(x); }} }}` (name the originating call in a comment)."
+        )
+    return "\n".join(lines) + "\n"
+
+
+def _format_derived_constants(spec: RegionalSpec, derived_constants) -> str:
+    """Gap-B hint: source-derivable constants pre-derived to make_dd/make_ff.
+
+    Surfaces the resolved source RHS and the exact bit-pair value so the model
+    uses it verbatim instead of guessing hex or bailing to Rule R4.
+    """
+    if not derived_constants:
+        return ""
+    factory = "make_dd" if spec.shim_prefix == "dd" else "make_ff"
+    lines = [
+        "## Source-derivable constants (Rule R3, step 3)",
+        "The constants below were resolved from their source definitions and "
+        f"pre-derived to exact `{factory}(...)` bit pairs. Use these VERBATIM — do "
+        "NOT guess hex and do NOT emit Rule R4 for them. A source `double`/`float` "
+        "literal carries only that precision, so its faithful extended value has a "
+        "zero low word; this is correct, not a truncation.",
+    ]
+    for c in derived_constants:
+        if c.get("expr"):
+            lines.append(
+                f"- `{c['name']}` (source RHS `{c['rhs']}`, {c['how']}) → `{c['expr']}`"
+            )
+        elif c.get("literals"):
+            lits = "; ".join(f"`{l['lit']}` → `{l['expr']}`" for l in c["literals"])
+            lines.append(
+                f"- `{c['name']}` (source RHS `{c['rhs']}`) is composite; assemble it "
+                f"from these derived literals: {lits}"
+            )
+    return "\n".join(lines) + "\n"

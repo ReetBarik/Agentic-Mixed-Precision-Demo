@@ -1,3 +1,139 @@
+# HANDOFF — Gap A (namespace-qualified bridge) + Gap B (source-derivable constants) (2026-07-18, langgraph-agents)
+
+Two shim-completeness gaps the include-set hardening rerun unmasked (both generic,
+not qcdloop-specific). Both were previously hidden behind the app-source-include
+error / the R4 escape hatch firing first; with those resolved they became the next
+accept-rate levers.
+
+## Reproduced first (run 20260718_194556_67dbcf37, confirmed on a fresh rerun)
+
+* **Gap B** — `_ieps50` (source definition `TScale(1e-50)`, a plain `double`
+  literal) tripped the Rule R4 `#error` on B0m.h:69 / B2m.h:65: no vendored
+  `dd_ieps50()`, no memorized hex pair. When the model *guessed*, it guessed
+  **wrong** — hi `0x34F0EE0B102B7182` (correct is `0x358DEE7A4AD4B81F`) plus a
+  spurious low word — then honestly bailed to R4. But the value is not a mystery:
+  a source double literal carries only double precision, so its faithful dd value
+  is `make_dd(<bits of the double>, 0x0)` — a zero low word.
+* **Gap A** — a promoted `ddouble` flowing into a **namespace-qualified** math
+  call `Ns::fn(x)` (e.g. `Kokkos::fabs`) skips ADL, so the vendored `quad::ddfun`
+  overloads are never found and the value narrows to `double`
+  (`cannot convert 'quad::ddfun::ddouble' to 'const double'`). Intermittent (the
+  model often bridges via the app's own `ql::kAbs`/`ql::Max` overloads, which
+  forward to `quad::ddfun::abs` and dodge Kokkos entirely).
+
+## What landed
+
+**Gap B — R3 becomes a 4-step cascade + a deterministic codegen helper.**
+- `agents/shared/constant_derive.py` (new): a framework-agnostic derivation module.
+  `resolve_constant_rhs(name, sources)` walks scan-reachable source to a constant's
+  own definition (`#define` / `constexpr` / `const` / literal-returning accessor)
+  and returns its RHS; `derive_from_rhs` runs the cascade — **(1)** vendored
+  `dd_*()`/`ff_*()`, **(2)** known hex pair, **(3)** derive from source RHS (3a: a
+  source `double`/`float` literal → `make_dd(bits, 0)` with a *zero* low word —
+  correct, not truncation; 3b: a closed form over a small **catalog** of
+  mathematical constants π/2π/π-2/e/√2/ln2/ln10/γ computed at import via the Bailey
+  split and verified bit-exact against the vendored `dd_*`/`ff_*` pairs), **(4)**
+  Rule R4 only if 1–3 all fail. `derive_literals_in` surfaces the literals of a
+  composite RHS (e.g. the complex `{0, 1e-50}` of `_ieps50`) so the model assembles
+  the container without guessing bits.
+- `agents/integrator_base/regional.py`: scans the region for constant candidates
+  (`derive_region_constants`), resolves + pre-derives them, and injects a
+  **"Source-derivable constants"** section into the user turn with ready-made
+  `make_dd(...)`/`make_ff(...)` values to use verbatim. The dd/ff system prompts'
+  R3 (and the dd `constant_note`) were rewritten as the ordered cascade.
+
+**Gap A — C3 refined + a deterministic bridge lint.**
+- dd/ff system prompts: new **C3 (namespace-qualified math bridge)** paragraph —
+  describes the ADL-skip *pattern* (`Ns::fn(promoted)` where `Ns` is neither the
+  vendored nor the app namespace) with **(a)** inject an overload into `Ns`
+  forwarding to the vendored op (preferred) / **(b)** a using-declaration fallback
+  when injecting there is documented-forbidden. Framework-agnostic: no framework is
+  named in the rule; Kokkos/std/sycl/cuda::std appear only as illustrations.
+- `agents/integrator_base/regional.py`: `find_qualified_math_calls` (region scan
+  keyed on a standard `<cmath>`/`<complex>` name set + the boundary dataflow's
+  promoted-name set, factored out as `boundary.compute_promoted_names`) feeds a
+  user-turn hint **and** a post-generation lint `_lint_qualified_bridges` that
+  rejects a shim missing a bridge for a qualified math call on a promoted operand
+  as a retryable `llm_failed` (same semantics as the C1 include lint — a failed gen
+  never counts against the Strategy transition budget).
+
+## Design choices
+
+- **Gap A (a) vs (b).** The prompt prefers (a) namespace injection unless the
+  target framework *documents* it as forbidden (a `static_assert` guard / an ADR
+  against user additions), in which case (b) the using-declaration is the fallback
+  with a comment. No framework is currently known to forbid it, so (a) is the live
+  path; (b) is a documented escape, not a guess. The lint accepts either.
+- **Gap A lint scope (few false positives).** The lint only fires on a *standard
+  math* function name, invoked *qualified*, on an operand that the boundary
+  dataflow actually promotes. App-specific wrappers (`ql::kAbs`) are deliberately
+  outside the math-name set — they are bridged transitively and the region-text
+  lint cannot see which level the shim chose, so flagging them would false-reject a
+  buildable shim. Residual risk (a standard math call transitively bridged via a
+  different namespace) is documented and rare in practice.
+- **Gap B cascade / the "zero low word" subtlety.** Step 3a is the crux: a
+  constant the *source* defines as a plain `double` literal has no precision below
+  that double, so `make_dd(bits, 0)` is the faithful promotion — this is explicitly
+  *not* the forbidden decimal-literal case (that rule guards π/e-style constants
+  whose true value out-runs a double). The catalog exists only for step 3b closed
+  forms, where taking the double bits *would* lose real precision. The helper
+  reads generic C++ constants; no qcdloop symbols in the module or the catalog.
+
+## Tests (+37 offline; full offline suite 244 → 281 passed; +3 @pytest.mark.llm)
+
+- `tests/shared/test_constant_derive.py` (18): catalog matches vendored dd/ff
+  pairs bit-for-bit; a double literal → zero dd low word (the exact `_ieps50` bits
+  the model got wrong); cast/suffix parsing; source-walk over `#define`/`constexpr`/
+  accessor/template-accessor forms (+ function-like-macro rejection); catalog
+  closed forms (M_PI, 2·M_PI, M_PI·0.5, std::numbers::pi_v); composite-RHS literal
+  enumeration.
+- `tests/integrator_base/test_bridge_lint.py` (13): detector picks up Kokkos/std/
+  sycl/`cuda::std` on promoted args, ignores `quad::`, non-promoted args, non-math
+  fns, `Type<…>` accessors; lint rejects a missing bridge, passes for namespace-
+  injection / using-decl / using-namespace, reports multiples.
+- `tests/integrator_base/test_gap_integration.py` (6): both gaps end-to-end through
+  the real engine with a canned LLM — Gap-A hint + lint (synthetic `std::sqrt`
+  promoted), Gap-B hint (synthetic `constexpr double MY_TINY = 1e-40`), composite
+  `_ieps50` derivation.
+- `tests/dd_integrator/test_regional.py` (+3 `@pytest.mark.llm`): live-model
+  reproduction — the `_ieps50` region generates with **no R4** and the correct
+  `0x358dee7a4ad4b81f` bits; a synthetic derivable constant never R4s; a synthetic
+  `std::sqrt(promoted)` gets a bridge. All pass against the Argo proxy (port 8084).
+
+## End-to-end rerun (`runs/qcdloop/rerun_failing_regions.py`, extended with an
+R4/bridge health report). Four regions through the **real Patcher** (generate →
+build-gate → commit):
+
+| region | before | after |
+|---|---|---|
+| `B3m.h:177` | builds (include fix) | **builds** |
+| `B2m.h:65`  | R4 on `_ieps50` → `llm_gen_failed` | **builds** (Gap B derived `_ieps50`) |
+| `B1m.h:62`  | R4 on `_ieps50` (HANDOFF) | **builds** (Gap B) |
+| `B0m.h:69`  | R4 on `_ieps50` → `llm_gen_failed` | **derives `_ieps50` correctly (no R4, correct bits)** — now blocked by a NEW, out-of-scope error (below) |
+
+**built (P2 ok): 2/4 → 3/4.** Gap B is demonstrably fixed on real regions (B2m
+promoted; B0m's shim now emits `make_dd(0x358dee7a4ad4b81fULL, 0x0)` instead of an
+R4 `#error`). LLM nondeterminism means an individual region's *before* status
+varies run-to-run; the R4-on-`_ieps50` mode is the consistent signature.
+
+## NEW failure mode flagged (needs Reet — out of scope for these two gaps)
+
+Getting B0m.h:69 past R4 unmasked a **shim-include-ordering** bug (distinct from the
+include-*set* fix): the boundary patch inserts `#include "<shim>"` immediately after
+`#pragma once`, i.e. **before** the header's own `#include "box_common.h"` — which is
+what transitively declares the `ql::Constants` primary template the shim
+specializes. Result: `error: 'Constants' is not a class template / explicit
+specialization of non-template 'ql::Constants'`. The shim is otherwise correct
+(clean includes, no R4, correct `_ieps50` bits). Fixing it means changing
+`agents/integrator_base/boundary._insert_shim_include` to place the shim **after**
+the region file's existing app includes (not just after `#pragma once`) — a
+boundary-patch design change with its own correctness surface (the shim must still
+precede the region body, which it will). Flagged rather than fixed unilaterally, per
+the task's stop-and-flag instruction. This is the next accept-rate lever for
+header-file regions that specialize app class templates.
+
+---
+
 # HANDOFF — DD/FF shim include-set hardening (2026-07-18, langgraph-agents)
 
 Prompt-hardened the regional integrators against **hallucinated app-source

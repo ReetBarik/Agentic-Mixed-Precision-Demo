@@ -13,6 +13,7 @@ Usage (under the venv + gcc/13.3.0 + cmake/3.28.3 module env):
 
 from __future__ import annotations
 
+import re
 import sys
 import tempfile
 from pathlib import Path
@@ -52,6 +53,20 @@ def _shim_include_report(shim_paths: list[str]) -> str:
         bad = _regional._lint_include_set(text, _ALLOWED)
         bits.append(f"{Path(p).name}: {'CLEAN' if bad is None else 'DIRTY:' + bad[:60]}")
     return "; ".join(bits) if bits else "(no shim)"
+
+
+def _shim_health_report(shim_paths: list[str]) -> str:
+    """Gap A/B health: whether any shim still carries a Rule R4 #error (Gap B) or
+    injects a namespace bridge (Gap A)."""
+    if not shim_paths:
+        return "(no shim)"
+    bits = []
+    for p in shim_paths:
+        text = Path(p).read_text(encoding="utf-8")
+        r4 = "R4#error" if "#error" in text else "no-R4"
+        bridge = "bridge+" if re.search(r"\bnamespace\s+(?!quad\b)\w+\s*\{", text) else "bridge-"
+        bits.append(f"{Path(p).name}: {r4},{bridge}")
+    return "; ".join(bits)
 
 
 def main() -> int:
@@ -96,10 +111,12 @@ def main() -> int:
         artifacts = p2.get("artifacts") or {}
         shim_paths = artifacts.get("shim_paths") or []
         inc = _shim_include_report(shim_paths)
+        health = _shim_health_report(shim_paths)
         detail = (p2.get("detail") or "")[:200]
         build_log = artifacts.get("build_log_path") or p2.get("build_log_path")
         print(f"    status     : {status}", flush=True)
         print(f"    includes   : {inc}", flush=True)
+        print(f"    gapA/gapB  : {health}", flush=True)
         if detail:
             print(f"    detail     : {detail}", flush=True)
         if build_log:

@@ -212,6 +212,69 @@ def _scan_decls(toks: list[_Tok]) -> list[_Decl]:
     return decls
 
 
+class _Promotion:
+    """The region's promotion partition (reads / pre-declared writes / promoted
+    local decls / full promoted-name set) — the shared dataflow both the boundary
+    patch and the Gap-A qualified-call lint key off."""
+
+    __slots__ = ("toks", "ident_texts", "pure_reads", "caseB", "decl_writes", "names")
+
+    def __init__(self, toks, ident_texts, pure_reads, caseB, decl_writes, names):
+        self.toks = toks
+        self.ident_texts = ident_texts
+        self.pure_reads = pure_reads
+        self.caseB = caseB
+        self.decl_writes = decl_writes
+        self.names = names
+
+
+def _compute_promotion(region_text: str, reads: list[str], writes: list[str]) -> _Promotion:
+    """Partition a region's identifiers into the extended-scalar promotion sets.
+
+    Reads promote unconditionally (Rule R1); a region-local decl promotes iff its
+    initializer consumes an already-promoted value, chaining to a fixpoint (Rule
+    R2); integer/bool locals never promote (Rule 1).  Factored out of
+    :func:`synthesize_boundary_patch` so the lint can reuse the exact same
+    dataflow the patch will apply.
+    """
+    toks = _tokenize(region_text)
+    ident_texts = {t.text for t in toks if _is_ident(t.text)}
+
+    all_decls = _scan_decls(toks)
+    decl_names = {d.name for d in all_decls}
+
+    # Case B: pre-declared writes (Fix C) re-assigned in the region.
+    caseB = [w for w in _dedupe(writes) if w in ident_texts and w not in decl_names]
+    # Reads: promoted unconditionally on entry (a name that is also a region-local
+    # decl is fundamentally a write — exclude it).
+    pure_reads = [r for r in _dedupe(reads)
+                  if r in ident_texts and r not in decl_names and r not in caseB]
+
+    promoted: set[str] = set(pure_reads) | set(caseB)
+    decl_writes: list[_Decl] = []
+    changed = True
+    while changed:
+        changed = False
+        for d in all_decls:
+            if d.name in promoted or d.type_text in _INT_TYPES:
+                continue
+            if d.rhs_idents & promoted:
+                promoted.add(d.name)
+                decl_writes.append(d)
+                changed = True
+
+    return _Promotion(toks, ident_texts, pure_reads, caseB, decl_writes, promoted)
+
+
+def compute_promoted_names(region_text: str, reads: list[str], writes: list[str]) -> set[str]:
+    """Public: the set of region identifiers promoted to the extended scalar.
+
+    Used by the Gap-A qualified-call bridge lint to decide whether a namespace-
+    qualified math call is invoked on a promoted (extended-typed) argument.
+    """
+    return set(_compute_promotion(region_text, reads, writes).names)
+
+
 def _apply_spans(text: str, edits: list[tuple[int, int, str]]) -> str:
     """Apply (start, end, replacement) span edits to ``text`` (non-overlapping)."""
     out = []
@@ -261,37 +324,14 @@ def synthesize_boundary_patch(
 
     region_lines = original_lines[line_start - 1:line_end]
     region_text = "\n".join(region_lines)
-    toks = _tokenize(region_text)
-    ident_texts = {t.text for t in toks if _is_ident(t.text)}
 
-    all_decls = _scan_decls(toks)
-    decl_names = {d.name for d in all_decls}
-
-    # Case B: pre-declared writes (Fix C) re-assigned in the region — declared
-    # above it, so not among the region's own decls.
-    caseB = [w for w in _dedupe(writes) if w in ident_texts and w not in decl_names]
-
-    # Reads: promoted unconditionally on entry (Rule R1).  A name that is both a
-    # region-local decl and a "read" is fundamentally a write — exclude it.
-    pure_reads = [r for r in _dedupe(reads)
-                  if r in ident_texts and r not in decl_names and r not in caseB]
-
-    # Dataflow: a region-local decl is promoted iff its initializer consumes a value
-    # already promoted (a read, a Case-B write, or an earlier promoted local).  The
-    # promotion chains through the region in source order to a fixpoint.  Discrete
-    # (integer/bool) locals are never promoted (Rule 1).
-    promoted: set[str] = set(pure_reads) | set(caseB)
-    decl_writes: list[_Decl] = []
-    changed = True
-    while changed:
-        changed = False
-        for d in all_decls:
-            if d.name in promoted or d.type_text in _INT_TYPES:
-                continue
-            if d.rhs_idents & promoted:
-                promoted.add(d.name)
-                decl_writes.append(d)
-                changed = True
+    # Dataflow promotion partition (reads / pre-declared writes / promoted local
+    # decls) — shared with the Gap-A lint via :func:`compute_promoted_names`.
+    prom = _compute_promotion(region_text, reads, writes)
+    toks = prom.toks
+    pure_reads = prom.pure_reads
+    caseB = prom.caseB
+    decl_writes = prom.decl_writes
 
     if not pure_reads and not decl_writes and not caseB and not shim_include:
         return None

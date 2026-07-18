@@ -74,11 +74,16 @@ _SPEC = regional.RegionalSpec(
     shim_prefix="dd",
     constant_note=(
         "## DD constant tables (hard requirement)\n"
-        "Any double-double constant this region needs that is not already a vendored "
-        "`dd_*()` free function MUST be materialized as `make_dd(0x<hi>ULL, 0x<lo>ULL)` "
-        "— a hex-encoded (hi, lo) IEEE-754 double pair (see Rule R3). A decimal literal "
-        "truncates the low word and defeats the promotion; if you do not know the exact "
-        "bits, emit the Rule R4 #error rather than guessing."
+        "Any double-double constant this region needs MUST be materialized at full "
+        "precision — never as a decimal literal (it truncates the low word). Resolve "
+        "each via the Rule R3 cascade IN ORDER: (1) a vendored `dd_*()` free function; "
+        "(2) a known `make_dd(0x<hi>ULL, 0x<lo>ULL)` hex pair; (3) derive from the "
+        "constant's own source definition — a source `double` literal (e.g. "
+        "`TScale(1e-50)`) promotes to `make_dd(<bits of that double>, 0x0)` with a ZERO "
+        "low word (correct — a source literal has only double precision), and a "
+        "closed form over catalog constants composes from their known pairs; "
+        "(4) only if none apply, the Rule R4 #error. Any values pre-derived for you "
+        "appear under 'Source-derivable constants' — use them verbatim."
     ),
 )
 
