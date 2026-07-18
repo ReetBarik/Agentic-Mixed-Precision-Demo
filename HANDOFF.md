@@ -243,3 +243,135 @@ the active scope. Not doable in post-processing.
 - **Cascade victim = DAG sink.** Non-sink intermediates meeting the cascade
   criteria are not treated as separate victims (avoids a chain per intermediate);
   revisit if a real cascade's victim is consumed downstream.
+
+---
+
+# Patcher agent — implementation handoff
+
+Scope: `agents/patcher/` implemented per `docs/strategy_patcher_design.md`
+§P1–§P7 (+ the cascade-chain amendment), on branch `langgraph-agents`. Strategy
+was already implemented (above); the Patcher is called from it as
+`patcher_fn(intent, ctx) -> P2`. Full suite: **148 → 183** (all green), incl. a
+real-build e2e.
+
+## What landed
+
+`agents/patcher/` (new modules):
+
+| module | responsibility |
+|---|---|
+| `intent.py` | P1 parse → `RemediationIntent` (reuses `strategy.models` — the shared contract), P4 cheap pre-checks (file/line/variable), tree-path resolver |
+| `result.py` | P2 return contract: the 8-status enum, `error.kind` vocab, `ok()` / `failure()` builders |
+| `dispatch.py` | P3 four-path dispatch + the generators (regional, plain-edit, git-revert, llm-rewrite) + `is_retryable_misgen` (P4a) |
+| `edits.py` | P3a plain-type-edit — comment/string/char-literal-aware keyword-token rewriter (see deviation below) |
+| `rewrites.py` | P3/P3b llm-rewrite prompt build + region splice (kahan / identity) |
+| `gates.py` | P5 build+smoke gate: vanilla driver, 21-row smoke, NaN/Inf scan, build/smoke timeouts, env-overridable module prelude |
+| `gitops.py` | Patcher-owned git: apply / commit (Q3 message) / reset-on-fail / `revert --no-commit` / introducing-commit lookup |
+| `agent.py` | `make_patcher_fn(...)` adapter + the per-intent flow: parse → precheck → dispatch → **N=3 bounded retry over generate+gate** (P4) → commit (P2) |
+
+Plumbing:
+- `agents/integrator_base/region.py` — shared `RegionIntegrationResult` (shim
+  paths + boundary patch) returned by both regional integrators.
+- `agents/dd_integrator/agent.py` — **`integrate_region`** added (P7, one-module
+  two-functions); `integrate` (whole-app) untouched.
+- `agents/ff_integrator/agent.py` — **`integrate_region`** added; `integrate`
+  stub untouched.
+- `agents/validator/agent.py` — **`make_validator_fn`** SHA↔patch adapter
+  (Strategy HANDOFF item 9): turns a candidate SHA into the cumulative
+  `starting_sha..candidate` diff `validate()` consumes.
+- `agents/orchestrator.py` — simplified to **characterize → strategy → END**;
+  the vestigial patcher/validate nodes + loop edges removed (Strategy drives both
+  as callables, Q5).
+- `agents/strategy/characterization.py` — single-span `RegionTarget.variables`
+  migrated from `prov_vars` to **`region_local_vars`** (fallback to `prov_vars`
+  for older reports); the tight region-local reads set the integrators want.
+
+## Integrator scope decision — **(b)** (bounded stub)
+
+Per the task's scope hedge, chose **(b)**: `ff_integrator.integrate_region` and
+`dd_integrator.integrate_region` land the **locked signature, cheap validation,
+and the `RegionIntegrationResult` return shape**, but the actual regional shim +
+boundary-patch *generation* (LLM-driven, mirroring the tracked integrator's
+hundreds of lines of prompt/C8/retry) is deferred — the default entry raises
+`NotImplementedError`, which the Patcher maps to `llm_gen_failed`.
+
+The Patcher's regional-integrator dispatch path is fully exercised through an
+**injected** integrator: unit tests inject a mock that writes a shim into the
+tree; the **e2e injects a hand-written qcdloop ff shim + boundary patch and does
+a real vanilla build + smoke + NaN scan + commit**. So all Patcher orchestration
+(dispatch, gates, retry, git ops, adapters, P2) is complete and tested; only the
+integrator *codegen* is stubbed. Rationale: full regional codegen did not fit one
+focused session alongside the whole Patcher; the injection seam means it drops in
+later without touching Patcher.
+
+## Design ambiguities / deviations flagged (not silently resolved)
+
+1. **`libclang` for plain-type-edit (P3a) — bindings absent on this image.**
+   The `clang` python bindings are not installed on the cluster. Shipped a small
+   C++ **keyword-token rewriter** instead: it skips comments / string / char
+   literals and rewrites only bare `float`/`double` keyword tokens on the target
+   lines. Because both are C++ *reserved keywords* they can never be part of a
+   longer identifier, so the identifier-collision corruption that motivated the
+   AST decision (`float_traits`, `floating_point`) is impossible for a
+   whole-token match; the lexer covers the comment/string cases. Same
+   corruption-safety guarantee for this specific swap. `edits.py` is structured
+   so a libclang backend slots in where the bindings exist. **Flag for review:**
+   deviates from the locked "libclang" wording, though not from its intent.
+
+2. **`integrate_region` signature — added `repo_path`.** The locked §P4 call
+   shape omits it, but a real integrator needs it to resolve `working_tree` (a
+   SHA) via `git show <sha>:<file>`. Added as a keyword; harmless to the stub.
+
+3. **git-revert looks up the introducing commit from git history, not
+   `iterations.jsonl`.** The design says "from Strategy's iteration log"; the
+   per-patch commits *are* that log (same `[iter_N] <kind> <file>:<lines>`
+   schema, Q3), so `gitops.find_introducing_commit` scans commit subjects. Avoids
+   a log-ingestion + write-timing dependency; equivalent result.
+
+4. **P4a "retry everything" consequence.** With `is_retryable_misgen == True`, a
+   *persistent* build/NaN/crash failure on an **llm-driven** path (regional /
+   rewrite) folds to `llm_gen_failed` after N (matches the §P4 pseudocode's final
+   `return llm_gen_failed`). At the DD rung Strategy therefore logs `dd_untested`,
+   not a physics ceiling (P6a) — conservative and correct until we can classify
+   real compile errors vs misgen. **Deterministic** paths (plain-edit, revert) do
+   *not* retry: a build failure there is a real `build_failed` (Bucket A).
+
+5. **Timeout is returned immediately** (no internal retry) so Strategy's P6
+   timeout-retry-once → fold-to-`build_failed` logic owns timeout policy.
+
+## Test coverage (`tests/patcher/`, +35)
+
+- `test_intent.py` — parse all 11 kinds; reject unknown kind / bad range /
+  missing identity; the three P4 pre-check misses → `patch_apply_failed`;
+  malformed intent → `patch_apply_failed`.
+- `test_edits.py` — keyword rewriter: in-range swap, comments/strings/identifiers
+  survive, float↔double round-trip, no-occurrence raises, out-of-range untouched.
+- `test_paths.py` — all four dispatch paths through the Patcher (mock gate): ff/dd
+  regional commit the shim; plain-edit double→float (identifier survives);
+  git-revert strips a prior ff install; missing introducing commit →
+  `patch_apply_failed`; llm-rewrite kahan + identity (identity reaches the prompt).
+- `test_retry.py` — integrator recovers within budget / exhausts → `llm_gen_failed`;
+  build recovers / exhausts (folds to `llm_gen_failed`); deterministic build fail →
+  `build_failed`; timeout returned once (not retried); failure resets the tree.
+- `test_gates.py` — `_scan_smoke`: ok / NaN / short-output-crash / nonzero-exit /
+  integral-name-not-scanned; build timeout → `timeout`.
+- `test_e2e.py` (`@kokkos`) — real git branch + real vanilla build + real smoke +
+  NaN scan + real commit, mocked integrator returning a hand-written qcdloop shim;
+  asserts P2 `ok`, artifacts on disk, one commit on the branch, Q3 commit subject,
+  ≥21 RES rows.
+
+## Punts from this pass
+
+- **Regional integrator codegen** (ff + dd) — scope decision (b); the real
+  LLM-driven / mechanical generation is the next task, dropping into the existing
+  injection seam and `RegionIntegrationResult` contract.
+- **libclang backend** for plain-type-edit — slot in where bindings exist; the
+  keyword rewriter is the portable default.
+- **Multi-line atomic chain intents** — Patcher treats a `cascade_chain` intent
+  as a single-line (representative-line) intent, per the task brief; real
+  multi-region atomic promotion is deferred with cascade e2e verification.
+- **Validator adapter is untested end-to-end against a real regional patch** —
+  it needs a real integrator (patch that adds a shim onto the include path) and
+  the deferred master→ddfun line-map (`validate()` still requires
+  `accepted_patches == []`). The SHA→diff→`validate()` wiring is in place and
+  injection-testable.
