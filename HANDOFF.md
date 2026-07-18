@@ -375,3 +375,88 @@ later without touching Patcher.
   the deferred master→ddfun line-map (`validate()` still requires
   `accepted_patches == []`). The SHA→diff→`validate()` wiring is in place and
   injection-testable.
+
+---
+
+# Region-local write extraction (Fix C) — implementation handoff
+
+Scope: `agents/shared/region_scan.py` — the source-scan companion to the
+characterizer's region-local *reads*. Delivers `extract_region_writes(file,
+line_start, line_end, working_tree, tracked_type="Tracked") -> list[str]`, the
+tracked-typed local write set the ff/dd boundary patch demotes on region exit.
+Closes the write-set gap flagged above ("Where journal data was insufficient" /
+"`region_local_vars` = reads, not writes"): the write set is not recoverable from
+the journal, so it is recovered from source. Branch `langgraph-agents`. Full
+suite **183 → 207** (all green).
+
+## Module placement decision
+
+**`agents/shared/`, not `agents/patcher/`.** The call sites are
+`ff_integrator.integrate_region` / `dd_integrator.integrate_region` (both build on
+`agents/integrator_base/`), and the utility is plausibly useful to the
+characterizer too. It is a shared source-scanning service, so it lives beside the
+other shared services (`stability_reducer.py`, `fast_merge.py`, …). Tests live in
+`tests/shared/test_region_scan.py` to match.
+
+## Backends — libclang available here (unlike the P3a cluster image)
+
+Mirrors P3a exactly: **libclang preferred (lazy import), keyword-token lexer
+fallback.** The lexer reuses the P3a lexical state machine
+(`agents/patcher/edits.py`) — skips comments / string / char literals, whole-token
+matching, same "constrained subset of numerical kernels" scope.
+
+- **libclang IS importable and functional in `.venv`** (`clang.cindex`, 
+  `Index.create` + `parse` verified). So — unlike P3a, which shipped only the
+  fallback because bindings were absent on the cluster — the **libclang backend is
+  the exercised primary path here.** The system `/usr/bin/python` still lacks the
+  bindings; run tests under `.venv`.
+- Tests parameterize **every** behavioural case over both backends (`backend`
+  fixture): `libclang` (skipped if bindings absent, so a bindings-less CI gives no
+  false confidence) and `fallback` (forced via monkeypatching `_import_clang` to
+  raise `ImportError`). 12 cases × 2 backends + backend-specific tests = 24.
+
+## Corner case discovered — libclang present but type unresolved
+
+Parsing a **single file without its include context** (the tracked type's header
+missing) makes clang mis-recover `Tracked<double> a = …` as `VAR_DECL a
+type='int'` and report **zero** writes — silently wrong for a real region. Guard:
+an *empty* libclang result over a region whose text still contains
+`tracked_type<` is treated as a resolution failure and routed to the include-free
+lexer (`_region_has_tracked_text`). Covered by
+`test_libclang_empty_over_unresolved_type_falls_back`. Practical consequence: on
+real HPC files parsed without `-I` context, the **lexer is the effective
+workhorse**; libclang's precision kicks in for self-contained files or when a
+future caller supplies include dirs (the signature has no include-dirs param — a
+possible extension when wiring lands).
+
+## Semantics choices (documented in the module)
+
+- **Write SET, source order.** Each written name appears once, ordered by first
+  write within the region. `Tracked<double> a = …; a = …;` → `["a"]` (chosen over
+  list semantics `["a","a"]`; the docstring calls it a write *set*).
+- **Writes counted:** (a) `tracked_type<T>` VAR_DECLs, and (b) re-assignments
+  (`name = …`, compound ops) of a tracked local — including a local declared
+  *above* the region but written inside it (both backends build the tracked-name
+  universe file-wide, then filter writes by line). A tracked-typed name
+  immediately followed by `(` is treated as a function declaration, not a local
+  write (excluded).
+- **libclang assignment form:** a class-based tracked type's re-assignment shows
+  up as `CALL_EXPR 'operator='` (overloaded), not `BINARY_OPERATOR`; that is what
+  the AST path matches. If a future `tracked_type` is a builtin/typedef alias
+  (plain `BINARY_OPERATOR` assignment), the AST path won't match it — but the
+  lexer fallback catches it textually. Flagged rather than handled (no such type
+  exists today).
+
+## Not wired into the integrators (per task)
+
+Deliberately **not** called from `ff_integrator` / `dd_integrator` — they are
+scope-decision-(b) stubs; wiring lands with the regional codegen task. This pass
+delivers the utility + tests only. No C++ / schema / journal / characterizer /
+pipeline changes.
+
+## Out-of-scope forms (flag only if a real region hits them)
+
+Anonymous intermediates, by-reference-out params, and function-return-consumed
+unnamed values are not treated as named writes — none appeared in the fixtures.
+The fallback does not attempt full C++ (same subset bound as P3a's rewriter);
+`>>` closing nested templates is handled but exotic template syntax is not.
