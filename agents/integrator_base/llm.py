@@ -62,6 +62,40 @@ def stream_llm(system_prompt: str, user_message: str, cfg, max_tokens: int) -> s
     return strip_code_fences(text)
 
 
+def stream_shim(system_prompt: str, user_message: str, cfg, max_tokens: int) -> tuple[str, int]:
+    """Like :func:`stream_llm`, but also return the call's total token count.
+
+    The regional integrators report ``llm_tokens`` on their
+    :class:`~agents.integrator_base.region.RegionIntegrationResult` (the Patcher
+    accumulates them into the Strategy budget), so they need the usage the plain
+    :func:`stream_llm` discards.  Returns ``(text, input_tokens + output_tokens)``.
+    """
+    import anthropic
+
+    client = anthropic.Anthropic(base_url=cfg.base_url, api_key=cfg.auth_token)
+    with client.messages.stream(
+        model=cfg.model,
+        max_tokens=max_tokens,
+        system=system_prompt,
+        messages=[{"role": "user", "content": user_message}],
+    ) as stream:
+        final = stream.get_final_message()
+
+    text = "".join(
+        block.text for block in final.content
+        if getattr(block, "type", None) == "text"
+    ).strip()
+    if not text:
+        raise RuntimeError("integrator_base: LLM returned no text content")
+
+    usage = getattr(final, "usage", None)
+    tokens = 0
+    if usage is not None:
+        tokens = (getattr(usage, "input_tokens", 0) or 0) + \
+                 (getattr(usage, "output_tokens", 0) or 0)
+    return strip_code_fences(text), tokens
+
+
 def strip_code_fences(text: str) -> str:
     """Strip a leading/trailing markdown code fence if the model added one."""
     stripped = text.strip()
