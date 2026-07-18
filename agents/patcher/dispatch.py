@@ -114,6 +114,10 @@ def _gen_regional(intent: RemediationIntent, deps: PatchDeps, attempt: int) -> G
     to = intent.kind.split("-to-")[-1]
     scalar = "ffloat" if to == "ff" else "ddouble"
     which = "ff" if to == "ff" else "dd"
+    # Caller precision to demote region writes back to on exit.  Only float-to-ff
+    # promotes from float; every other regional transition promotes from double
+    # (ff-to-dd is reverted to double first, below, before the dd install).
+    caller_type = "float" if intent.kind == "float-to-ff" else "double"
     integrator = deps.integrators.get(which)
     if integrator is None:
         return Gen(False, R.LLM_GEN_FAILED, R.ERR_INTEGRATOR,
@@ -134,6 +138,7 @@ def _gen_regional(intent: RemediationIntent, deps: PatchDeps, attempt: int) -> G
             working_tree=deps.parent_sha,
             repo_path=str(deps.repo_root),
             scalar_type=scalar,
+            caller_type=caller_type,
             direction="in",
             out_dir=deps.shims_dir,
             attempt=attempt,

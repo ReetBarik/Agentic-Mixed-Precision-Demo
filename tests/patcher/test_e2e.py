@@ -1,14 +1,25 @@
 """End-to-end Patcher: real strategy branch + real git commit + real vanilla
-build + real smoke/NaN scan, with a mocked regional integrator returning a
-hand-written qcdloop shim (scope decision (b)).
+build + real smoke/NaN scan.
 
-Marked ``kokkos`` — it compiles the qcdloop vanilla driver, so it needs the HPC
-toolchain + a Kokkos install.  Skipped automatically where those are absent.
+Two flavors:
+
+* ``test_e2e_regional_ff_real_build`` — a *mocked* regional integrator returning a
+  hand-written qcdloop shim (scope decision (b)); proves the Patcher plumbing
+  offline (no LLM).
+* ``test_e2e_regional_ff_real_llm`` — the *real* ff integrator (no injection): a
+  real LLM generates the ff shim, the deterministic boundary patch promotes a real
+  qcdloop region, and the candidate really builds + smokes + commits.  This is the
+  agentic loop's forward slice on real code.  Marked ``llm`` (skipped without the
+  Argo proxy) in addition to ``kokkos``.
+
+Both are marked ``kokkos`` — they compile the qcdloop vanilla driver, so they need
+the HPC toolchain + a Kokkos install.  Skipped automatically where those are absent.
 """
 
 from __future__ import annotations
 
 import difflib
+import os
 import shutil
 import subprocess
 from pathlib import Path
@@ -119,5 +130,67 @@ def test_e2e_regional_ff_real_build(qcdloop_repo, tmp_path):
     assert subject.startswith("[iter_1] double-to-ff box/B2m.h:20-22")
 
     # -- smoke run really produced >= 21 result rows, no NaN --
+    runtime = Path(art["runtime_log_path"]).read_text()
+    assert runtime.count("RES,") >= 21
+
+
+@_needs_kokkos
+@pytest.mark.llm
+@pytest.mark.skipif(not os.environ.get("ANTHROPIC_AUTH_TOKEN"),
+                    reason="requires the Argo LLM proxy")
+def test_e2e_regional_ff_real_llm(qcdloop_repo, tmp_path):
+    """The forward slice on real code: real LLM ff shim + deterministic boundary
+    patch → real vanilla build + smoke + commit, with NO injected integrator.
+
+    The region is a real single-statement double computation
+    (``kokkosUtils.h:312`` — ``TMass arg = x1 * x2;`` inside ``Li2omx``); the local
+    is declared through the ``TMass`` template alias (``double`` at the vanilla
+    instantiation), exercising the boundary's dataflow-based promotion + demote-to-
+    original-type even though the Patcher passes ``caller_type="double"``.
+    """
+    root, start = qcdloop_repo
+    run_dir = tmp_path / "run"
+    ctx = {"run_id": "e2e-llm", "branch": "strategy/e2e", "repo_path": str(root),
+           "parent_sha": start, "run_dir": str(run_dir), "iter_id": 1}
+
+    # No integrators override → the real ff_integrator.integrate_region is used.
+    fn = make_patcher_fn(
+        build_config={"headers_dir": str(root), "kokkos_root": str(_KOKKOS)})
+
+    intent = {
+        "target": {"file": "kokkosUtils.h", "line_start": 312, "line_end": 312,
+                   "variables": ["x1", "x2"]},
+        "kind": "double-to-ff", "intent": "speedup",
+        "current_precision": "double", "rationale_id": "iter_1"}
+
+    resp = fn(intent, ctx)
+
+    # -- P2 ok: candidate committed, real LLM tokens spent --
+    assert resp["status"] == R.OK, resp.get("error")
+    assert resp["candidate_sha"] and resp["parent_sha"] == start
+    assert resp["llm_tokens"] > 0
+    art = resp["artifacts"]
+    shim = Path(art["shim_paths"][0])
+    assert shim.exists() and shim.name.startswith("kokkosUtils_ff_")
+    assert art["boundary_patch_path"] and Path(art["boundary_patch_path"]).exists()
+
+    # -- the real shim is a valid header referencing the vendored ff type --
+    shim_text = shim.read_text()
+    assert "#pragma once" in shim_text
+    assert "ff_math.hpp" in shim_text
+    assert "SOURCE_HASH: PENDING" not in shim_text
+
+    # -- the committed region carries the deterministic boundary edits, demoting to
+    #    the local's own template-alias type (TMass), not the passed caller "double" --
+    committed = _git(root, "show", f"{resp['candidate_sha']}:kokkosUtils.h").stdout
+    assert "quad::ffun::ffloat x1__ff = quad::ffun::ffloat(x1);" in committed
+    assert "quad::ffun::ffloat arg__ext = x1__ff * x2__ff;" in committed
+    assert "TMass arg = static_cast<TMass>(arg__ext.hi)" in committed
+    assert f'#include "{shim.name}"' in committed
+
+    # -- exactly one commit, schema-conformant subject, smoke produced 21 rows --
+    assert _git(root, "rev-list", "--count", f"{start}..HEAD").stdout.strip() == "1"
+    subject = _git(root, "log", "-1", "--format=%s", resp["candidate_sha"]).stdout.strip()
+    assert subject.startswith("[iter_1] double-to-ff kokkosUtils.h:312")
     runtime = Path(art["runtime_log_path"]).read_text()
     assert runtime.count("RES,") >= 21
