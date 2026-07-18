@@ -576,3 +576,84 @@ without `ANTHROPIC_AUTH_TOKEN`.
   chain intents remain the Patcher HANDOFF punt (single-line intents only).
 - **`caller_type` for `float-to-ff`** demotes Case-B writes to `float`; region-local
   writes always demote to their own declared type regardless.
+
+---
+
+# First real end-to-end run (2026-07-18)
+
+First wiring of the full loop on real Stage-4 output: **characterize → Strategy →
+Patcher (real LLM) → Validator (real 3-build precision test)**, driven by
+`runs/qcdloop/run_strategy_e2e.py` (skips the characterize node, calls
+`strategy.agent.run` directly per the Q5 seam).
+
+- **run_id:** `20260718_194556_67dbcf37`  ·  branch `strategy/20260718_194556_67dbcf37`
+- **report:** `runs/qcdloop/strategy/20260718_194556_67dbcf37/report.md` (+ `report.json`, `final.diff`, `iterations.jsonl`)
+- **terminal status:** `budget_exhausted` — 8 accepted `double-to-dd` promotions
+  (budget cap), 19 iteration-log entries, 1274 s, 84,959 LLM tokens, tolerance 8.0,
+  snapshot seed 12345 / n=1000.
+- **config note (budget deviation):** default budget (500 iters / 6 h) is
+  intractable at real-Validator cost given the report's ~53k cascade chains, so the
+  smoke ran `max_iters=8` / 4 h wall. Validator snapshot n=1000 (fast smoke). See
+  "smells" below re: what `max_iters` actually counts.
+
+## Terminal verdict per region
+
+- **8 promoted to `dd` (accepted, ≥8 digits vs DD oracle):** `B2m.h:64`, `B0m.h:88`,
+  `kokkosUtils.h:608`, `B1m.h:79`, `B2m.h:492`, `kokkosUtils.h:248`, `kokkosUtils.h:225`,
+  `B4m.h:189`.
+- **11 `dd_untested` (Patcher failure at the double-to-dd rung, P6a — NOT a physics
+  ceiling):** `B2m.h:65`, `B1m.h:62/63`, `B4m.h:163/233`, `B0m.h:68/69`, `B2m.h:84`,
+  `B3m.h:177`, `kokkosUtils.h:745/550`. All are the intermittent shim-hallucination
+  failures below.
+- **Remainder of the 66-long correctness-region queue + the cascade-chain tier:** not
+  reached (budget bound first).
+
+## What broke and what was fixed
+
+1. **`fast_merge` dropped `cascade_chains`** (real bug, fixed `9cde89b`). The parallel
+   shard merge never read `cascade_chains` from shards and omitted them from output, so
+   any report built via the fast path (i.e. every 100k run) had an **empty correctness
+   tier-2**. `region_local_vars` flowed correctly but was untested. Mirrored
+   `finalize_report` (union chain_id-keyed dict → sorted list) + added fast/slow parity
+   tests (`tests/agents/test_fast_merge.py`).
+2. **Regional integrator read the wrong git path** (real bug, fixed `d6db3b0`).
+   `_gen_regional` passed the characterization region key verbatim — a **bare basename**
+   (`B2m.h`) — to the integrator, whose `_git_show` does `git show <sha>:<file>` and
+   whose boundary patch labels `a/<file>`. The file is `box/B2m.h`, so **every** regional
+   promotion died at `could not read B2m.h@<sha>` (→ `llm_gen_failed`). Fixed to pass the
+   repo-relative resolved path (`deps.target_path` rel `repo_root`).
+3. **Flat-tree assumption** (harness design). The regional integrator drops generated
+   shims at the repo root and assumes `repo_root == QL_HEADERS`; the runner therefore
+   gives the Patcher a **dedicated headers-rooted git repo** (a copy of
+   `qcdloop_headers_full` with `boxGPU.h` at root) while the Validator baselines against
+   the pristine main `qcdloop_headers_full`. Without this, `_install_in_tree` would drop
+   shims off the include path.
+4. **Frozen report was stale/oversized.** `runs/qcdloop/report_100k.json` is **13.7 GB**,
+   lacks `region_local_vars` + `cascade_chains` (predates the reducer upgrade), and the
+   filename in the brief (`results_100k.json`) doesn't exist. Per approval, re-ran the
+   chunked characterization → `runs/qcdloop/report_smoke.json` (n=1000, both fields
+   present, 53,603 cascade chains). The 13.7 GB frozen report was **not** touched.
+
+## Remaining smells / follow-ups
+
+- **Intermittent hallucinated app-header includes in DD shims.** The dominant failure
+  (11/19 iters): the LLM shim adds e.g. `#include "ql/constants.h"` / `"ql/maths.h"`
+  (nonexistent on the include path) → build gate fails → after retries folds to
+  `llm_gen_failed` (mislabeled log_tag `llm_capacity`). Region-dependent and
+  non-deterministic (`B2m.h:64` succeeds, adjacent `B2m.h:65` fails both attempts).
+  Needs prompt hardening ("emit no app-header includes; only vendored `dd_math.hpp`/
+  `dd_complex.hpp`; materialize constants inline via `make_dd`") and/or a misgen
+  classifier. This is the #1 thing to fix to raise the accept rate.
+- **Cascade chains not deduplicated across samples.** chain_ids embed the sample hash, so
+  n=1000 → 53,603 chains; the tier-2 queue scales with samples×victims and
+  `regions_at_threshold` in the report reads 54,047 (inflated by chain `region_status`
+  entries). Needs span-level dedup before queueing or the cascade tier is unrunnable at
+  scale.
+- **`max_iters` counts only accepts + genuine rejects** (`llm_gen_failed` has
+  `counts_budget=False`), so `max_iters=8` did ~19 log iterations. Add a separate hard
+  cap on total iterations (incl. gen-failures) for bounded smoke runs.
+- **`precision_distribution` dd=7 vs 8 `precision_assignment` entries** — off-by-one
+  accounting mismatch between `region_final` and the accepted-assignment list; reconcile.
+- **13.7 GB report / loader OOM.** `load_regions`/`load_chains` each `json.loads` the
+  whole file, twice — fine at n=1000, would OOM on the 100k report. A streaming loader is
+  needed before Strategy can consume a full-scale report.
