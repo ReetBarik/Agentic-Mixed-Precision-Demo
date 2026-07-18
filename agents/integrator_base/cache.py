@@ -61,6 +61,35 @@ def compute_source_hash(headers_dir: Path, ruleset_text: str) -> str:
     return h.hexdigest()
 
 
+def compute_region_hash(
+    region_src: str,
+    ruleset_text: str,
+    scalar_type: str,
+    writes: list[str],
+) -> str:
+    """The *regional* shim's staleness key (the ``integrate_region`` analogue of
+    :func:`compute_source_hash`).
+
+    A regional shim is cached against a single code region, not a header tree, so
+    the hash folds in the region's own bytes (``region_src``), the generating
+    integrator's ruleset (so a rule refinement invalidates every cached shim, as
+    in the whole-app path), the extended scalar type it was generated for
+    (``float-float`` vs ``double-double`` are different shims), and the Fix-C write
+    set (a schema change to the region's writes invalidates the shim, since the
+    boundary patch is synthesized from it).  Writes are sorted so the key is
+    order-independent.
+    """
+    h = hashlib.sha256()
+    h.update(region_src.encode("utf-8"))
+    h.update(b"\0")
+    h.update(ruleset_hash(ruleset_text).encode("utf-8"))
+    h.update(b"\0")
+    h.update(scalar_type.encode("utf-8"))
+    h.update(b"\0")
+    h.update("\0".join(sorted(writes)).encode("utf-8"))
+    return h.hexdigest()
+
+
 def hash_header_dir(headers_dir: Path) -> str:
     """SHA-256 over the header files under ``headers_dir`` (recursive).
 
