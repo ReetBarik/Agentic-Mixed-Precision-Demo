@@ -460,3 +460,119 @@ Anonymous intermediates, by-reference-out params, and function-return-consumed
 unnamed values are not treated as named writes — none appeared in the fixtures.
 The fallback does not attempt full C++ (same subset bound as P3a's rewriter);
 `>>` closing nested templates is handled but exotic template syntax is not.
+
+---
+
+# Regional ff/dd codegen — implementation handoff (2026-07-18)
+
+Replaces the scope-(b) bounded stubs in `ff_integrator` / `dd_integrator` with
+real LLM-driven regional generation. The agentic loop's forward slice now runs on
+real qcdloop code: a real LLM shim + a deterministic boundary patch → real vanilla
+build + smoke + commit, through the real Patcher with **no injection**.
+
+## What landed
+
+- **`agents/integrator_base/boundary.py`** (new, deterministic) — synthesizes the
+  region boundary patch as a `git apply -p1` diff: promote reads to the extended
+  scalar on entry (Rule R1), keep region locals extended (Rule R2), demote writes
+  back on exit, and `#include` the shim after `#pragma once`. Comment/string/
+  char-literal-aware, whole-word (reuses the P3a/region_scan lexical state machine).
+- **`agents/integrator_base/regional.py`** (new) — the shared `run_integrate_region`
+  engine the ff/dd twins wrap. Reads the region at the pinned SHA (`git show`),
+  recovers writes (Fix C), SOURCE_HASH-caches, LLM-generates the shim
+  (`attempt`-varied, cache bypassed on retry), writes it to `out_dir` **and** the
+  candidate tree, and pairs it with the boundary patch. ff/dd differ only by a
+  `RegionalSpec` (ruleset + C++ scalar/complex spelling + DD constant note).
+- **`agents/integrator_base/cache.py`** — `compute_region_hash(region_src, ruleset,
+  scalar_type, writes)`, the regional SOURCE_HASH analogue of `compute_source_hash`.
+- **`agents/integrator_base/llm.py`** — `stream_shim` returns `(text, tokens)` so
+  the result carries `llm_tokens`.
+- **`agents/ff_integrator/{agent.py,system_prompt.txt}`** and
+  **`agents/dd_integrator/{agent.py,system_prompt.txt}`** — `integrate_region` is
+  now a thin wrapper over the engine (`quad::ffun::ffloat` / `quad::ddfun::ddouble`).
+  `ff_integrator.integrate` (whole-app) and `dd_integrator.integrate` (whole-app
+  qcdloop DD stub, Validator's ground truth) are **untouched**.
+- **Vendored `third_party/include/{ff_math.hpp,ff_complex.hpp}`** from
+  `kokkos-extended-precision-demo@fffunKokkos` + `third_party/include` added to the
+  app CMake include path so shims resolve `<ff_math.hpp>`.
+- **`agents/patcher/dispatch.py`** — `_gen_regional` passes `caller_type` (float for
+  `float-to-ff`, else double).
+
+## Prompt-authoring decisions (R1–R4)
+
+The tracked Rules 1–9 + C1–C7 are the ancestor set; regional promotion adds:
+
+- **R1 — boundary conversion is NOT the LLM's.** The promote/demote casts are
+  synthesized deterministically; the shim must not emit them, nor reference the
+  `__ff`/`__ext` renamed identifiers (it never sees them). This is the load-bearing
+  split (design §P4): the LLM produces only the type/operator/constant surface, so a
+  retry re-rolls the shim while the patch machinery stays fixed.
+- **R2 — internals stay extended** (no mid-region round-trip through double/float).
+- **R3 — named constants keep name + precision.** ff routes through vendored
+  `ff_*()`; **DD must hex-encode** every constant as `make_dd(0x<hi>ULL,0x<lo>ULL)`
+  — a decimal literal truncates the low word (ref `gen_dd_constants.cpp`). Codified
+  in the DD prompt + reinforced in the DD `RegionalSpec.constant_note`.
+- **R4 — `#error` escape hatch** (mirrors Rule 9), including "don't guess a
+  constant's hex bits — surface it."
+
+## Deviations from tracked_integrator's patterns (and why)
+
+1. **Shared engine (`regional.py`), not per-integrator duplication.** The ff/dd
+   regional paths are near-identical; the whole-app tracked path is not. Putting the
+   flow in `integrator_base/regional.py` keeps the two `agent.py` files to a spec +
+   a one-line delegation (design §P7 "code reuse is the point").
+2. **Two-limb demotion, not `static_cast<caller>(x_extended)`.** Neither `ffloat`
+   nor `ddouble` defines `operator double`; the vendored types' own conversion-out
+   idiom is `(double)x.hi + (double)x.lo`. The boundary emits
+   `static_cast<T>(x.hi) + static_cast<T>(x.lo)`.
+3. **Dataflow-based local promotion, not a fixed `caller_type` token.** Real qcdloop
+   locals are declared through template aliases (`TMass`/`TScale`, `double` at the
+   vanilla instantiation), so matching the literal `caller_type="double"` finds
+   nothing. The boundary promotes a local iff its initializer consumes an
+   already-promoted value (chaining to a fixpoint) and demotes to the local's **own**
+   declared type — which is what made the real e2e work through the Patcher. This is
+   also why **Fix C returns `[]` on vanilla regions** (it keys on `tracked_type<…>`
+   template syntax; bare `double`/`TMass` decls don't match): it is still wired in
+   (`tracked_type=caller_type`) and feeds the pre-declared (Case B) write path, but
+   the region-local write set comes from the boundary's own decl scan. Not a bug —
+   the two sources are complementary; extending Fix C to bare/alias types is a
+   follow-up below.
+4. **Cache only on `attempt==0`.** A Patcher retry (`attempt>0`) must re-roll, so it
+   bypasses the SOURCE_HASH cache (the shim filename/key is attempt-independent).
+
+## LLM / token cost (from the real e2e)
+
+`test_e2e_regional_ff_real_llm` (region `kokkosUtils.h:312`, `TMass arg = x1*x2`):
+one integrator attempt, **~3.37–3.39k tokens** (input+output) per shim generation,
+~2.5 min wall including the Kokkos vanilla build. The generated shim was minimal and
+correct on the first attempt (no retry): `#pragma once` + vendored includes + a
+Rule-2/C3 comment noting the vendored `ffloat*ffloat` operator suffices. Real-LLM
+integration tests are marked `@pytest.mark.llm` (+`kokkos` for the e2e) and skip
+without `ANTHROPIC_AUTH_TOKEN`.
+
+## Test coverage
+
+- `tests/integrator_base/test_boundary.py` (8) — promote/rename/demote, empty set,
+  multi read/write chaining, Case-B seeding, whole-word/comment/string safety,
+  body-local vs signature, template-alias demote-to-original-type, int-not-promoted.
+- `tests/integrator_base/test_region_cache.py` (6) — `compute_region_hash` variation.
+- `tests/ff_integrator/test_regional.py` (6+1 llm) / `tests/dd_integrator/test_regional.py`
+  (5+1 llm) — shim+boundary generation, cache hit skips LLM, retry bypass + message
+  variation, DD hex-constant note, bad-range failure, whole-app NotImplemented.
+- `tests/patcher/test_e2e.py::test_e2e_regional_ff_real_llm` (llm+kokkos) — the
+  no-injection forward slice, **verified passing here**. The offline injected e2e
+  is preserved. Offline suite: **231 passing** (was 207).
+
+## Punts / follow-ups
+
+- **Whole-app ff/dd** (`integrate`) — not built; the regional path is what the
+  Patcher drives. `dd_integrator.integrate` remains the qcdloop DD ground-truth stub.
+- **Fix C on bare/alias types** — `extract_region_writes` matches only
+  `tracked_type<…>`; extending it to `double`/`TMass` (or plumbing `-I` context so
+  libclang resolves the vanilla types) would let it, rather than the boundary's decl
+  scan, own the region-local write set. Not needed today.
+- **Boundary kernel-subset bounds** — one name per decl statement (`double a,b;` and
+  split `double r; r=…;` unhandled); single contiguous region. Multi-line atomic
+  chain intents remain the Patcher HANDOFF punt (single-line intents only).
+- **`caller_type` for `float-to-ff`** demotes Case-B writes to `float`; region-local
+  writes always demote to their own declared type regardless.
