@@ -162,19 +162,64 @@ def test_whole_word_and_comment_string_safety():
     assert "// a is a read, abc is not" in patched
 
 
-def test_function_decl_not_treated_as_local_write():
+def test_body_local_promoted_signature_untouched():
+    # Realistic region: a statement inside a method body (line 4), NOT the
+    # signature.  The parameter ``a`` in the signature (line 3) is outside the
+    # region, so it is not renamed; the body-local ``double r`` is promoted because
+    # its RHS consumes the promoted read ``a``.
     file_text = (
         "#pragma once\n"
         "struct T {\n"
-        "    double compute(double a) { double r = a + 1.0; return r; }\n"
+        "    double compute(double a) {\n"
+        "        double r = a + 1.0;\n"
+        "        return r;\n"
+        "    }\n"
         "};\n"
     )
-    # region is line 3; ``double compute(`` must NOT be retyped (it is a function),
-    # but ``double r`` inside IS a local write.
     diff = boundary.synthesize_boundary_patch(
-        rel_file="t.h", file_text=file_text, line_start=3, line_end=3,
-        reads=[], writes=[], scalar_type=_SCALAR, caller_type="double",
+        rel_file="t.h", file_text=file_text, line_start=4, line_end=4,
+        reads=["a"], writes=[], scalar_type=_SCALAR, caller_type="double",
     )
     patched = _apply(file_text, diff)
-    assert "double compute(double a)" in patched       # signature untouched
-    assert f"{_SCALAR} r__ext = a + 1.0;" in patched   # local retyped/renamed
+    assert "    double compute(double a) {" in patched     # signature untouched
+    assert f"{_SCALAR} r__ext = a__ff + 1.0;" in patched   # body local promoted
+    assert "double r = static_cast<double>(r__ext.hi) + static_cast<double>(r__ext.lo);" in patched
+
+
+def test_template_alias_local_uses_original_type_on_demote():
+    # Real HPC kernels declare locals through template aliases (e.g. qcdloop's
+    # TMass), not the literal caller_type the Patcher passes.  Dataflow detection
+    # promotes the local anyway and demotes to its OWN declared type.
+    file_text = (
+        "#pragma once\n"
+        "TOutput f(TMass const& x1, TMass const& x2) {\n"
+        "    TMass arg = x1 * x2;\n"
+        "    return g(arg);\n"
+        "}\n"
+    )
+    diff = boundary.synthesize_boundary_patch(
+        rel_file="k.h", file_text=file_text, line_start=3, line_end=3,
+        reads=["x1", "x2"], writes=[], scalar_type=_SCALAR, caller_type="double",
+    )
+    patched = _apply(file_text, diff)
+    assert f"{_SCALAR} arg__ext = x1__ff * x2__ff;" in patched
+    # demote target is the local's own declared type (TMass), not caller_type
+    assert "TMass arg = static_cast<TMass>(arg__ext.hi) + static_cast<TMass>(arg__ext.lo);" in patched
+
+
+def test_integer_local_not_promoted():
+    # An int index derived from a promoted read stays int (Rule 1).
+    file_text = (
+        "#pragma once\n"
+        "void h(double a) {\n"
+        "    int n = 2;\n"
+        "    double r = a * 2.0;\n"
+        "}\n"
+    )
+    diff = boundary.synthesize_boundary_patch(
+        rel_file="h.h", file_text=file_text, line_start=3, line_end=4,
+        reads=["a"], writes=[], scalar_type=_SCALAR, caller_type="double",
+    )
+    patched = _apply(file_text, diff)
+    assert "    int n = 2;" in patched                       # int untouched
+    assert f"{_SCALAR} r__ext = a__ff * 2.0;" in patched     # double promoted

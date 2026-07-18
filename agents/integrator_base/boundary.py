@@ -20,33 +20,39 @@ Transform (applied to the inclusive 1-based line range ``[line_start, line_end]`
 
 1. ``#include "<shim>"`` inserted once after the file's ``#pragma once``.
 2. **Reads → extended (entry).** For each read ``r`` (from the characterizer's
-   ``region_local_vars``) that is not itself a region-local write:
-   ``<scalar> r__ff = <scalar>(r);`` before the region, and every whole-word ``r``
-   inside the region is renamed to ``r__ff``.  (Rule R1.)
-3. **Region internals stay extended.** A region-local declaration
-   ``<caller> w = …`` is retyped to ``<scalar> w__ext = …`` (Rule R2); a write
-   ``w`` declared *before* the region (re-assigned inside it) is seeded with
-   ``<scalar> w__ext = <scalar>(w);`` at entry.  Every whole-word ``w`` inside the
-   region is renamed to ``w__ext``.
-4. **Writes → caller (exit).** After the region, each write is demoted back under
-   its original name: ``w = static_cast<caller>(w__ext.hi) + static_cast<caller>
-   (w__ext.lo);`` (a declaration ``<caller> w = …`` when ``w`` was region-local).
-   The two-limb reconstruction is the extended types' own conversion-out idiom
-   (neither ``ffloat`` nor ``ddouble`` defines ``operator double``).
+   ``region_local_vars``): ``<scalar> r__ff = <scalar>(r);`` before the region, and
+   every whole-word ``r`` inside the region is renamed to ``r__ff``.  (Rule R1.)
+3. **Region internals stay extended (dataflow).** A statement-level local
+   declaration ``<T> w = <rhs>`` whose ``<rhs>`` consumes a value already promoted
+   to the extended scalar (a promoted read, or an earlier promoted local — the
+   promotion chains through the region) is retyped ``<scalar> w__ext = <rhs>``
+   (Rule R2) and every whole-word ``w`` inside the region is renamed to ``w__ext``.
+   A write ``w`` declared *before* the region and re-assigned inside it (reported in
+   ``writes`` by Fix C) is seeded with ``<scalar> w__ext = <scalar>(w);`` at entry
+   and likewise renamed.
+4. **Writes → caller (exit).** After the region each write is demoted back under
+   its original name via two-limb reconstruction: a region-local decl to its
+   *original declared type* ``<T> w = static_cast<T>(w__ext.hi) + static_cast<T>
+   (w__ext.lo);``; a pre-declared write assigned back ``w = static_cast<caller>
+   (w__ext.hi) + …``.  Two-limb reconstruction is the extended types' own
+   conversion-out idiom (neither ``ffloat`` nor ``ddouble`` defines ``operator
+   double``).
 
-**Write-set sources.** Region-local declarations (``<caller> w``) are recovered by
-this module's own comment/string-aware scan — the reliable path for a vanilla
-(``double``/``float``) region, where the Fix-C libclang/lexer scanner keys on
-``tracked_type<…>`` template syntax and finds nothing.  The ``writes`` argument
-(from :func:`agents.shared.region_scan.extract_region_writes`) is consumed for
-writes *declared before* the region (and for already-extended regions in
-``ff-to-dd`` composites); the two sources are unioned.
+**Why dataflow, not a fixed caller type.** Real HPC kernels declare their locals
+through template aliases (qcdloop's ``TMass`` / ``TScale``, both ``double`` at the
+vanilla instantiation), not the literal spelling the Patcher passes as
+``caller_type``.  Detecting which locals to promote by *what their RHS consumes*
+— rather than by matching a fixed type token — makes the transform work on
+templated source, and demoting to the local's own declared type keeps downstream
+code (which reads that local under its original type) well-formed.  Fix-C's
+``writes`` still feeds the pre-declared (Case B) writes; ``caller_type`` is the
+demotion target only for those.
 
-**Assumptions (kernel subset, documented).** A single contiguous region; one
-declaration per statement (``<caller> name = …``, not ``double a, b;``); plain
-value locals (no ``const`` / reference / pointer qualifiers on the retyped decl).
-The rewrite is comment/string/char-literal-aware and whole-word — it never edits a
-token inside a comment or string, nor a substring of a longer identifier.
+**Assumptions (kernel subset, documented).** A single contiguous region; a promoted
+local is a statement-level ``<type> <name> = <init>`` (one name per statement, not
+``double a, b;``, and not a split ``double r; r = …;``).  Discrete-typed locals
+(``int`` / ``bool`` / ``unsigned`` / …) are never retyped (Rule 1 — integers stay
+in integer land).  The rewrite is comment/string/char-literal-aware and whole-word.
 """
 
 from __future__ import annotations
@@ -58,6 +64,20 @@ _IDENT_CHARS = set("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ01234567
 
 _READ_SUFFIX = "__ff"
 _WRITE_SUFFIX = "__ext"
+
+# Discrete/integer type tokens never retyped to the extended scalar (Rule 1 —
+# keep integer computations in integer land).
+_INT_TYPES = frozenset({
+    "int", "bool", "char", "short", "long", "unsigned", "signed", "size_t",
+    "int8_t", "int16_t", "int32_t", "int64_t",
+    "uint8_t", "uint16_t", "uint32_t", "uint64_t", "ptrdiff_t",
+})
+
+# Tokens that can lead a `<tok> <ident> =` triple without it being a declaration.
+_NON_TYPE_LEADERS = frozenset({
+    "return", "if", "else", "for", "while", "do", "switch", "case", "sizeof",
+    "new", "delete", "throw", "co_return", "co_await", "co_yield",
+})
 
 
 class _Tok:
@@ -136,19 +156,29 @@ def _is_ident(text: str) -> bool:
     return bool(text) and text[0] in _IDENT_CHARS and not text[0].isdigit()
 
 
-def _scan_local_decls(toks: list[_Tok], caller_type: str) -> tuple[list[str], set[int]]:
-    """Find region-local declarations ``<caller_type> <name>`` (not function decls).
+class _Decl:
+    """A statement-level local declaration ``<type> <name> = <init> ;``."""
 
-    Returns ``(names_in_source_order, retype_token_indices)`` — the declared names
-    and the token indices of the ``caller_type`` keyword to retype to the scalar.
-    Two forms are excluded: a ``caller_type`` whose declared name is immediately
-    followed by ``(`` is a function declaration/definition; and a ``caller_type``
-    appearing inside parentheses (paren depth > 0) is a function parameter or a
-    loop/condition binding, not a statement-level local write.
+    __slots__ = ("name", "type_idx", "type_text", "rhs_idents")
+
+    def __init__(self, name: str, type_idx: int, type_text: str, rhs_idents: set[str]):
+        self.name = name          # declared identifier
+        self.type_idx = type_idx  # token index of the type to retype
+        self.type_text = type_text
+        self.rhs_idents = rhs_idents  # identifiers in the initializer expression
+
+
+def _scan_decls(toks: list[_Tok]) -> list[_Decl]:
+    """Find statement-level ``<type> <name> = <init>`` declarations (source order).
+
+    A declaration is two consecutive identifiers followed by ``=`` at paren depth 0
+    (so function parameters and loop/condition bindings inside ``(...)`` are
+    excluded), where the leading identifier is a type (not a control keyword) and
+    the name is not immediately a call ``name(``.  Integer-typed locals are skipped
+    by the caller (Rule 1).  The RHS identifier set is collected up to the next
+    top-level ``;`` for the dataflow check.
     """
-    names: list[str] = []
-    seen: set[str] = set()
-    retype_idx: set[int] = set()
+    decls: list[_Decl] = []
     depth = 0
     n = len(toks)
     for i in range(n):
@@ -159,19 +189,27 @@ def _scan_local_decls(toks: list[_Tok], caller_type: str) -> tuple[list[str], se
         if t.text == ")":
             depth = max(0, depth - 1)
             continue
-        if t.text != caller_type or depth != 0:
+        if depth != 0 or not _is_ident(t.text) or t.text in _NON_TYPE_LEADERS:
             continue
-        if i + 1 >= n or not _is_ident(toks[i + 1].text):
+        if i + 2 >= n or not _is_ident(toks[i + 1].text) or toks[i + 2].text != "=":
             continue
-        name = toks[i + 1].text
-        following = toks[i + 2].text if i + 2 < n else ""
-        if following == "(":            # function decl, not a local write
-            continue
-        retype_idx.add(i)
-        if name not in seen:
-            seen.add(name)
-            names.append(name)
-    return names, retype_idx
+        # collect RHS identifiers until the next top-level ';'
+        rhs: set[str] = set()
+        d = 0
+        j = i + 3
+        while j < n:
+            tj = toks[j].text
+            if tj in "([{":
+                d += 1
+            elif tj in ")]}":
+                d -= 1
+            elif tj == ";" and d == 0:
+                break
+            elif _is_ident(tj):
+                rhs.add(tj)
+            j += 1
+        decls.append(_Decl(toks[i + 1].text, i, t.text, rhs))
+    return decls
 
 
 def _apply_spans(text: str, edits: list[tuple[int, int, str]]) -> str:
@@ -226,24 +264,44 @@ def synthesize_boundary_patch(
     toks = _tokenize(region_text)
     ident_texts = {t.text for t in toks if _is_ident(t.text)}
 
-    # -- classify writes --------------------------------------------------------
-    decl_writes, retype_idx = _scan_local_decls(toks, caller_type)   # Case A
-    decl_set = set(decl_writes)
-    # Case B: passed writes that appear in the region but are NOT declared here
-    # (re-assigned locals declared above the region / already-extended locals).
-    caseB = [w for w in _dedupe(writes) if w in ident_texts and w not in decl_set]
-    write_names = decl_writes + caseB
-    write_set = set(write_names)
+    all_decls = _scan_decls(toks)
+    decl_names = {d.name for d in all_decls}
 
-    pure_reads = [r for r in _dedupe(reads) if r in ident_texts and r not in write_set]
+    # Case B: pre-declared writes (Fix C) re-assigned in the region — declared
+    # above it, so not among the region's own decls.
+    caseB = [w for w in _dedupe(writes) if w in ident_texts and w not in decl_names]
 
-    if not pure_reads and not write_names and not shim_include:
+    # Reads: promoted unconditionally on entry (Rule R1).  A name that is both a
+    # region-local decl and a "read" is fundamentally a write — exclude it.
+    pure_reads = [r for r in _dedupe(reads)
+                  if r in ident_texts and r not in decl_names and r not in caseB]
+
+    # Dataflow: a region-local decl is promoted iff its initializer consumes a value
+    # already promoted (a read, a Case-B write, or an earlier promoted local).  The
+    # promotion chains through the region in source order to a fixpoint.  Discrete
+    # (integer/bool) locals are never promoted (Rule 1).
+    promoted: set[str] = set(pure_reads) | set(caseB)
+    decl_writes: list[_Decl] = []
+    changed = True
+    while changed:
+        changed = False
+        for d in all_decls:
+            if d.name in promoted or d.type_text in _INT_TYPES:
+                continue
+            if d.rhs_idents & promoted:
+                promoted.add(d.name)
+                decl_writes.append(d)
+                changed = True
+
+    if not pure_reads and not decl_writes and not caseB and not shim_include:
         return None
 
     rename_map = {r: r + _READ_SUFFIX for r in pure_reads}
-    rename_map.update({w: w + _WRITE_SUFFIX for w in write_names})
+    rename_map.update({w: w + _WRITE_SUFFIX for w in caseB})
+    rename_map.update({d.name: d.name + _WRITE_SUFFIX for d in decl_writes})
+    retype_idx = {d.type_idx for d in decl_writes}
 
-    # -- rewrite region tokens (retype decls + rename reads/writes) -------------
+    # -- rewrite region tokens (retype promoted decls + rename reads/writes) -----
     edits: list[tuple[int, int, str]] = []
     for i, t in enumerate(toks):
         if i in retype_idx:
@@ -263,10 +321,11 @@ def synthesize_boundary_patch(
                      f"  // Rule R1: seed pre-declared write in {scalar_type}")
 
     exit_lines: list[str] = []
-    for w in decl_writes:   # Case A: region-local decl → declare the caller alias
-        exit_lines.append(f"{indent}{caller_type} {w} = {_demote_expr(w, caller_type)};"
-                          f"  // Rule R1: demote region write to {caller_type}")
-    for w in caseB:         # Case B: assign back to the pre-declared caller var
+    for d in decl_writes:   # region-local decl → declare the alias at its own type
+        exit_lines.append(
+            f"{indent}{d.type_text} {d.name} = {_demote_expr(d.name, d.type_text)};"
+            f"  // Rule R1: demote region write to {d.type_text}")
+    for w in caseB:         # pre-declared write → assign back at the caller type
         exit_lines.append(f"{indent}{w} = {_demote_expr(w, caller_type)};"
                           f"  // Rule R1: demote region write to {caller_type}")
 
