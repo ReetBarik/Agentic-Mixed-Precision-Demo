@@ -21,6 +21,11 @@ endif()
 
 set(_recipes_dir ${CMAKE_CURRENT_SOURCE_DIR}/../src)
 
+# Repo-vendored extended-precision headers (quad::ffun::ffloat / quad::ddfun::ddouble)
+# that regional ff/dd shims #include.  Always available regardless of the candidate
+# header tree, so a regional shim installed by the Patcher resolves <ff_math.hpp>.
+set(_vendored_include ${CMAKE_CURRENT_SOURCE_DIR}/../../../third_party/include)
+
 if(QL_MODE STREQUAL "dd")
     add_executable(boxGPU_app ${_recipes_dir}/boxGPU_dd.cpp)  # #defines USE_DD_COMPLEX itself
 elseif(QL_MODE STREQUAL "vanilla")
@@ -33,6 +38,7 @@ target_include_directories(boxGPU_app PRIVATE
     ${QL_HEADERS}
     ${QL_HEADERS}/box
     ${_recipes_dir}       # boxGPU_app_recipes.hpp
+    ${_vendored_include}  # ff_math.hpp / ff_complex.hpp for regional ff/dd shims
 )
 target_link_libraries(boxGPU_app PRIVATE Kokkos::kokkos)
 target_compile_options(boxGPU_app PRIVATE -w)  # qcdloop headers are warning-noisy
