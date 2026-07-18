@@ -928,8 +928,82 @@ precision, speedup floor) land in `agents/strategy/`.
 **Caveat on `region_local_vars`:** it is region-local *reads* (source vars
 used as direct leaf operands at the line), NOT declares/assigns. The journal
 has no LHS/output field and `track()` emits no record, so the *written*
-variable of a region is not nameable from journal data — a schema change would
-be required. See HANDOFF.md "Where journal data was insufficient".
+variable of a region is not nameable from journal data. See HANDOFF.md
+"Where journal data was insufficient".
+
+### Region-local writes — Fix C (libclang source scan, LOCKED 2026-07-17)
+
+**Fix C, not a journal schema change.** Considered three options for
+recovering region-local writes:
+
+- **Fix A** — journal `track()` calls so named-input events land in the
+  log. Cheap C++ change but yield depends on downstream code using
+  `track()` for intermediates, which qcdloop does not.
+- **Fix B** — add LHS field to `LogRecord`, populate via
+  `Tracked<T>::operator=`. C++ can't do this natively (RHS journals
+  before the assignment fires); needs macro trickery or source
+  rewriter. Big lift.
+- **Fix C** — libclang source scan at the region's line range,
+  extract LHS names of assignments where LHS type is `Tracked<T>`.
+  No C++/schema/journal/pipeline changes. Runs on demand when Patcher
+  or the integrators need it.
+
+**Chosen: Fix C.** Rationale:
+
+1. The write-set is a *source-code* fact, not a runtime fact. For
+   boundary-conversion purposes (ff/dd shim exit-side casts) the
+   syntactic level is the right level.
+2. Patcher already depends on libclang for P3a (plain-type-edit).
+   Zero new dependencies.
+3. Doesn't perturb tracked-datatype semantics or invalidate the 100k
+   report. Additive characterizer or Patcher utility.
+4. Fix A + B stay unbuilt unless a concrete downstream need surfaces
+   that Fix C can't cover.
+
+**Call surface** (proposed for `agents/shared/region_scan.py` or
+`agents/patcher/region_scan.py` — module placement decided at
+implementation time):
+
+```python
+def extract_region_writes(
+    file: str,
+    line_start: int,
+    line_end: int,
+    working_tree: str,          # SHA; resolves via git show <sha>:<file>
+    tracked_type: str = "Tracked",  # parameterize for future scalar types
+) -> list[str]:
+    """Region-local write set: LHS names of Tracked<T> assignments in [line_start, line_end].
+
+    Deterministic, source-only, no runtime dependency.
+    """
+```
+
+**Where it's called:** inside `ff_integrator.integrate_region` and
+`dd_integrator.integrate_region` when building the boundary patch.
+Boundary patch needs two variable sets:
+- **Reads crossing the boundary** — already available via
+  `intent.target.variables` (`region_local_vars`, i.e. reads).
+- **Writes crossing the boundary** — from `extract_region_writes()`.
+  These are values the region computes that downstream code reads;
+  boundary patch demotes them back to the caller's precision on exit.
+
+Without writes, the boundary patch can't emit the exit-side
+conversion correctly.
+
+**Fallback plan (P3a-style deviation):** if libclang bindings aren't
+available in a given environment (they weren't on the cluster image
+for the Patcher pass), ship a keyword-lexer approximation: identify
+assignment statements (`<type> <name> = ...` or `<name> = ...`) whose
+declared type is `Tracked<T>` via a small state-machine parse. Same
+corruption-safety story as the P3a keyword-token rewriter — works
+reliably for the constrained subset of C++ that appears in numerical
+kernels, doesn't try to handle full C++. Flag the deviation in
+HANDOFF.md the same way the P3a fallback was flagged.
+
+**Out of scope for Fix C** (revisit only if a real region hits them):
+- Anonymous intermediates (no LHS name)
+- Values passed by reference-out params
+- Values returned from functions that then get consumed unnamed
 
 ---
 
