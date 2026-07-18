@@ -123,6 +123,17 @@ def _gen_regional(intent: RemediationIntent, deps: PatchDeps, attempt: int) -> G
         return Gen(False, R.LLM_GEN_FAILED, R.ERR_INTEGRATOR,
                    f"no {which}_integrator wired")
 
+    # Characterization region keys are bare basenames (``B2m.h``) but the file may
+    # live in a subdir (``box/B2m.h``).  The integrator reads the source at a SHA
+    # via ``git show`` and labels its boundary patch with this path, both of which
+    # need the repo-relative path, not the bare name.  ``deps.target_path`` was
+    # resolved by ``resolve_in_tree`` (precheck guarantees the file exists).
+    try:
+        rel_file = deps.target_path.resolve().relative_to(
+            deps.repo_root.resolve()).as_posix()
+    except (AttributeError, ValueError):
+        rel_file = intent.target.file
+
     # composite ff-to-dd: strip the prior ff install first, then install dd.
     if intent.kind == "ff-to-dd":
         rv = _do_revert(intent, deps, "-to-ff")
@@ -131,7 +142,7 @@ def _gen_regional(intent: RemediationIntent, deps: PatchDeps, attempt: int) -> G
 
     try:
         res: RegionIntegrationResult = integrator(
-            file=intent.target.file,
+            file=rel_file,
             line_start=intent.target.line_start,
             line_end=intent.target.line_end,
             variables=list(intent.target.variables),

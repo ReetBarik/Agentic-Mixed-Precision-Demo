@@ -9,6 +9,7 @@ journal*.jsonl.gz
 *.parquet
 run.log
 run_chunked*.log
+run_*.log
 
 # journal_meta.json is a small build/run metadata sibling; regenerated on every
 # run alongside the journal, so it is also kept out of git.
