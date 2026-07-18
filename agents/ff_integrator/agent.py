@@ -45,11 +45,25 @@ catalog (float-float emulation / DD recovery) and the Patcher section.
 
 from __future__ import annotations
 
+from pathlib import Path
+
+from agents.integrator_base.region import RegionIntegrationResult
+
 _NOT_IMPLEMENTED_MSG = (
     "ff_integrator is a STUB: regional float-float promotion is deferred until "
     "the Patcher agent lands (it defines the code-region contract this integrator "
     "consumes). See this module's docstring for the intended regional API "
     "(file/line range + variables -> ffloat/ffcomplex shim + boundary patch)."
+)
+
+_REGION_STUB_MSG = (
+    "ff_integrator.integrate_region is a BOUNDED STUB (scope decision (b), see "
+    "HANDOFF.md): the region contract, cheap validation and the "
+    "RegionIntegrationResult return shape are implemented, but LLM-driven regional "
+    "float-float generation is deferred. The Patcher exercises this dispatch path "
+    "through an *injected* integrator (tests/e2e supply a hand-written qcdloop ff "
+    "shim); the default path raises this until real regional generation lands. "
+    "Region requested: {file}:{line_start}-{line_end} scalar={scalar_type}."
 )
 
 
@@ -63,3 +77,30 @@ def integrate(*args, **kwargs):
     unspecified until the Patcher's region contract exists.
     """
     raise NotImplementedError(_NOT_IMPLEMENTED_MSG)
+
+
+def integrate_region(
+    *,
+    file: str,
+    line_start: int,
+    line_end: int,
+    variables: list[str],
+    working_tree: str,
+    scalar_type: str = "ffloat",
+    direction: str = "in",
+    out_dir: Path,
+    attempt: int = 0,
+    repo_path: str | None = None,
+) -> RegionIntegrationResult:
+    """Regional float-float promotion (design §P4 call shape).
+
+    BOUNDED STUB — see :data:`_REGION_STUB_MSG` / HANDOFF.md scope decision (b).
+    The signature is the locked one the Patcher calls (``working_tree`` is a SHA;
+    ``repo_path`` lets a real implementation do ``git show <sha>:<file>``); the
+    return type is the shared :class:`RegionIntegrationResult`.  Real LLM-driven
+    ``ffloat``/``ffcomplex`` shim + boundary-patch generation is deferred; the
+    Patcher consumes an injected integrator for this path today.
+    """
+    Path(out_dir).mkdir(parents=True, exist_ok=True)
+    raise NotImplementedError(_REGION_STUB_MSG.format(
+        file=file, line_start=line_start, line_end=line_end, scalar_type=scalar_type))

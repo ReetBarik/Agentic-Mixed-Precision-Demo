@@ -52,6 +52,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
+from agents.integrator_base.region import RegionIntegrationResult
+
 # The ddfun_enabled DD triple that marks a qcdloop tree as DD-ready.  All three
 # must be co-located (same directory) — a bare kokkosMaths_dd.h without the
 # dd_math/dd_complex it includes is not a usable DD tree.
@@ -143,3 +145,46 @@ def _locate_dd_triple(root: Path) -> Path | None:
         if cand.is_file() and _has_triple(cand.parent):
             return cand.resolve()
     return None
+
+
+_REGION_STUB_MSG = (
+    "dd_integrator.integrate_region is a BOUNDED STUB (scope decision (b), see "
+    "HANDOFF.md): the P7 region contract, cheap validation and the "
+    "RegionIntegrationResult return shape are implemented, but LLM-driven regional "
+    "double-double generation is deferred. Beyond the ff twin, a real "
+    "implementation must materialize any DD constant table this region touches as "
+    "hex-encoded (hi, lo) double pairs (see this module's docstring / qcdloop's "
+    "scripts/gen_dd_constants.cpp) so constants survive at full DD precision. The "
+    "Patcher exercises this path through an *injected* integrator today. "
+    "Region requested: {file}:{line_start}-{line_end} scalar={scalar_type}."
+)
+
+
+def integrate_region(
+    *,
+    file: str,
+    line_start: int,
+    line_end: int,
+    variables: list[str],
+    working_tree: str,
+    scalar_type: str = "ddouble",
+    direction: str = "in",
+    out_dir: Path,
+    attempt: int = 0,
+    repo_path: str | None = None,
+) -> RegionIntegrationResult:
+    """Regional double-double promotion (P7) — sibling of :func:`integrate`.
+
+    Signature mirrors ``ff_integrator.integrate_region`` exactly, with
+    ``scalar_type="ddouble"`` (design §P7 "one module, two functions").  Returns
+    the shared :class:`RegionIntegrationResult` (shim path(s) + boundary patch).
+
+    BOUNDED STUB — see :data:`_REGION_STUB_MSG` / HANDOFF.md scope decision (b).
+    The DD-specific wrinkle beyond the ff path is constant-table hex codegen
+    (hex-encoded ``(hi, lo)`` double pairs); real generation reusing
+    :mod:`agents.integrator_base` is deferred.  The Patcher consumes an injected
+    integrator for this path today.
+    """
+    Path(out_dir).mkdir(parents=True, exist_ok=True)
+    raise NotImplementedError(_REGION_STUB_MSG.format(
+        file=file, line_start=line_start, line_end=line_end, scalar_type=scalar_type))
