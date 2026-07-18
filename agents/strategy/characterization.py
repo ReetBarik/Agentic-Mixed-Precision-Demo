@@ -112,9 +112,9 @@ def load_regions(report_path: str | Path, *, merge: bool = True,
 
     Returns ``(records, meta)`` where meta carries ``non_localizable_skipped``,
     ``raw_regions`` (pre-merge count) and ``schema_version``.  ``variables`` is
-    populated from the region's ``prov_vars`` — the only variable-ish field the
-    report exposes (see HANDOFF.md: this is a provenance union, not the
-    region-local set).
+    the region-local *reads* set (``region_local_vars``, falling back to
+    ``prov_vars`` for older reports) — the tight in-scope set ff_integrator /
+    dd_integrator consume, not the full transitive provenance union.
 
     When ``merge`` (default), per-integral entries sharing ``(file, line)`` are
     collapsed into one code-region target with worst-case signals, because a
@@ -183,12 +183,26 @@ def load_chains(report_path: str | Path) -> tuple[list[ChainRecord], dict]:
     return chains, {"n_chains": len(chains)}
 
 
+def _region_vars(region: dict) -> list[str]:
+    """The region-local *reads* for a single-span region (Q1 variable set).
+
+    Prefer ``region_local_vars`` — the tight set of source vars used as direct
+    leaf operands at the line — over ``prov_vars`` (the full transitive
+    provenance union).  ff_integrator / dd_integrator want the region-local set,
+    not the DAG closure (see HANDOFF.md: consumer migration).  Falls back to
+    ``prov_vars`` for reports predating the ``region_local_vars`` field.
+    """
+    if "region_local_vars" in region:
+        return list(region.get("region_local_vars") or [])
+    return list(region.get("prov_vars", []) or [])
+
+
 def _one_record(integral: str, region: dict, file: str, line: int) -> RegionRecord:
     ops = region.get("ops", {}) or {}
     return RegionRecord(
         integral=integral,
         target=RegionTarget(file=file, line_start=line, line_end=line,
-                            variables=list(region.get("prov_vars", []) or [])),
+                            variables=_region_vars(region)),
         signal_class=region.get("signal_class", "stable"),
         max_cond=float(region.get("max_cond", 0.0) or 0.0),
         max_rel_err=float(region.get("max_rel_err", 0.0) or 0.0),
