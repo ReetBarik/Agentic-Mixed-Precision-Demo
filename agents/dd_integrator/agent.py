@@ -9,12 +9,15 @@ Validator invokes it to produce the DD ground-truth build (see
 
 =============================  STUB STATUS  ================================
 
-This is a STUB.  It does **no** LLM generation.  It only supports the one
-application we already have a hand-written double-double port for —
-``qcdloop@ddfun_enabled`` — and for that app it simply confirms the DD headers
-are present and returns the path to the existing, hand-written
-``kokkosMaths_dd.h``.  For any other application it fails loudly rather than
-guessing.
+Two entrypoints, two scopes.  :func:`integrate_region` (regional DD promotion,
+design §P7) is **implemented** — a thin wrapper over the shared engine
+:func:`agents.integrator_base.regional.run_integrate_region`, LLM-driven, sibling
+to ``ff_integrator.integrate_region``.  :func:`integrate` (whole-app DD) is still
+a **STUB**: it does **no** LLM generation and only supports the one application we
+already have a hand-written double-double port for — ``qcdloop@ddfun_enabled`` —
+for which it confirms the DD headers are present and returns the path to the
+existing hand-written ``kokkosMaths_dd.h`` (Validator's ground-truth build path).
+For any other application it fails loudly rather than guessing.
 
 Concretely, :func:`integrate`:
 
@@ -52,7 +55,32 @@ from __future__ import annotations
 
 from pathlib import Path
 
+from agents.integrator_base import regional
 from agents.integrator_base.region import RegionIntegrationResult
+
+# ---------------------------------------------------------------------------
+# Regional ruleset + concrete C++ type spellings (mirrors ff_integrator; the
+# shared engine in agents/integrator_base/regional.py does the work).  The prompt
+# bytes feed the regional shim's SOURCE_HASH via cache.compute_region_hash.  The
+# DD-specific wrinkle beyond ff is the hex-encoded (hi, lo) constant-table note.
+# ---------------------------------------------------------------------------
+_SYSTEM_PROMPT = (Path(__file__).parent / "system_prompt.txt").read_text(encoding="utf-8")
+
+_SPEC = regional.RegionalSpec(
+    system_prompt=_SYSTEM_PROMPT,
+    cpp_scalar="quad::ddfun::ddouble",
+    cpp_complex="quad::ddfun::ddcomplex",
+    vendored_headers=["dd_math.hpp", "dd_complex.hpp"],
+    shim_prefix="dd",
+    constant_note=(
+        "## DD constant tables (hard requirement)\n"
+        "Any double-double constant this region needs that is not already a vendored "
+        "`dd_*()` free function MUST be materialized as `make_dd(0x<hi>ULL, 0x<lo>ULL)` "
+        "— a hex-encoded (hi, lo) IEEE-754 double pair (see Rule R3). A decimal literal "
+        "truncates the low word and defeats the promotion; if you do not know the exact "
+        "bits, emit the Rule R4 #error rather than guessing."
+    ),
+)
 
 # The ddfun_enabled DD triple that marks a qcdloop tree as DD-ready.  All three
 # must be co-located (same directory) — a bare kokkosMaths_dd.h without the
@@ -147,19 +175,6 @@ def _locate_dd_triple(root: Path) -> Path | None:
     return None
 
 
-_REGION_STUB_MSG = (
-    "dd_integrator.integrate_region is a BOUNDED STUB (scope decision (b), see "
-    "HANDOFF.md): the P7 region contract, cheap validation and the "
-    "RegionIntegrationResult return shape are implemented, but LLM-driven regional "
-    "double-double generation is deferred. Beyond the ff twin, a real "
-    "implementation must materialize any DD constant table this region touches as "
-    "hex-encoded (hi, lo) double pairs (see this module's docstring / qcdloop's "
-    "scripts/gen_dd_constants.cpp) so constants survive at full DD precision. The "
-    "Patcher exercises this path through an *injected* integrator today. "
-    "Region requested: {file}:{line_start}-{line_end} scalar={scalar_type}."
-)
-
-
 def integrate_region(
     *,
     file: str,
@@ -168,23 +183,33 @@ def integrate_region(
     variables: list[str],
     working_tree: str,
     scalar_type: str = "ddouble",
+    caller_type: str = "double",
     direction: str = "in",
     out_dir: Path,
     attempt: int = 0,
     repo_path: str | None = None,
+    cfg=None,
+    llm_fn=None,
 ) -> RegionIntegrationResult:
     """Regional double-double promotion (P7) — sibling of :func:`integrate`.
 
     Signature mirrors ``ff_integrator.integrate_region`` exactly, with
-    ``scalar_type="ddouble"`` (design §P7 "one module, two functions").  Returns
-    the shared :class:`RegionIntegrationResult` (shim path(s) + boundary patch).
-
-    BOUNDED STUB — see :data:`_REGION_STUB_MSG` / HANDOFF.md scope decision (b).
-    The DD-specific wrinkle beyond the ff path is constant-table hex codegen
-    (hex-encoded ``(hi, lo)`` double pairs); real generation reusing
-    :mod:`agents.integrator_base` is deferred.  The Patcher consumes an injected
-    integrator for this path today.
+    ``scalar_type="ddouble"`` (design §P7 "one module, two functions"); the concrete
+    C++ spelling (``quad::ddfun::ddouble`` / ``ddcomplex``) comes from :data:`_SPEC`.
+    Thin wrapper over the shared engine
+    :func:`agents.integrator_base.regional.run_integrate_region` — reads the region
+    at ``working_tree``, recovers writes (Fix C), LLM-generates a ddouble shim
+    (SOURCE_HASH-cached, ``attempt``-varied), and pairs it with a deterministic
+    boundary patch.  The DD-specific wrinkle beyond the ff twin — hex-encoded
+    ``(hi, lo)`` constant tables — is codified in the ruleset (Rule R3) and the
+    ``constant_note`` carried on :data:`_SPEC`.  Returns the shared
+    :class:`RegionIntegrationResult`; never raises past the seam.
     """
-    Path(out_dir).mkdir(parents=True, exist_ok=True)
-    raise NotImplementedError(_REGION_STUB_MSG.format(
-        file=file, line_start=line_start, line_end=line_end, scalar_type=scalar_type))
+    return regional.run_integrate_region(
+        _SPEC,
+        file=file, line_start=line_start, line_end=line_end,
+        variables=variables, working_tree=working_tree,
+        scalar_type=scalar_type, caller_type=caller_type, direction=direction,
+        out_dir=out_dir, attempt=attempt, repo_path=repo_path,
+        cfg=cfg, llm_fn=llm_fn,
+    )
