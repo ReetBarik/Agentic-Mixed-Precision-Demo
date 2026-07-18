@@ -1,3 +1,95 @@
+# HANDOFF — DD/FF shim include-set hardening (2026-07-18, langgraph-agents)
+
+Prompt-hardened the regional integrators against **hallucinated app-source
+includes** — the #1 accept-rate lever from the 2026-07-18 shakedown
+(`runs/qcdloop/strategy/20260718_194556_67dbcf37`). In that run 11 DD regions
+came back `dd_untested` (P6a Patcher failures); the dominant build-gate death was
+DD shims emitting `#include "ql/constants.h"`, `<qcdloop/qcdloop.h>`,
+`<qcdloop/types.h>`, `<Kokkos_Macros.hpp>`, … — app-source paths not on the
+shim's include path, so every such build died with
+`fatal error: <path>: No such file or directory` before the shim was ever
+honestly tested.
+
+## Root cause
+
+Both regional prompts' `Output:` section ended with
+`#include`s of the vendored headers **"(and any target headers the shim needs)"** —
+an explicit invitation to pull app headers. The shim is textually included INTO
+the region's own translation unit, where the library's declarations
+(`ql::Constants<T>`, `ql::Max`, Kokkos macros) are already visible, so re-including
+their headers is never needed and always breaks (the boundary patch owns all
+caller-side wiring). Failure was intermittent (nondeterministic generation), so
+this is prompt hygiene, not a structural bug.
+
+## What landed
+
+1. **Prompt (primary fix).** New numbered rule **C1 "closed include set"** in both
+   `agents/dd_integrator/system_prompt.txt` and
+   `agents/ff_integrator/system_prompt.txt` (mirrors the existing C-rule style —
+   enumerated allowlist + rationale + what to do instead). The `Output:` clause
+   `(and any target headers the shim needs)` was replaced with
+   `vendored headers ONLY … (see C1: no app-source headers)`.
+2. **Deterministic lint (safety net).** `agents/integrator_base/regional.py`
+   (`_lint_include_set` / `_allowed_include_set`, `RegionalSpec.allowed_includes`,
+   `_STDLIB_HEADERS`). Any `#include` outside {vendored headers ∪ stdlib} makes
+   `run_integrate_region` return `RegionIntegrationResult.failed(...)` →
+   `Gen(False, LLM_GEN_FAILED)` → the Patcher's **N=3 retry re-rolls** exactly as
+   for any misgen. A lint reject never produces an accepted transition, so it does
+   **not** count against the Strategy transition budget. Shared engine → both ff
+   and dd inherit it. Stdlib headers are allowed (harmless, always on path) to
+   avoid false-rejecting an otherwise-buildable shim.
+
+## Tests (+11 offline; full offline suite 233 → 244 passed)
+
+- `tests/integrator_base/test_include_lint.py` (9): each observed hallucination
+  rejected, clean/stdlib/quoted-vendored pass, commented `#include` ignored,
+  cross-vendored (ff header in a dd shim) rejected, multi-forbidden all reported.
+- `tests/dd_integrator/test_regional.py` (+2 offline): ruleset carries C1;
+  a forbidden-include shim becomes retryable `llm_failed` and is **not** persisted
+  into the candidate tree.
+- `tests/dd_integrator/test_regional.py` (+2 `@pytest.mark.llm`, skip if proxy
+  absent): regenerate the exact previously-failing regions `B2m.h:65` /
+  `B4m.h:163` with the live model → include set is clean. **Passed** against the
+  Argo proxy (port 8084).
+
+## End-to-end proof (`runs/qcdloop/rerun_failing_regions.py`)
+
+Drove 4 previously-`dd_untested` regions through the real Patcher (generate →
+build-gate → commit), not the full loop:
+
+| region | prior failure | now |
+|---|---|---|
+| `B3m.h:177` | `<qcdloop/constants.h>` (include-only) | **builds (P2 ok)** |
+| `B2m.h:65`  | `ql/constants.h` (+ `_ieps50`) | **builds (P2 ok)** |
+| `B0m.h:69`  | `<qcdloop/qcdloop.h>` (+ `_ieps50`) | fails — Kokkos overload gap (not includes) |
+| `B1m.h:62`  | `qcdloop/*` (+ `_ieps50`) | fails — **Rule R4 escape hatch on `_ieps50`** (by design) |
+
+Across all reruns (up to 3 attempts each): **zero** `No such file` include errors,
+**zero** forbidden includes in any generated shim. The include-hallucination mode
+is eliminated. 2/4 build; the other 2 fail for reasons unrelated to this fix.
+
+## Flag for the 50k run (other patterns the lint surfaced downstream)
+
+Two failure modes remain in the `_ieps50`/`_2ipi` family that are **not** include
+bugs and were previously masked by the include error firing first:
+
+1. **R4 escape hatch on un-vendored DD constants.** `_ieps50` (1e-50),
+   `_reps()`, `_2ipi` (2πi) have no vendored `dd_*()` and no known hex `(hi,lo)`,
+   so the model correctly emits the Rule R4 `#error`. This is honest, not a
+   regression — but it's a hard ceiling until `scripts/gen_dd_constants.cpp` emits
+   those pairs (or they're added to the vendored table). Worth pre-generating the
+   qcdloop constant set before the 50k run so these regions can actually promote.
+2. **Kokkos math overload gap** (`B0m.h:69`): a promoted `ddouble` flows into
+   `Kokkos::fabs` / `Kokkos_Complex.hpp` internals that have no `ddouble` overload
+   (`cannot convert 'quad::ddfun::ddouble' to 'const double'`). This is a
+   shim-completeness / C3 static-instantiation issue, orthogonal to includes —
+   flagging as the next accept-rate lever after this one.
+
+Reproduce: `python runs/qcdloop/rerun_failing_regions.py` under the venv +
+`module load gcc/13.3.0 cmake/3.28.3`.
+
+---
+
 # Strategy agent — implementation handoff
 
 Scope: `agents/strategy/` implemented per `docs/strategy_patcher_design.md`

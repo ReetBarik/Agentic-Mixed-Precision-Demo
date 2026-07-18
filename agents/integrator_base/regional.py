@@ -24,6 +24,7 @@ region-scoped inputs and the boundary patch as a first-class output.
 
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -36,6 +37,28 @@ from agents.shared.region_scan import RegionScanError, extract_region_writes
 # headroom so a shim is never truncated mid-file.
 _MAX_OUTPUT_TOKENS = 8000
 
+# A regional shim's include set is CLOSED (system-prompt rule C1): the vendored
+# extended-precision headers, and nothing app-source.  The dominant Patcher
+# failure in the 2026-07-18 shakedown (run 20260718_194556_67dbcf37) was DD shims
+# hallucinating app-source includes — ``#include "ql/constants.h"``,
+# ``<qcdloop/types.h>``, ``<Kokkos_Macros.hpp>`` — that are not on the shim's
+# include path, so every such build died with ``fatal error: <path>: No such file
+# or directory`` before the shim was ever honestly tested (P6a "dd_untested").
+# The prompt is the primary fix; this lint is the deterministic safety net.
+#
+# Standard-library headers are harmless (always on the include path) and a minimal
+# shim should not need them, but allowing them avoids rejecting an otherwise
+# buildable shim — a false reject would burn a retry.  App-source headers are the
+# actual failure mode and are always rejected.
+_STDLIB_HEADERS = frozenset({
+    "cstdint", "cstddef", "cstdlib", "cmath", "cfloat", "climits", "cassert",
+    "complex", "limits", "type_traits", "utility", "array", "tuple", "algorithm",
+})
+
+# ``#include <foo>`` / ``#include "foo"`` as a real preprocessor directive (first
+# non-whitespace token is ``#include``, so a ``//``-commented line never matches).
+_INCLUDE_RE = re.compile(r'^\s*#\s*include\s*[<"]([^>"]+)[>"]')
+
 
 @dataclass
 class RegionalSpec:
@@ -47,6 +70,9 @@ class RegionalSpec:
     vendored_headers: list[str]   # e.g. ["ff_math.hpp", "ff_complex.hpp"]
     shim_prefix: str              # "ff" | "dd" — filename tag
     constant_note: str = ""       # extra user-turn guidance (DD hex constants)
+    # Include-set allowlist for the C1 lint.  ``None`` -> derived from
+    # ``vendored_headers`` ∪ the standard-library set; set explicitly to override.
+    allowed_includes: list[str] | None = None
 
 
 def run_integrate_region(
@@ -135,6 +161,15 @@ def run_integrate_region(
     if not shim_body or not shim_body.strip():
         return RegionIntegrationResult.failed("LLM returned empty shim")
 
+    # 5a. Deterministic include-set lint (C1 safety net).  A shim that pulls an
+    #     app-source header cannot build — reject it as a misgen so the Patcher's
+    #     N=3 retry re-rolls, exactly as for any other bad generation.  This does
+    #     NOT count against the Strategy transition budget (a failed gen never
+    #     produces an accepted transition).
+    bad_include = _lint_include_set(shim_body, _allowed_include_set(spec))
+    if bad_include is not None:
+        return RegionIntegrationResult.failed(bad_include, llm_tokens=tokens)
+
     # 6. Stamp the SOURCE_HASH and persist (artifact copy + tree copy for the build).
     shim_text = cache.apply_source_hash(shim_body, cache_key)
     shim_out.write_text(shim_text, encoding="utf-8")
@@ -151,6 +186,44 @@ def run_integrate_region(
 # ---------------------------------------------------------------------------
 # helpers
 # ---------------------------------------------------------------------------
+
+def _allowed_include_set(spec: RegionalSpec) -> frozenset[str]:
+    """Header names a regional shim may `#include` (C1): vendored ∪ stdlib.
+
+    ``spec.allowed_includes`` overrides the vendored set when given; the
+    standard-library headers are always permitted (harmless, always on path).
+    """
+    base = spec.allowed_includes if spec.allowed_includes is not None else spec.vendored_headers
+    return frozenset(base) | _STDLIB_HEADERS
+
+
+def _lint_include_set(shim_body: str, allowed: frozenset[str]) -> str | None:
+    """Return an error message if the shim `#include`s anything outside ``allowed``.
+
+    The C1 rule keeps the shim's include set closed to the vendored extended-
+    precision headers (plus harmless stdlib headers).  Any other `#include` — an
+    app-source path like ``ql/constants.h`` / ``qcdloop/types.h`` / ``Kokkos_*.hpp``
+    — is not on the shim's include path and guarantees a hard build failure, so we
+    treat it as a misgeneration.  Returns ``None`` when the include set is clean.
+    """
+    forbidden: list[str] = []
+    for line in shim_body.splitlines():
+        m = _INCLUDE_RE.match(line)
+        if not m:
+            continue
+        header = m.group(1).strip()
+        if header not in allowed:
+            forbidden.append(header)
+    if not forbidden:
+        return None
+    return (
+        "C1 include lint: shim includes forbidden app-source header(s) "
+        f"{forbidden} — a regional shim's include set is closed to the vendored "
+        f"headers {sorted(allowed - _STDLIB_HEADERS)} (+ stdlib). App-source "
+        "headers are not on the shim include path and break the build; the boundary "
+        "patch owns caller-side wiring. Treating as a retryable misgeneration."
+    )
+
 
 def _boundary(spec, file, src, line_start, line_end, variables, writes,
               caller_type, shim_name, repo_path) -> str | None:

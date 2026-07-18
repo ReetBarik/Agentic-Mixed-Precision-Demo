@@ -116,6 +116,65 @@ def test_ruleset_forbids_decimal_constants():
     assert "decimal literal" in dd._SYSTEM_PROMPT
 
 
+def test_ruleset_forbids_app_source_includes():
+    # The DD ruleset must codify the closed include set (C1) — the fix for the
+    # 2026-07-18 shakedown's dominant dd_untested cause.
+    assert "C1." in dd._SYSTEM_PROMPT
+    assert "app-source" in dd._SYSTEM_PROMPT
+
+
+class _BadIncludeLLM:
+    """Emits a shim that hallucinates an app-source header (the shakedown bug)."""
+
+    def __init__(self):
+        self.calls = []
+
+    def __call__(self, system, user, attempt):
+        self.calls.append((system, user, attempt))
+        return (
+            "#pragma once\n"
+            "// SOURCE_HASH: PENDING\n"
+            "#include <dd_math.hpp>\n"
+            "#include <dd_complex.hpp>\n"
+            '#include "ql/constants.h"\n'   # <-- forbidden app-source header
+            "// Rule 5: Constants<ddouble> specialization\n"
+        )
+
+
+def test_forbidden_include_is_rejected_as_misgen(repo, tmp_path):
+    # The include-set lint must turn an app-source #include into a retryable
+    # llm_failed (so the Patcher re-rolls), NOT let it through to a doomed build.
+    out = tmp_path / "shims"
+    llm = _BadIncludeLLM()
+    res = _call(repo, out, llm)
+    assert not res.ok
+    assert res.status == "llm_failed"
+    assert "C1 include lint" in (res.error or "")
+    assert "ql/constants.h" in (res.error or "")
+    # A rejected shim must not be persisted into the candidate tree.
+    root, _ = repo
+    assert not list(root.glob("kernel_dd_*.h"))
+
+
+# --------------------------------------------------------------------------- #
+# Integration: a real LLM call (skipped without the Argo proxy).
+# --------------------------------------------------------------------------- #
+
+# Exact region sources that triggered app-source-include hallucinations in run
+# 20260718_194556_67dbcf37 (all reference ql:: symbols that tempt an app header).
+_PREVIOUSLY_FAILING_REGIONS = {
+    "B2m.h:65": (
+        "        const TOutput k34c = TOutput(k34 - ql::Max(ql::kAbs(k34), "
+        "TMass(ql::Constants<TMass>::_one())) * "
+        "ql::Constants<TScale>::template _ieps50<TOutput, TMass, TScale>()) / k13c;"
+    ),
+    "B4m.h:163": (
+        "        const TScale gamma = ql::Sign(ql::Real(a*(x[1][3] - x[0][3])) "
+        "+ ql::Constants<TScale>::_reps());"
+    ),
+}
+
+
 # --------------------------------------------------------------------------- #
 # Integration: a real LLM call (skipped without the Argo proxy).
 # --------------------------------------------------------------------------- #
@@ -131,3 +190,37 @@ def test_real_llm_generates_parseable_dd_shim(repo, tmp_path):
     assert "dd_math.hpp" in shim
     assert res.boundary_patch and "quad::ddfun::ddouble" in res.boundary_patch
     assert res.llm_tokens > 0
+
+
+@pytest.mark.llm
+@pytest.mark.skipif(not os.environ.get("ANTHROPIC_AUTH_TOKEN"),
+                    reason="requires the Argo LLM proxy")
+@pytest.mark.parametrize("loc", sorted(_PREVIOUSLY_FAILING_REGIONS))
+def test_real_llm_previously_failing_region_has_clean_includes(loc, tmp_path):
+    """Regenerate a region that hallucinated an app-source #include in the
+    2026-07-18 shakedown; with C1 in the prompt (+ lint net) the shim must build
+    a clean include set (res.ok — the lint would have flipped it to llm_failed).
+    """
+    region_src = _PREVIOUSLY_FAILING_REGIONS[loc]
+    root = tmp_path / "cand"
+    root.mkdir()
+    # A header carrying the exact failing region line — the generation trigger is
+    # the region text (ql:: symbols), not the surrounding tree.
+    (root / "region.h").write_text("#pragma once\n" + region_src + "\n")
+    _git(root, "init", "-q")
+    _git(root, "config", "user.email", "t@t.t")
+    _git(root, "config", "user.name", "t")
+    _git(root, "add", "-A")
+    _git(root, "commit", "-q", "-m", "base")
+    sha = _git(root, "rev-parse", "HEAD").stdout.strip()
+
+    res = dd.integrate_region(
+        file="region.h", line_start=2, line_end=2, variables=[],
+        working_tree=sha, out_dir=tmp_path / "shims",
+        repo_path=str(root), llm_fn=None,
+    )
+    assert res.ok, f"{loc}: {res.error}"
+    shim = Path(res.shim_paths[0]).read_text()
+    from agents.integrator_base import regional as _r
+    bad = _r._lint_include_set(shim, _r._allowed_include_set(dd._SPEC))
+    assert bad is None, f"{loc}: {bad}"
