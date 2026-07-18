@@ -61,13 +61,16 @@ def _map_shards(wid: int, paths: list[str], mapdir: str) -> dict:
         for name, c in d.get("samples_seen", {}).items():
             samples[name] = samples.get(name, 0) + c
         for name, idata in d.get("integrals", {}).items():
-            a = acc.setdefault(name, {"regions": {}, "variables": {}})
+            a = acc.setdefault(name, {"regions": {}, "variables": {}, "cascade_chains": {}})
             for loc, reg in idata.get("regions", {}).items():
                 sr._merge_region(a["regions"].setdefault(loc, sr._new_region_json()), reg)
             for vid, var in idata.get("variables", {}).items():
                 if var.get("is_source_var"):
                     sr._merge_variable(
                         a["variables"].setdefault(vid, sr._new_variable_json()), var)
+            # cascade chains are keyed by (stable) chain_id; union across shards,
+            # never merged — mirrors merge_reports (Strategy owns line overlap).
+            a["cascade_chains"].update(idata.get("cascade_chains", {}))
     for name, a in acc.items():
         Path(f"{mapdir}/frag_{name}__{wid}.json").write_bytes(_dumps(a))
     return {"samples": samples, "no_id": no_id}
@@ -77,7 +80,7 @@ def _reduce_integral(name: str, n_samples: int, mapdir: str,
                      cfg: sr.ReducerConfig) -> tuple[str, str]:
     """Merge one integral's fragments, finalize it, serialize to a blob file."""
     gc.disable()
-    a = {"regions": {}, "variables": {}}
+    a = {"regions": {}, "variables": {}, "cascade_chains": {}}
     prov: dict[str, set] = {}  # union region provenance once, not per-shard
     for f in glob.glob(f"{mapdir}/frag_{name}__*.json"):
         frag = _loads(Path(f).read_bytes())
@@ -89,6 +92,7 @@ def _reduce_integral(name: str, n_samples: int, mapdir: str,
             sr._merge_region(a["regions"].setdefault(loc, sr._new_region_json()), reg)
         for vid, var in frag["variables"].items():
             sr._merge_variable(a["variables"].setdefault(vid, sr._new_variable_json()), var)
+        a["cascade_chains"].update(frag.get("cascade_chains", {}))
     for loc, d in a["regions"].items():
         if loc in prov:
             d["prov_vars"] = sorted(prov[loc])
@@ -109,6 +113,9 @@ def _reduce_integral(name: str, n_samples: int, mapdir: str,
         ][:10],
         "regions": regions,
         "variables": variables,
+        # mirror finalize_report: chain_id-keyed dict -> deterministic list
+        "cascade_chains": [a["cascade_chains"][cid]
+                           for cid in sorted(a["cascade_chains"])],
     }
     outp = f"{mapdir}/out_{name}.json"
     Path(outp).write_bytes(_dumps(out))
