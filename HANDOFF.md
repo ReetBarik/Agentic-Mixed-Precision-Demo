@@ -107,6 +107,67 @@ New `tests/shared/test_backfill_ff_prediction.py` **+8** (sensitivity-exact and
 float-derived, idempotent, skip-no-float, report/variable/chain coverage,
 dict-shaped chains, file round-trip, dry-run). **Offline delta: +12.**
 
+## Task 3 — Strategy two-phase walk (split correctness / speedup budget)
+
+**Problem:** correctness and speedup shared one `max_iters`; correctness tier 1
+alone could exhaust it before speedup was ever touched. (Now that Task 2 makes
+the speedup queue non-empty on qcdloop, that starvation is real, not theoretical.)
+
+**What landed** (single Strategy invocation, internal phase switch — not two CLI
+runs):
+- `StrategyBudget` gains `max_iters_correctness` / `max_iters_speedup` (both
+  `None` by default). `StrategyBudget.phase_caps()` resolves them: neither set →
+  70/30 split with the speedup cap taking the exact remainder (sums to
+  `max_iters`, no rounding drift); one set → the other defaults to its 0.7/0.3
+  proportion.
+- `agent.execute()` is now explicitly two-phase. Phase 1 walks the correctness
+  queue + cascade chains to termination or its cap; phase 2 walks the speedup
+  queue on the accepted state. **Spillover:** at the phase boundary
+  (`_enter_speedup_phase`) unused phase-1 counting iterations are added to the
+  phase-2 cap; phase-2 leftovers never spill back.
+- **Phase-1 cap is a *soft* stop** (`phase_exhausted` → hand off to speedup), so
+  "phase 1 hit its cap" is not a run-level failure. The **phase-2 cap is a hard
+  stop** (`budget_exhausted`). Global ceilings (wall-clock, tokens,
+  diminishing-returns, commit-failed) remain hard stops in either phase and skip
+  phase 2. **Overall run status = phase-2's status** (no new terminal statuses).
+- **Phase-2 skip:** regions promoted to dd in phase 1 (direct
+  `region_final == dd` *plus* cascade-chain lines floored at dd) are removed from
+  the phase-2 candidate set (`_dd_promoted_keys`) — speedup can't move a region
+  already at the correctness floor. (This subsumes what the pre-existing speedup
+  `floor` rule did for chain-claimed lines; the floor still caps ff-floored lines
+  that remain demotable.)
+- **Iteration log:** every entry now carries `phase: "correctness" | "speedup"`.
+  The report gains a `phase_summary` (per-phase iterations / accepts / effective
+  iter cap / `skipped_dd_promoted`); `precision_assignment` + `algorithmic_rewrites`
+  entries are stamped with `phase`; `report.md` gains a "Two-phase walk" table
+  grouping accepts by phase.
+
+**Surprising / flagged:**
+- **"success" can hide a cut-short correctness phase.** Per the decided design
+  (status = phase-2's status), if phase 1 hits its cap but phase 2 completes, the
+  run reports `success` even though correctness regions are left `unworked`
+  (visible in `region_status` / the precision distribution, not the top-line
+  status). The old single-budget test `test_budget_max_iters_exhausted` asserted
+  a run-level `budget_exhausted` in exactly this shape; it is renamed
+  `test_budget_max_iters_correctness_only` and now asserts the new soft-handoff
+  behavior. If you'd rather surface a cut-short phase 1, add a `partial` when
+  `phase_exhausted and correctness_queue not drained` — deliberately NOT done
+  (design says status = phase-2's).
+- **No "mixed-precision within a region" concept was added.** The design's STOP
+  trigger (a region needing dd for correctness at some inputs and ff for speedup
+  at others) did not arise: phase-2 candidates are `stable` regions disjoint from
+  the correctness queue by construction, and any region phase 1 pushed to dd is
+  skipped in phase 2. A region is only ever assigned one precision. Nothing to
+  flag there.
+
+**Tests:** `tests/strategy/` 60 → **65**. New `test_two_phase.py` (+5): (a) phase 1
+at full cap, phase 2 still runs its reserved chunk; (b) phase-1 early finish
+spills into phase 2 (plus a control proving the speedup cap binds *without*
+spill); (c) phase 2 skips a dd-promoted (cascade-chain) region while a free
+region demotes; (d) empty speedup queue → phase-2 no-op, run still `success`.
+`test_loop.py` budget test updated for the soft phase-1 hand-off (net 0). **Offline
+delta: +5.**
+
 ---
 
 # HANDOFF — Gap A (namespace-qualified bridge) + Gap B (source-derivable constants) (2026-07-18, langgraph-agents)

@@ -15,11 +15,40 @@ DEFAULT_MODEL = os.environ.get("ARGO_MODEL", "claudeopus47")
 
 @dataclass
 class StrategyBudget:
-    """Hard caps on a single Strategy run. Any cap exceeded → status budget_exhausted."""
+    """Hard caps on a single Strategy run. Any cap exceeded → status budget_exhausted.
 
-    max_iters: int = 500                     # counting iterations (see StrategyConfig notes)
-    max_wall_clock_sec: float = 6 * 3600.0   # 6h wall-clock ceiling
+    ``max_iters`` is the *total* counting-iteration budget, split across the
+    two-phase walk (correctness then speedup). ``max_iters_correctness`` /
+    ``max_iters_speedup`` override the split per phase: when both are ``None`` the
+    total is split 70/30; when only one is set the other defaults proportionally
+    (0.7 / 0.3 of ``max_iters``). Unused correctness budget spills forward into the
+    speedup phase at the phase boundary; unused speedup budget never spills back
+    (correctness is already terminated). ``max_wall_clock_sec`` / ``max_llm_tokens``
+    are global ceilings across both phases.
+    """
+
+    max_iters: int = 500                     # total counting-iteration budget
+    max_iters_correctness: int | None = None  # phase-1 cap (default: 0.7 * max_iters)
+    max_iters_speedup: int | None = None      # phase-2 cap (default: 0.3 * max_iters)
+    max_wall_clock_sec: float = 6 * 3600.0   # 6h wall-clock ceiling (global)
     max_llm_tokens: int = 20_000_000         # cumulative LLM tokens reported by Patcher
+
+    def phase_caps(self) -> tuple[int, int]:
+        """Resolve ``(correctness_cap, speedup_cap)`` from the knobs.
+
+        Explicit per-phase knobs are honored; a ``None`` knob defaults to its 70/30
+        proportion of ``max_iters``. When *neither* is set the speedup cap takes the
+        exact remainder so the two sum to ``max_iters`` (no rounding drift).
+        """
+        c, s = self.max_iters_correctness, self.max_iters_speedup
+        if c is None and s is None:
+            c = round(0.7 * self.max_iters)
+            s = self.max_iters - c
+        elif c is None:
+            c = round(0.7 * self.max_iters)
+        elif s is None:
+            s = round(0.3 * self.max_iters)
+        return max(0, int(c)), max(0, int(s))
 
 
 @dataclass

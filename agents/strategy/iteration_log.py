@@ -35,15 +35,18 @@ class IterationLogger:
     def write(self, *, iter_id: int, target: dict, kind: str, intent: str,
               current_precision: str, patcher_status: str,
               validator_verdict: str | None, accepted: bool, log_tag: str,
-              rationale: str, strategy_bug: bool = False,
-              extra: dict | None = None) -> dict:
+              rationale: str, phase: str | None = None,
+              strategy_bug: bool = False, extra: dict | None = None) -> dict:
         """Append one iteration record and return it.
 
-        ``strategy_bug`` is set true only on ``patch_apply_failed`` (P6). ``extra``
-        folds in optional fields (digit deltas, candidate_sha, identity, …).
+        ``phase`` is the two-phase walk phase (``correctness`` | ``speedup``) the
+        iteration ran under. ``strategy_bug`` is set true only on
+        ``patch_apply_failed`` (P6). ``extra`` folds in optional fields (digit
+        deltas, candidate_sha, identity, …).
         """
         record = {
             "iter_id": iter_id,
+            "phase": phase,
             "target": target,
             "kind": kind,
             "intent": intent,

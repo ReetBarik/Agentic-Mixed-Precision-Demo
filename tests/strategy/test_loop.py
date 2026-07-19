@@ -83,13 +83,20 @@ def test_commit_failed_aborts_internal_error(tmp_path):
     assert tags == ["fatal"]
 
 
-def test_budget_max_iters_exhausted(tmp_path):
+def test_budget_max_iters_correctness_only(tmp_path):
+    # Two-phase walk: max_iters=2 splits 70/30 → correctness cap 1, speedup cap 1.
+    # A correctness-only workload soft-exhausts phase 1 at its cap and (phase 2
+    # empty) ends "success" (overall status = phase-2's status), NOT a run-level
+    # budget_exhausted — phase-1 hitting its cap is a soft hand-off.
     regions = [(f"I{i}", "a.h", 10 + i, "stable", 1e-3, 1e-2) for i in range(5)]
     report = write_report(tmp_path, regions)
     res, rep = run_agent(tmp_path, report, ok_patcher(), const_validator("reject"),
                          max_iters=2)
-    assert res["status"] == "budget_exhausted"
-    assert rep["budget_iters_used"] == 2
+    assert res["status"] == "success"
+    assert rep["budget_iters_used"] == 1                    # correctness cap = 1
+    assert rep["phase_summary"]["correctness"]["iterations"] == 1
+    assert rep["phase_summary"]["correctness"]["iter_cap"] == 1
+    assert rep["phase_summary"]["speedup"]["iterations"] == 0
 
 
 def test_diminishing_returns_partial(tmp_path):

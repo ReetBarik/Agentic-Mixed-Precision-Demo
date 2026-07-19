@@ -84,7 +84,21 @@ class StrategyRun:
         self.budget_iters = 0
         self.tokens = 0
         self.dr_streak = 0
-        self.stop_status: str | None = None   # set → hard/soft stop requested
+        self.stop_status: str | None = None   # set → HARD stop (ends the whole run)
+
+        # -- two-phase walk (correctness → speedup) --
+        # Phase-1 hitting its cap is a SOFT stop: it ends the correctness phase and
+        # hands off to speedup; only a global ceiling (wall/tokens/DR/fatal) or the
+        # phase-2 cap is a HARD run stop.  Overall status = phase-2's status.
+        self.cap_correctness, self.cap_speedup = self.cfg.budget.phase_caps()
+        self.phase = INTENT_CORRECTNESS       # current walk phase
+        self.phase_iters = 0                  # counting iters in the current phase
+        self.phase_exhausted = False          # soft: phase-1 cap reached
+        self.phase_stats = {
+            INTENT_CORRECTNESS: {"iterations": 0, "accepts": 0},
+            INTENT_SPEEDUP: {"iterations": 0, "accepts": 0},
+        }
+        self.dd_promoted_keys: set[tuple] = set()   # phase-1 dd promotions (skip in phase 2)
 
         # -- accumulators for the report --
         self.precision_assignment: list[dict] = []
@@ -123,27 +137,61 @@ class StrategyRun:
         if self.repo and self.starting_sha:
             self.repo.create_branch(self.branch, self.starting_sha)
 
-        # -- correctness mode drains first: tier-1/3/4 regions, then the cascade
-        #    chains (tier 2's concrete population).  All finish before speedup, so
-        #    the required_by ledger is fully populated when speedup consults it. --
+        # == Phase 1 — correctness walk to termination (or its cap) ============
+        # tier-1/3/4 regions, then the cascade chains (tier 2's concrete
+        # population).  All finish before speedup, so the required_by ledger is
+        # fully populated when speedup consults it.
+        self.phase = INTENT_CORRECTNESS
         for record in correctness_q:
-            if self.stop_status:
+            if self._phase_over():
                 break
             self._process_target(record, INTENT_CORRECTNESS)
         for chain in chain_q:
-            if self.stop_status:
+            if self._phase_over():
                 break
             self._process_chain(chain)
 
-        # -- speedup mode second (only if correctness fully drained) --
+        # == Phase 2 — speedup walk on the phase-1 accepted state ==============
+        # Only a HARD stop (global ceiling / fatal) skips phase 2; a phase-1 cap
+        # (soft) hand-off still runs speedup on its reserved + spilled budget.
         if not self.stop_status:
-            for record in speedup_q:
+            self._enter_speedup_phase()
+            speedup_q2 = [r for r in speedup_q if r.key not in self.dd_promoted_keys]
+            for record in speedup_q2:
                 if self.stop_status:
                     break
                 self._process_target(record, INTENT_SPEEDUP)
 
         status = self.stop_status or "success"
         return self._finalize(status, meta, len(correctness_q))
+
+    def _phase_over(self) -> bool:
+        """True when the current phase must stop — a hard run stop OR the soft
+        phase-1 cap hand-off."""
+        return self.stop_status is not None or self.phase_exhausted
+
+    def _enter_speedup_phase(self) -> None:
+        """Cross the phase boundary: spill unused phase-1 budget into phase 2.
+
+        The phase-2 effective cap = its own knob + whatever counting iterations
+        phase 1 left on the table.  Unused speedup budget does NOT spill back
+        (phase 1 is already terminated).  Snapshots the phase-1 dd promotions
+        (region_final == dd, plus chain-floored lines) so phase 2 skips them.
+        """
+        spill = max(0, self.cap_correctness - self.phase_iters)
+        self.cap_speedup = self.cap_speedup + spill
+        self.dd_promoted_keys = self._dd_promoted_keys()
+        self.phase = INTENT_SPEEDUP
+        self.phase_iters = 0
+        self.phase_exhausted = False
+
+    def _dd_promoted_keys(self) -> set[tuple]:
+        """Region keys sitting at dd after phase 1 — direct promotions plus lines
+        a cascade chain floored at dd (speedup can't move a dd-floored region)."""
+        dd_idx = LADDER.index("dd")
+        keys = {k for k, p in self.region_final.items() if p == "dd"}
+        keys |= {k for k, idx in self.line_floor_idx.items() if idx == dd_idx}
+        return keys
 
     def _rank_chains(self, chains) -> list:
         """Tier-2 population: cascade chains above the tolerance bar, worst
@@ -236,14 +284,20 @@ class StrategyRun:
                 iter_id=iter_id, target=intent.target.as_dict(), kind=intent.kind,
                 intent=intent.intent, current_precision=intent.current_precision,
                 patcher_status=status, validator_verdict=validator_verdict,
-                accepted=accepted, log_tag=entry.log_tag,
+                accepted=accepted, log_tag=entry.log_tag, phase=self.phase,
                 rationale=self._rationale(intent, entry.log_tag, accepted),
                 strategy_bug=(entry.log_tag == "strategy_bug"),
                 extra=self._log_extra(intent, resp, verdict_digits))
 
+            # ---- per-phase accounting (for the report's phase grouping) ----
+            self.phase_stats[self.phase]["iterations"] += 1
+            if accepted:
+                self.phase_stats[self.phase]["accepts"] += 1
+
             # ---- budget / diminishing-returns accounting ----
             if entry.counts_budget:
                 self.budget_iters += 1
+                self.phase_iters += 1
             self.tokens += int(resp.get("llm_tokens", 0) or 0)
             if accepted:
                 self.dr_streak = 0
@@ -298,17 +352,19 @@ class StrategyRun:
             level = intent.kind.split("-to-")[-1]
             self.precision_assignment.append(
                 {**intent.target.as_dict(), "precision": level,
-                 "required_by": [], "rationale_id": intent.rationale_id})
+                 "required_by": [], "rationale_id": intent.rationale_id,
+                 "phase": self.phase})
         elif accepted and is_rewrite:
             self.rewrites.append(
                 {**intent.target.as_dict(), "kind": intent.kind,
                  "identity": intent.identity, "rationale_id": intent.rationale_id,
-                 "accepted": True})
+                 "accepted": True, "phase": self.phase})
         elif ceiling_retain:
             # DD retained on the branch as the ceiling candidate (Q2 / P6a)
             self.precision_assignment.append(
                 {**intent.target.as_dict(), "precision": "dd",
-                 "required_by": [], "rationale_id": intent.rationale_id})
+                 "required_by": [], "rationale_id": intent.rationale_id,
+                 "phase": self.phase})
 
     def _finish_walk(self, record, res, walk_digits) -> None:
         self.region_final[record.key] = res.final_precision
@@ -392,7 +448,8 @@ class StrategyRun:
                 "file": file, "line_start": ls, "line_end": le,
                 "precision": precision,
                 "required_by": sorted(self.line_chain_ids[key]),
-                "rationale_id": self.line_rationale.get(key, "")})
+                "rationale_id": self.line_rationale.get(key, ""),
+                "phase": INTENT_CORRECTNESS})   # cascade chains are always phase 1
             # reflect the floor in the per-line final precision (distribution)
             cur = self.region_final.get(key)
             if cur is None or LADDER.index(cur) < self.line_floor_idx[key]:
@@ -400,11 +457,15 @@ class StrategyRun:
 
     # ------------------------------------------------------------------
     def _check_stops(self) -> bool:
-        """Return True if a budget or diminishing-returns stop just fired."""
+        """Return True if a stop just fired (hard run stop OR soft phase-1 cap).
+
+        Global ceilings (wall-clock, tokens, diminishing-returns) are HARD stops
+        in either phase.  The per-phase iteration cap is a SOFT hand-off in phase 1
+        (``phase_exhausted`` → move to speedup) and a HARD stop in phase 2
+        (``budget_exhausted`` — nothing runs after speedup).
+        """
         b = self.cfg.budget
-        if self.budget_iters >= b.max_iters:
-            self.stop_status = "budget_exhausted"
-            return True
+        # -- global ceilings (both phases) --
         if (time.monotonic() - self.t0) >= b.max_wall_clock_sec:
             self.stop_status = "budget_exhausted"
             return True
@@ -414,6 +475,15 @@ class StrategyRun:
         if self.cfg.diminishing_returns_k > 0 and self.dr_streak >= self.cfg.diminishing_returns_k:
             self.stop_status = "partial"
             return True
+        # -- per-phase iteration cap --
+        if self.phase == INTENT_CORRECTNESS:
+            if self.phase_iters >= self.cap_correctness:
+                self.phase_exhausted = True     # soft: end phase 1, hand off to speedup
+                return True
+        else:  # speedup phase
+            if self.phase_iters >= self.cap_speedup:
+                self.stop_status = "budget_exhausted"
+                return True
         return False
 
     def _rationale(self, intent, log_tag: str, accepted: bool) -> str:
@@ -470,6 +540,17 @@ class StrategyRun:
             "iterations": self.logger._next_id,
             "budget_iters_used": self.budget_iters,
             "llm_tokens_used": self.tokens,
+            "phase_summary": {
+                "correctness": {
+                    **self.phase_stats[INTENT_CORRECTNESS],
+                    "iter_cap": self.cap_correctness,
+                },
+                "speedup": {
+                    **self.phase_stats[INTENT_SPEEDUP],
+                    "iter_cap": self.cap_speedup,   # effective (incl. phase-1 spill)
+                    "skipped_dd_promoted": len(self.dd_promoted_keys),
+                },
+            },
             "correctness_queue_len": n_correctness,
             "precision_assignment": self.precision_assignment,
             "algorithmic_rewrites": self.rewrites,

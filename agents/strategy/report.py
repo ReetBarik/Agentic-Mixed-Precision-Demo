@@ -89,6 +89,28 @@ def _render_markdown(r: dict) -> str:
                 f"{w.get('rationale_id', '?')} |")
         lines.append("")
 
+    # -- two-phase walk summary (accepts grouped by phase) --
+    ps = r.get("phase_summary", {})
+    if ps:
+        assigns = r.get("precision_assignment", [])
+        corr_acc = sum(1 for a in assigns if a.get("phase") == "correctness")
+        spd_acc = sum(1 for a in assigns if a.get("phase") == "speedup")
+        c, s = ps.get("correctness", {}), ps.get("speedup", {})
+        lines += [
+            "## Two-phase walk", "",
+            "| phase | iterations | iter cap | accepts (walk) | precision assigns |",
+            "|---|---|---|---|---|",
+            f"| correctness | {c.get('iterations', 0)} | {c.get('iter_cap', '?')} | "
+            f"{c.get('accepts', 0)} | {corr_acc} |",
+            f"| speedup | {s.get('iterations', 0)} | {s.get('iter_cap', '?')} | "
+            f"{s.get('accepts', 0)} | {spd_acc} |",
+            "",
+        ]
+        skipped = s.get("skipped_dd_promoted")
+        if skipped:
+            lines += [f"_{skipped} region(s) promoted to dd in phase 1 were skipped "
+                      f"in the speedup phase._", ""]
+
     # -- iteration summary --
     lines += [
         "## Iteration summary",
