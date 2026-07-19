@@ -365,7 +365,18 @@ def run_integrate_region(
     # 3. SOURCE_HASH cache key (region ⊕ ruleset ⊕ scalar ⊕ writes).
     cache_key = cache.compute_region_hash(region_src, spec.system_prompt,
                                           spec.cpp_scalar, writes)
-    shim_name = f"{Path(file).stem}_{spec.shim_prefix}_{cache_key[:8]}.h"
+    # Region-scoped shim filename: the line range makes the name unique per
+    # region so two regions in the SAME file with byte-identical source (which
+    # produce the same content cache_key) get DISTINCT shim files instead of
+    # colliding on one name.  Without the ``L{start}_{end}`` scope the later
+    # region cache-hits the earlier region's shim, installs a byte-identical
+    # copy, nets no tree change, and the Patcher's commit fails "nothing to
+    # commit" — historically escalated to a fatal run abort.  It also stops a
+    # later region from silently overwriting an earlier region's accepted shim.
+    # The full cache_key still gates the content (via ``_is_cache_hit``), so a
+    # re-run of the SAME region still reuses its shim.
+    shim_name = (f"{Path(file).stem}_{spec.shim_prefix}"
+                 f"_L{line_start}_{line_end}_{cache_key[:8]}.h")
     shim_out = out_dir / shim_name
 
     # 4. Cache hit (only on the first attempt — a retry must re-roll the shim).
