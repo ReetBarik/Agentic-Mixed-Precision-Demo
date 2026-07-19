@@ -1,0 +1,60 @@
+{
+ "native_double": {
+  "add": 1,
+  "sub": 1,
+  "mul": 1,
+  "div": 1,
+  "sqrt": 1,
+  "neg": 1,
+  "abs": 1,
+  "log": 20,
+  "atan2": 30
+ },
+ "native_float": {
+  "add": 1,
+  "sub": 1,
+  "mul": 1,
+  "div": 1,
+  "sqrt": 1,
+  "neg": 1,
+  "abs": 1,
+  "log": 20,
+  "atan2": 30
+ },
+ "dd": {
+  "add": 11,
+  "sub": 11,
+  "mul": 32,
+  "div": 42,
+  "sqrt": 44,
+  "neg": 2,
+  "abs": 2,
+  "log": 4100,
+  "atan2": 4300
+ },
+ "ff": {
+  "add": 11,
+  "sub": 11,
+  "mul": 32,
+  "div": 42,
+  "sqrt": 44,
+  "neg": 2,
+  "abs": 2,
+  "log": 2350,
+  "atan2": 2500
+ },
+ "primitive_kinds": [
+  "abs",
+  "add",
+  "div",
+  "mul",
+  "neg",
+  "sqrt",
+  "sub"
+ ],
+ "transcendental_kinds": [
+  "atan2",
+  "log"
+ ],
+ "note": "primitives exact from headers; transcendentals are documented estimates"
+}

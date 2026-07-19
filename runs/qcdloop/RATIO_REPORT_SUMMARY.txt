@@ -1,0 +1,16 @@
+RATIO_REPORT_SUMMARY — Wave-1+2 10k walk (run 20260719_185132_033cbe69, @3fd5ad3)
+
+TL;DR: baseline 100.00% double / 0.00% float  ->  after-walk 98.95% double / 1.05% float (primitives-only, source-exact); 99.87% / 0.13% incl. estimated dd transcendentals.
+
+Baseline flops (all double, native): primitives 188,083,622 | full 332,932,402
+After-walk float share of throughput: primitives 1.052% | full 0.128%
+Total flop inflation vs baseline: primitives 14.37x | full 68.01x
+
+Logical-op reallocation (194,205,502 total ops): double 26.5% | dd 65.7% | float 7.6% | ff 0.25%
+
+Top 3 op-kinds by delta contribution (dd double-flop inflation):
+  1. log (est): 2,511,715 dd ops x4100 = 10,298,031,500 double flops
+  2. atan2 (est): 2,236,016 dd ops x4300 = 9,614,868,800 double flops
+  3. mul: 51,121,681 dd ops x32 = 1,635,893,792 double flops
+
+Interpretation: the walk spent its arithmetic budget on dd correctness (65.7% of ops -> dd, ~11-44x flops), not float speedup (7.8% of ops -> float/ff). Float throughput share is small but real; conclusion robust to transcendental estimate.
