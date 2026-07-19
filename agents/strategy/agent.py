@@ -32,7 +32,9 @@ from agents.strategy.characterization import load_chains, load_regions
 from agents.strategy.dispatch import dispatch
 from agents.strategy.gitops import GitRepo
 from agents.strategy.iteration_log import IterationLogger
-from agents.strategy.models import INTENT_CORRECTNESS, INTENT_SPEEDUP, LADDER
+from agents.strategy.models import (
+    INTENT_CORRECTNESS, INTENT_SPEEDUP, LADDER, VIA_PLAIN, VIA_REGIONAL,
+)
 from agents.strategy.ranking import build_queues, error_threshold
 from agents.strategy.report import write_reports
 from agents.strategy.source_probe import region_has_bare_double
@@ -203,16 +205,19 @@ class StrategyRun:
     def _process_target(self, record, mode: str) -> None:
         """Drive one region target's retry walk to termination."""
         floor = self._floor_for(record.key) if mode == INTENT_SPEEDUP else None
-        float_ok = True
+        float_via = VIA_PLAIN
         if mode == INTENT_SPEEDUP:
-            # Gate the plain-edit float rung on whether the region even has a bare
-            # `double` token to rewrite (template-typed regions do not).
-            float_ok = region_has_bare_double(
+            # A region with a bare `double` token reaches float via the Patcher's
+            # plain-edit rung (VIA_PLAIN); a template-typed region has no such token
+            # and reaches float only via the LLM/regional float integrator
+            # (VIA_REGIONAL) — Wave 2 makes that path reachable instead of settling.
+            has_bare = region_has_bare_double(
                 self.repo_path, record.target.file,
                 record.target.line_start, record.target.line_end,
                 cache=self._source_cache)
+            float_via = VIA_PLAIN if has_bare else VIA_REGIONAL
         walk = RetryWalk(record, mode, self.tolerance, baseline="double",
-                         floor=floor, float_demote_ok=float_ok)
+                         floor=floor, float_via=float_via)
         stopped, walk_digits = self._drive_walk(walk, record, chain=None)
         if stopped:
             self.region_final[record.key] = walk.installed

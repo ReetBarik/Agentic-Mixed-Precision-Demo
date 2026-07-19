@@ -105,7 +105,7 @@ class _Patcher:
             shims_dir=dirs["shims"], patches_dir=dirs["patches"],
             integrators=self.integrators, llm_call=self.llm_call)
 
-        path = dispatch.dispatch_path(intent.kind)
+        path = dispatch.dispatch_path(intent.kind, intent.via)
         llm_driven = dispatch.is_llm_driven(path)
         attempts = MAX_INTEGRATOR_RETRIES if llm_driven else 1
 
@@ -265,8 +265,10 @@ def _resolve_headers_dir(repo_root: Path, cfg: dict) -> Path:
 def _default_integrators() -> dict:
     from agents.dd_integrator import agent as dd_integrator
     from agents.ff_integrator import agent as ff_integrator
+    from agents.float_integrator import agent as float_integrator
     return {"ff": ff_integrator.integrate_region,
-            "dd": dd_integrator.integrate_region}
+            "dd": dd_integrator.integrate_region,
+            "float": float_integrator.integrate_region}
 
 
 def _default_llm_call(config: PipelineConfig | None):

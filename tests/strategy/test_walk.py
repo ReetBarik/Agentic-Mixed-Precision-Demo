@@ -160,34 +160,73 @@ def test_speedup_no_floor_demotes_to_float():
     assert walk.result().final_precision == "float"
 
 
-# ---- template-typed float rung gate (CALIBRATION.md §Bug 4) ----
+# ---- template-typed float rung: Wave-2 regional path (was CALIBRATION.md §Bug 4) ----
 
-def test_speedup_template_region_skips_float_rung():
-    # float_demote_ok=False (no bare `double` token to rewrite): after the ff
-    # demotion the walk settles at ff WITHOUT ever proposing ff-to-float — no
-    # wasted iteration, no patch_inapplicable.
+def test_speedup_template_region_tries_double_to_float_directly():
+    # Wave 2: a template-typed region (float_via=VIA_REGIONAL) now attempts
+    # `double-to-float` DIRECTLY via the regional float integrator — the FIRST
+    # thing proposed — instead of settling at ff (the Wave-1 gate).  Accepting it
+    # settles at float (the cheapest passing rung).  The intent is tagged
+    # via="regional" so the Patcher routes it to the float integrator.
+    from agents.strategy.models import VIA_REGIONAL
     rec = make_region("B1", "f.h", 10, "stable", pred_float=1e-30)
     walk = RetryWalk(rec, "speedup", tolerance=10.0, baseline="double",
-                     float_demote_ok=False)
-    proposed = []
+                     float_via=VIA_REGIONAL)
     intent = walk.propose("iter_0")
-    proposed.append(intent.kind)
-    walk.resolve(accepted=True)                 # double-to-ff accepts
-    assert walk.propose("iter_1") is None        # float rung gated → no proposal
+    assert intent.kind == "double-to-float"
+    assert intent.via == VIA_REGIONAL
+    walk.resolve(accepted=True)                 # float accepted → cheapest, stop
+    assert walk.propose("iter_1") is None
     res = walk.result()
-    assert proposed == ["double-to-ff"]
+    assert res.status == "settled" and res.final_precision == "float"
+
+
+def test_speedup_template_region_falls_back_to_ff_when_float_rejects():
+    # Wave 2: if `double-to-float` rejects (float too lossy), the regional walk
+    # falls back to `double-to-ff` (preserving the demotion Wave 1 already won).
+    from agents.strategy.models import VIA_REGIONAL
+    rec = make_region("B1", "f.h", 10, "stable", pred_float=1e-30)
+    walk = RetryWalk(rec, "speedup", tolerance=10.0, baseline="double",
+                     float_via=VIA_REGIONAL)
+    kinds = []
+    intent = walk.propose("iter_0")
+    kinds.append(intent.kind)
+    walk.resolve(accepted=False)                # float rejected → try ff
+    intent = walk.propose("iter_1")
+    kinds.append(intent.kind)
+    assert intent.via == VIA_REGIONAL
+    walk.resolve(accepted=True)                 # ff accepted → cheapest passing, stop
+    assert walk.propose("iter_2") is None
+    res = walk.result()
+    assert kinds == ["double-to-float", "double-to-ff"]
     assert res.status == "settled" and res.final_precision == "ff"
 
 
-def test_speedup_non_template_region_still_reaches_float():
-    # Control: float_demote_ok=True (default) keeps the float rung for non-template
-    # code, so the same region walks down to float.
+def test_speedup_template_region_regional_floor_blocks_float():
+    # The cascade-chain floor still binds the regional path: floor=ff means float
+    # is skipped and only ff is tried.
+    from agents.strategy.models import VIA_REGIONAL
     rec = make_region("B1", "f.h", 10, "stable", pred_float=1e-30)
     walk = RetryWalk(rec, "speedup", tolerance=10.0, baseline="double",
-                     float_demote_ok=True)
+                     floor="ff", float_via=VIA_REGIONAL)
+    intent = walk.propose("iter_0")
+    assert intent.kind == "double-to-ff"        # float target below floor → skipped
+    walk.resolve(accepted=False)
+    assert walk.propose("iter_1") is None
+    assert walk.result().final_precision == "double"
+
+
+def test_speedup_non_template_region_still_reaches_float_via_plain():
+    # Control: float_via=VIA_PLAIN (default) keeps the historical single-step
+    # ladder for non-template code (double→ff→ff-to-float via plain edit).
+    from agents.strategy.models import VIA_PLAIN
+    rec = make_region("B1", "f.h", 10, "stable", pred_float=1e-30)
+    walk = RetryWalk(rec, "speedup", tolerance=10.0, baseline="double",
+                     float_via=VIA_PLAIN)
     kinds = []
     while (intent := walk.propose("iter")) is not None:
         kinds.append(intent.kind)
+        assert intent.via == VIA_PLAIN
         walk.resolve(accepted=True)
     assert kinds == ["double-to-ff", "ff-to-float"]
     assert walk.result().final_precision == "float"

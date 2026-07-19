@@ -23,7 +23,9 @@ from __future__ import annotations
 import re
 from pathlib import Path
 
-from agents.strategy.models import ALL_KINDS, RegionTarget, RemediationIntent
+from agents.strategy.models import (
+    ALL_KINDS, VIA_PLAIN, VIA_REGIONAL, RegionTarget, RemediationIntent,
+)
 
 
 class IntentError(ValueError):
@@ -58,6 +60,9 @@ def parse_intent(wire: dict) -> RemediationIntent:
 
     intent_flavor = wire.get("intent")
     identity = wire.get("identity")
+    via = wire.get("via", VIA_PLAIN) or VIA_PLAIN
+    if via not in (VIA_PLAIN, VIA_REGIONAL):
+        raise IntentError(f"unknown via {via!r} (expected {VIA_PLAIN!r} or {VIA_REGIONAL!r})")
     try:
         return RemediationIntent(
             target=RegionTarget(file=file, line_start=line_start,
@@ -67,6 +72,7 @@ def parse_intent(wire: dict) -> RemediationIntent:
             current_precision=str(wire.get("current_precision", "")),
             rationale_id=str(wire.get("rationale_id", "")),
             identity=identity,
+            via=via,
         )
     except ValueError as exc:      # RemediationIntent.__post_init__ guards
         raise IntentError(str(exc)) from exc

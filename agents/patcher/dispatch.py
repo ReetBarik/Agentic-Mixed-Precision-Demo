@@ -24,7 +24,7 @@ from typing import Callable
 
 from agents.integrator_base.region import RegionIntegrationResult
 from agents.patcher import edits, gitops, result as R, rewrites
-from agents.strategy.models import RemediationIntent
+from agents.strategy.models import VIA_REGIONAL, RemediationIntent
 
 # ---- dispatch-path tags ----
 PATH_REGIONAL = "regional"
@@ -37,9 +37,17 @@ _TO_DD = frozenset({"double-to-dd"})
 _PLAIN = frozenset({"float-to-double", "double-to-float"})
 _REVERT = frozenset({"ff-to-double", "dd-to-double", "ff-to-float"})
 _REWRITE = frozenset({"reformulate-kahan", "reformulate-identity"})
+# ``-to-float`` demotions that, when Strategy tags them ``via="regional"`` (a
+# template-typed region with no bare ``double`` token), route to the LLM/regional
+# float integrator instead of the plain-edit / git-revert path (Wave 2).
+_TO_FLOAT = frozenset({"double-to-float", "ff-to-float"})
 
 
-def dispatch_path(kind: str) -> str:
+def dispatch_path(kind: str, via: str = "plain") -> str:
+    # Wave 2: a ``-to-float`` demotion on a template-typed region (via="regional")
+    # is realized by generating a float-specialized shim, exactly like ff/dd.
+    if via == VIA_REGIONAL and kind in _TO_FLOAT:
+        return PATH_REGIONAL
     if kind in _TO_FF or kind in _TO_DD or kind == "ff-to-dd":
         return PATH_REGIONAL
     if kind in _PLAIN:
@@ -112,11 +120,15 @@ def generate(intent: RemediationIntent, deps: PatchDeps, attempt: int,
 
 def _gen_regional(intent: RemediationIntent, deps: PatchDeps, attempt: int) -> Gen:
     to = intent.kind.split("-to-")[-1]
-    scalar = "ffloat" if to == "ff" else "ddouble"
-    which = "ff" if to == "ff" else "dd"
-    # Caller precision to demote region writes back to on exit.  Only float-to-ff
-    # promotes from float; every other regional transition promotes from double
-    # (ff-to-dd is reverted to double first, below, before the dd install).
+    # Target scalar tag + integrator key.  ``float`` (Wave 2) is a native demotion
+    # target routed here only when Strategy tagged the intent ``via="regional"``
+    # (a template-typed region — dispatch_path made that call); ff/dd are the
+    # extended promotion/demotion targets.
+    scalar = {"ff": "ffloat", "dd": "ddouble"}.get(to, "float")
+    which = {"ff": "ff", "dd": "dd"}.get(to, "float")
+    # Caller precision to demote/widen region writes back to on exit.  Only
+    # float-to-ff promotes from float; every other regional transition converts
+    # against double (ff-to-dd / ff-to-float revert to double first, below).
     caller_type = "float" if intent.kind == "float-to-ff" else "double"
     integrator = deps.integrators.get(which)
     if integrator is None:
@@ -134,8 +146,10 @@ def _gen_regional(intent: RemediationIntent, deps: PatchDeps, attempt: int) -> G
     except (AttributeError, ValueError):
         rel_file = intent.target.file
 
-    # composite ff-to-dd: strip the prior ff install first, then install dd.
-    if intent.kind == "ff-to-dd":
+    # composite ff-to-dd / ff-to-float (regional): strip the prior ff install
+    # first (back to the clean double baseline), then generate the dd / float shim
+    # against that clean region.
+    if intent.kind in ("ff-to-dd", "ff-to-float"):
         rv = _do_revert(intent, deps, "-to-ff")
         if not rv.ok:
             return rv

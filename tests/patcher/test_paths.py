@@ -42,6 +42,69 @@ def test_regional_dd_uses_dd_integrator(repo, make_ctx):
     assert resp["artifacts"]["shim_paths"] and "region_dd.h" in resp["artifacts"]["shim_paths"][0]
 
 
+# -- 1b. Wave-2: template-typed float demotion routes to the float integrator ---
+
+def test_regional_double_to_float_via_regional_uses_float_integrator(repo, make_ctx):
+    # A template-typed region: Strategy tags `double-to-float` via="regional", so
+    # the Patcher must route it to the FLOAT integrator (a regional shim), NOT the
+    # plain-edit path.  Post-Wave-1 this kind went to plain-edit and died
+    # patch_inapplicable on template code; now it generates a float shim.
+    root, start = repo
+    fn = make_patcher_fn(gate_fn=ok_gate,
+                         integrators={"float": make_shim_integrator(root, shim_name="region_float.h")})
+    resp = fn(intent("double-to-float", flavor="speedup", via="regional"),
+              make_ctx(root, start))
+    assert resp["status"] == R.OK
+    assert _blob_exists(root, resp["candidate_sha"], "region_float.h")
+    assert "float" in resp["artifacts"]["shim_paths"][0]
+
+
+def test_regional_double_to_float_passes_float_scalar_to_integrator(repo, make_ctx):
+    # The integrator is invoked with scalar_type="float" (not ffloat/ddouble).
+    root, start = repo
+    seen = {}
+
+    def _integ(**kw):
+        seen.update(kw)
+        shim = Path(root) / "region_float.h"
+        shim.write_text(f"// {kw['scalar_type']} shim\n")
+        return __import__("agents.integrator_base.region", fromlist=["RegionIntegrationResult"]) \
+            .RegionIntegrationResult(status="ok", shim_paths=[str(shim)],
+                                     boundary_patch=None, llm_tokens=7)
+
+    fn = make_patcher_fn(gate_fn=ok_gate, integrators={"float": _integ})
+    resp = fn(intent("double-to-float", flavor="speedup", via="regional"),
+              make_ctx(root, start))
+    assert resp["status"] == R.OK
+    assert seen["scalar_type"] == "float"
+    assert seen["caller_type"] == "double"
+
+
+def test_double_to_float_plain_still_uses_plain_edit(repo, make_ctx):
+    # Control: without via="regional" (a non-templated region), `double-to-float`
+    # keeps the historical plain-type-edit path — Wave 2 must not regress it.
+    root, start = repo
+    fn = make_patcher_fn(gate_fn=ok_gate)   # no float integrator wired
+    resp = fn(intent("double-to-float", line_start=4, line_end=6, flavor="speedup",
+                     variables=["result"]),
+              make_ctx(root, start))
+    assert resp["status"] == R.OK
+    committed = git(root, "show", f"{resp['candidate_sha']}:region.h").stdout
+    assert "inline float compute(float a, float b)" in committed
+
+
+def test_dispatch_path_routing_for_float():
+    # Unit-level: the routing table distinguishes plain vs regional float.
+    from agents.patcher import dispatch
+    assert dispatch.dispatch_path("double-to-float", "regional") == dispatch.PATH_REGIONAL
+    assert dispatch.dispatch_path("ff-to-float", "regional") == dispatch.PATH_REGIONAL
+    assert dispatch.dispatch_path("double-to-float", "plain") == dispatch.PATH_PLAIN_EDIT
+    assert dispatch.dispatch_path("ff-to-float", "plain") == dispatch.PATH_REVERT
+    # non-float kinds ignore `via`
+    assert dispatch.dispatch_path("double-to-ff", "regional") == dispatch.PATH_REGIONAL
+    assert dispatch.dispatch_path("double-to-dd", "plain") == dispatch.PATH_REGIONAL
+
+
 # -- 2. plain-type-edit -----------------------------------------------------
 
 def test_plain_edit_double_to_float(repo, make_ctx):

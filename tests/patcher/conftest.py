@@ -63,7 +63,8 @@ def make_ctx(tmp_path):
 
 def intent(kind, *, file="region.h", line_start=4, line_end=6,
            variables=("result",), flavor="correctness",
-           current_precision="double", identity=None, rationale_id="iter_1"):
+           current_precision="double", identity=None, rationale_id="iter_1",
+           via=None):
     payload = {
         "target": {"file": file, "line_start": line_start, "line_end": line_end,
                    "variables": list(variables)},
@@ -72,6 +73,8 @@ def intent(kind, *, file="region.h", line_start=4, line_end=6,
     }
     if identity is not None:
         payload["identity"] = identity
+    if via is not None:
+        payload["via"] = via
     return payload
 
 

@@ -134,11 +134,25 @@ class RegionTarget:
         return f"{self.file}:{self.line_start}-{self.line_end}"
 
 
+# How the Patcher should realize a ``-to-float`` demotion (P3 Wave-2 amendment).
+#   "plain"    — plain-type-edit / git-revert path (a bare ``double`` token exists
+#                to rewrite; the historical rung, kept for non-templated regions).
+#   "regional" — the LLM/regional float integrator (a template-typed region has no
+#                bare ``double`` token, so float is only reachable by generating a
+#                ``float``-specialized shim, exactly as ff/dd are generated).
+# For every non-``-to-float`` kind ``via`` is inert (those kinds have a single
+# dispatch path); it defaults to "plain".
+VIA_PLAIN = "plain"
+VIA_REGIONAL = "regional"
+
+
 @dataclass
 class RemediationIntent:
     """What Strategy emits to Patcher (P1 + P3 amendment).
 
     ``identity`` is populated only for ``kind == "reformulate-identity"``.
+    ``via`` selects how a ``-to-float`` demotion is realized (plain edit vs the
+    regional float integrator) — see :data:`VIA_PLAIN` / :data:`VIA_REGIONAL`.
     """
 
     target: RegionTarget
@@ -147,6 +161,7 @@ class RemediationIntent:
     current_precision: str
     rationale_id: str
     identity: str | None = None
+    via: str = VIA_PLAIN
 
     def __post_init__(self) -> None:
         if self.kind not in ALL_KINDS:
@@ -157,6 +172,8 @@ class RemediationIntent:
             raise ValueError("reformulate-identity requires an `identity`")
         if self.kind != "reformulate-identity" and self.identity is not None:
             raise ValueError(f"identity only valid for reformulate-identity, got {self.kind!r}")
+        if self.via not in (VIA_PLAIN, VIA_REGIONAL):
+            raise ValueError(f"unknown via {self.via!r}")
 
     def to_patcher(self) -> dict:
         """The wire form handed to the Patcher callable (P1 shape)."""
@@ -166,6 +183,7 @@ class RemediationIntent:
             "intent": self.intent,
             "current_precision": self.current_precision,
             "rationale_id": self.rationale_id,
+            "via": self.via,
         }
         if self.identity is not None:
             payload["identity"] = self.identity

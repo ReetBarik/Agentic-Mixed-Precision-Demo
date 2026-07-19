@@ -39,6 +39,7 @@ from agents.strategy.characterization import RegionRecord
 from agents.strategy.models import (
     IDENTITY_CATALOG, INTENT_CORRECTNESS, INTENT_SPEEDUP, LADDER,
     SIGNAL_CANCELLATION_CASCADE, SIGNAL_LOCAL_CANCELLATION,
+    VIA_PLAIN, VIA_REGIONAL,
     RemediationIntent, TRANSITION_KINDS, next_down,
 )
 
@@ -74,9 +75,11 @@ def _rewrites_for(signal_class: str) -> list[tuple[str, str | None]]:
 class RetryWalk:
     def __init__(self, record: RegionRecord, mode: str, tolerance: float,
                  baseline: str = "double", floor: str | None = None,
-                 float_demote_ok: bool = True):
+                 float_via: str = VIA_PLAIN):
         if mode not in (INTENT_CORRECTNESS, INTENT_SPEEDUP):
             raise ValueError(f"unknown walk mode {mode!r}")
+        if float_via not in (VIA_PLAIN, VIA_REGIONAL):
+            raise ValueError(f"unknown float_via {float_via!r}")
         self.record = record
         self.mode = mode
         self.tolerance = tolerance
@@ -86,12 +89,23 @@ class RetryWalk:
         # region may be demoted to, because a promoted cascade chain still claims
         # one of its lines at that precision.  None → no floor (down to float).
         self.floor = floor
-        # False → the plain-edit ``-to-float`` rung is inapplicable to this region
-        # (template-typed: no bare ``double`` token to rewrite).  The speedup walk
-        # settles at the current rung instead of proposing a doomed float demotion
-        # (CALIBRATION.md §Bug 4).  Correctness walks never target float, so this is
-        # a no-op there.
-        self.float_demote_ok = float_demote_ok
+        # How the speedup walk realizes a ``float`` demotion (Wave 2):
+        #   VIA_PLAIN    — non-templated region: a bare ``double`` token exists, so
+        #                  the single-step ladder (double→ff→float) reaches float via
+        #                  the Patcher's plain-edit ``ff-to-float`` rung (historical).
+        #   VIA_REGIONAL — template-typed region (no bare ``double`` token): float is
+        #                  reachable ONLY by generating a float-specialized shim, so
+        #                  the walk tries ``double-to-float`` DIRECTLY (cheapest rung
+        #                  first) and falls back to ``double-to-ff`` — both tagged
+        #                  ``via="regional"`` so the Patcher routes to the float / ff
+        #                  integrators.  Replaces the Wave-1 "settle, skip float"
+        #                  gate (CALIBRATION.md §Bug 4).
+        # Correctness walks never target float, so this is inert there.
+        self.float_via = float_via
+        # Regional speedup plan: demotion targets below ``double`` in cost order
+        # (cheapest first); the first that the Validator accepts wins.
+        self._regional_plan: list[str] = ["float", "ff"]
+        self._regional_i = 0
 
         # correctness: higher rungs reachable from baseline via a supported kind
         base_i = LADDER.index(baseline)
@@ -150,15 +164,16 @@ class RetryWalk:
         return None
 
     def _propose_speedup(self, rationale_id: str) -> RemediationIntent | None:
+        if self.float_via == VIA_REGIONAL:
+            return self._propose_speedup_regional(rationale_id)
+        return self._propose_speedup_plain(rationale_id)
+
+    def _propose_speedup_plain(self, rationale_id: str) -> RemediationIntent | None:
+        """Non-templated region: single-step cost ladder (double→ff→float), float
+        reached via the Patcher's plain-edit ``-to-float`` rung (the historical
+        path — kept unchanged for regions that carry a bare ``double`` token)."""
         target_level = next_down(self.installed)
         if target_level is None or f"{self.installed}-to-{target_level}" not in TRANSITION_KINDS:
-            self._result = WalkResult(status="settled", final_precision=self.installed)
-            return None
-        # Skip the plain-edit `-to-float` rung for template-typed regions: there is
-        # no bare `double` token to rewrite, so the demotion can only fail
-        # (patch_inapplicable).  Settle at the current rung instead of wasting the
-        # iteration (CALIBRATION.md §Bug 4).
-        if target_level == "float" and not self.float_demote_ok:
             self._result = WalkResult(status="settled", final_precision=self.installed)
             return None
         # required_by floor: never demote a line below the precision a promoted
@@ -172,7 +187,35 @@ class RetryWalk:
         return RemediationIntent(
             target=self.record.target, kind=f"{self.installed}-to-{target_level}",
             intent=INTENT_SPEEDUP, current_precision=self.installed,
-            rationale_id=rationale_id)
+            rationale_id=rationale_id, via=VIA_PLAIN)
+
+    def _propose_speedup_regional(self, rationale_id: str) -> RemediationIntent | None:
+        """Template-typed region (Wave 2): try the demotion targets below the
+        baseline cheapest-first (``float`` then ``ff``) via the LLM/regional
+        integrators.  The first the Validator accepts wins (cheapest passing
+        precision); on reject, advance to the next (more expensive) target.
+
+        This is what makes ``double->float`` reachable on template code — it is
+        proposed DIRECTLY (a skip transition), not gated off as in Wave 1 — while
+        the ``double->ff`` fallback preserves the demotions Wave 1 already won.
+        """
+        while self._regional_i < len(self._regional_plan):
+            target_level = self._regional_plan[self._regional_i]
+            kind = f"{self.baseline}-to-{target_level}"
+            # respect the cascade-chain floor and the kind vocabulary
+            if (kind not in TRANSITION_KINDS or
+                    (self.floor is not None
+                     and _ladder_index(target_level) < _ladder_index(self.floor))):
+                self._regional_i += 1
+                continue
+            self._pending_is_dd = False
+            self._pending_is_rewrite = False
+            return RemediationIntent(
+                target=self.record.target, kind=kind, intent=INTENT_SPEEDUP,
+                current_precision=self.baseline, rationale_id=rationale_id,
+                via=VIA_REGIONAL)
+        self._result = WalkResult(status="settled", final_precision=self.installed)
+        return None
 
     # -- resolution -------------------------------------------------------
     def resolve(self, accepted: bool, genuine_reject: bool = False) -> None:
@@ -242,6 +285,16 @@ class RetryWalk:
                 attempted_rewrites=list(self.attempted_rewrites))
 
     def _resolve_speedup(self, intent: RemediationIntent, accepted: bool) -> None:
+        if self.float_via == VIA_REGIONAL:
+            # Cheapest-first search: the first accepted target is the cheapest
+            # passing precision → install it and stop.  A reject advances to the
+            # next (more expensive) candidate in the plan.
+            if accepted:
+                self.installed = intent.kind.split("-to-")[-1]
+                self._result = WalkResult(status="settled", final_precision=self.installed)
+            else:
+                self._regional_i += 1
+            return
         if accepted:
             self.installed = intent.kind.split("-to-")[-1]
             # continue: next propose() tries the next cheaper rung
