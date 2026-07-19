@@ -9,8 +9,20 @@ def test_all_statuses_present():
     assert set(DISPATCH) == {
         "ok", "build_failed", "runtime_nan", "runtime_crashed",
         "llm_gen_failed", "patch_apply_failed", "timeout", "commit_failed",
-        "empty_candidate",
+        "empty_candidate", "patch_inapplicable",
     }
+
+
+def test_patch_inapplicable_is_benign_advance():
+    # A `-to-float` rung inapplicable to template code: advance the walk, but do
+    # NOT tag it a strategy_bug, count it vs budget, or (see agent) bump the DR
+    # streak.  It is not a signal about the intent — the transition just doesn't
+    # apply to this region.
+    e = dispatch("patch_inapplicable")
+    assert e.action == "advance"
+    assert e.log_tag == "patch_inapplicable"
+    assert e.counts_budget is False
+    assert e.is_reject is False
 
 
 def test_empty_candidate_advances_non_fatal():
@@ -64,7 +76,7 @@ def test_non_ok_statuses_flag_dd_untested():
     # P6a: any Patcher failure at the DD rung means DD was never honestly tested.
     for status in ["build_failed", "runtime_nan", "runtime_crashed",
                    "llm_gen_failed", "patch_apply_failed", "timeout",
-                   "empty_candidate"]:
+                   "empty_candidate", "patch_inapplicable"]:
         assert dispatch(status).dd_untested is True
     assert dispatch("ok").dd_untested is False
 

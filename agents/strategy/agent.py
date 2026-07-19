@@ -35,6 +35,7 @@ from agents.strategy.iteration_log import IterationLogger
 from agents.strategy.models import INTENT_CORRECTNESS, INTENT_SPEEDUP, LADDER
 from agents.strategy.ranking import build_queues, error_threshold
 from agents.strategy.report import write_reports
+from agents.strategy.source_probe import region_has_bare_double
 from agents.strategy.walk import RetryWalk
 
 _REPO = Path(__file__).resolve().parents[2]
@@ -116,6 +117,7 @@ class StrategyRun:
         self.line_floor_idx: dict[tuple, int] = {}
         self.line_rationale: dict[tuple, str] = {}
         self._retain_rationale: str | None = None   # set per walk iteration on retain
+        self._source_cache: dict = {}   # resolved-path -> file lines (float-rung probe)
 
     # ------------------------------------------------------------------
     def execute(self) -> dict:
@@ -146,10 +148,7 @@ class StrategyRun:
             if self._phase_over():
                 break
             self._process_target(record, INTENT_CORRECTNESS)
-        for chain in chain_q:
-            if self._phase_over():
-                break
-            self._process_chain(chain)
+        self._process_chains(chain_q)
 
         # == Phase 2 — speedup walk on the phase-1 accepted state ==============
         # Only a HARD stop (global ceiling / fatal) skips phase 2; a phase-1 cap
@@ -204,7 +203,16 @@ class StrategyRun:
     def _process_target(self, record, mode: str) -> None:
         """Drive one region target's retry walk to termination."""
         floor = self._floor_for(record.key) if mode == INTENT_SPEEDUP else None
-        walk = RetryWalk(record, mode, self.tolerance, baseline="double", floor=floor)
+        float_ok = True
+        if mode == INTENT_SPEEDUP:
+            # Gate the plain-edit float rung on whether the region even has a bare
+            # `double` token to rewrite (template-typed regions do not).
+            float_ok = region_has_bare_double(
+                self.repo_path, record.target.file,
+                record.target.line_start, record.target.line_end,
+                cache=self._source_cache)
+        walk = RetryWalk(record, mode, self.tolerance, baseline="double",
+                         floor=floor, float_demote_ok=float_ok)
         stopped, walk_digits = self._drive_walk(walk, record, chain=None)
         if stopped:
             self.region_final[record.key] = walk.installed
@@ -212,15 +220,89 @@ class StrategyRun:
             return
         self._finish_walk(record, walk.result(), walk_digits)
 
-    def _process_chain(self, chain) -> None:
+    def _process_chains(self, chain_q) -> None:
+        """Drive the cascade-chain correctness phase with representative dedup.
+
+        The walk drives on a chain's *representative* line (``lines[0]``); with
+        many chains at scale sharing representatives, walking each chain
+        independently re-drives the same line dozens of times — wasting budget and
+        tripping diminishing-returns before speedup (CALIBRATION.md §Bug 2).  So:
+
+        * **group** chains by representative line and walk each group **once**
+          (the highest-ranked chain drives; its result is distributed to the rest);
+        * **skip** a group whose representative is already at/above the target
+          precision (``dd``) — no walk enqueued.
+
+        Every chain (driver, dedup-sibling, or already-at-target) still flows
+        through the required_by ledger and gets a ``region_status`` so accounting /
+        telemetry account for all of them; only the driver spends walk iterations.
+        """
+        dd_idx = LADDER.index("dd")
+        groups: dict[tuple, list] = {}
+        order: list[tuple] = []
+        for chain in chain_q:
+            rep_key = chain.lines[0].key
+            if rep_key not in groups:
+                groups[rep_key] = []
+                order.append(rep_key)
+            groups[rep_key].append(chain)
+
+        for rep_key in order:
+            if self._phase_over():
+                break
+            group = groups[rep_key]
+            # Fix (a): representative already at/above the target — no walk fires.
+            if self._line_precision_idx(rep_key) >= dd_idx:
+                precision = LADDER[self._line_precision_idx(rep_key)]
+                rationale = self.line_rationale.get(rep_key, "")
+                for chain in group:
+                    self._skip_chain_dedup(chain, precision, rationale)
+                continue
+            # Fix (b): walk the driver once, distribute its result to the siblings.
+            driver = group[0]
+            res = self._process_chain(driver)
+            if res is None:                     # walk interrupted by a stop
+                break
+            for chain in group[1:]:
+                self._skip_chain_dedup(chain, res.final_precision,
+                                       self._retain_rationale or "")
+
+    def _process_chain(self, chain):
         """Drive one cascade chain's correctness walk; distribute the promoted
-        precision across every line in the chain via the required_by ledger."""
+        precision across every line in the chain via the required_by ledger.
+
+        Returns the terminal :class:`WalkResult` (used to distribute precision to
+        dedup-siblings sharing the representative line), or ``None`` if a budget /
+        DR stop interrupted the walk mid-flight.
+        """
         record = chain.walk_record()
         walk = RetryWalk(record, INTENT_CORRECTNESS, self.tolerance, baseline="double")
         stopped, walk_digits = self._drive_walk(walk, record, chain=chain)
         if stopped:
-            return
-        self._finish_chain(chain, walk.result(), walk_digits)
+            return None
+        res = walk.result()
+        self._finish_chain(chain, res, walk_digits)
+        return res
+
+    def _line_precision_idx(self, key: tuple) -> int:
+        """Ladder index of the highest precision already assigned to ``key`` —
+        max of its baseline/final precision and any cascade-chain floor."""
+        idx = self.line_floor_idx.get(key, -1)
+        prec = self.region_final.get(key)
+        if prec is not None:
+            idx = max(idx, LADDER.index(prec))
+        return idx
+
+    def _skip_chain_dedup(self, chain, precision: str, rationale: str) -> None:
+        """Record a chain whose representative was walked (or already resolved) by
+        another chain: distribute the determined precision across this chain's own
+        lines (so its unique tail lines still get floored and it appears in every
+        line's ``required_by``), then mark it ``chain_dedup_skipped`` — it drove no
+        independent walk iteration."""
+        if LADDER.index(precision) > LADDER.index("double"):
+            for line in chain.lines:
+                self._require_line(line.key, chain.chain_id, precision, rationale)
+        self.region_status[chain.chain_id] = "chain_dedup_skipped"
 
     def _drive_walk(self, walk, record, chain) -> tuple[bool, float | None]:
         """Run a walk to termination (or until a stop fires).
@@ -258,7 +340,7 @@ class StrategyRun:
             validator_verdict = None
             verdict_digits = None
             if patcher_ok:
-                verdict = self._invoke_validator(resp.get("candidate_sha"), iter_id)
+                verdict = self._invoke_validator(resp, iter_id)
                 validator_verdict = verdict.get("verdict")
                 verdict_digits = (verdict.get("candidate") or {}).get("min_precise_digits")
                 if verdict_digits is not None:
@@ -301,7 +383,7 @@ class StrategyRun:
             self.tokens += int(resp.get("llm_tokens", 0) or 0)
             if accepted:
                 self.dr_streak = 0
-            elif entry.log_tag != "strategy_bug":
+            elif entry.log_tag not in ("strategy_bug", "patch_inapplicable"):
                 self.dr_streak += 1
 
             # ---- advance the walk state machine ----
@@ -327,12 +409,17 @@ class StrategyRun:
                         "error": {"kind": "timeout", "detail": "second timeout folded to build_failed"}}
         return resp
 
-    def _invoke_validator(self, candidate_sha, iter_id: int) -> dict:
+    def _invoke_validator(self, resp: dict, iter_id: int) -> dict:
+        artifacts = resp.get("artifacts") or {}
         ctx = {"run_id": self.run_id, "branch": self.branch,
                "repo_path": str(self.repo_path) if self.repo_path else None,
                "tolerance": self.tolerance, "snapshot": self.snapshot,
-               "iter_id": iter_id}
-        return self.validator_fn(candidate_sha, ctx)
+               "iter_id": iter_id,
+               # Build-fuse: hand the gate binary + tree hash to the Validator so it
+               # reuses the just-built candidate binary instead of rebuilding it.
+               "gate_binary": artifacts.get("gate_binary"),
+               "gate_tree_hash": artifacts.get("gate_tree_hash")}
+        return self.validator_fn(resp.get("candidate_sha"), ctx)
 
     def _patcher_ctx(self, iter_id: int) -> dict:
         return {"run_id": self.run_id, "branch": self.branch,
@@ -527,7 +614,9 @@ class StrategyRun:
         n_ceiling = sum(1 for c in self.ceiling_regions if c["ceiling_kind"] == "dd_ceiling")
         n_untested = sum(1 for c in self.ceiling_regions if c["ceiling_kind"] == "dd_untested")
         n_unresolved = sum(1 for s in self.region_status.values() if s == "unresolved")
-        n_threshold = len(self.region_status) - n_ceiling - n_untested - n_unresolved
+        n_dedup = sum(1 for s in self.region_status.values() if s == "chain_dedup_skipped")
+        n_threshold = (len(self.region_status) - n_ceiling - n_untested
+                       - n_unresolved - n_dedup)
 
         report = {
             "status": status,
@@ -559,6 +648,7 @@ class StrategyRun:
                 "regions_at_dd_ceiling": n_ceiling,
                 "regions_dd_untested": n_untested,
                 "regions_unresolved": n_unresolved,
+                "regions_chain_dedup_skipped": n_dedup,
                 "ceiling_regions": self.ceiling_regions,
             },
             "precision_distribution": dist,

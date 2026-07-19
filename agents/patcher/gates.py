@@ -26,6 +26,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from agents.build_run.agent import _module_settings
+from agents.integrator_base.cache import hash_header_dir
 from agents.patcher import result as R
 
 _REPO = Path(__file__).resolve().parents[2]
@@ -46,6 +47,11 @@ class GateResult:
     detail: str | None = None
     build_log_path: Path | None = None
     runtime_log_path: Path | None = None
+    # Build-fuse (CALIBRATION.md §Bug 5): on OK the gate binary + a content hash of
+    # the header tree it was built against, so the Validator can reuse this binary
+    # for its candidate run instead of rebuilding the same monolithic TU.
+    binary_path: Path | None = None
+    tree_hash: str | None = None
 
     @property
     def ok(self) -> bool:
@@ -116,7 +122,14 @@ def run_gate(headers_dir: Path, build_dir: Path, logs_dir: Path, iter_id,
                           build_log, runtime_log)
 
     runtime_log.write_text(f"$ {smoke_cmd}\n{run.stdout}\n---stderr---\n{run.stderr}\n")
-    return _scan_smoke(run, expected_rows, build_log, runtime_log)
+    result = _scan_smoke(run, expected_rows, build_log, runtime_log)
+    if result.ok:
+        # Publish the binary + the hash of the tree it was built against so the
+        # Validator can reuse it (the candidate tree it would build is byte-identical
+        # to this one — same header set + shims — so its hash_header_dir matches).
+        result.binary_path = binary
+        result.tree_hash = hash_header_dir(headers_dir)
+    return result
 
 
 def _scan_smoke(run: subprocess.CompletedProcess, expected_rows: int,

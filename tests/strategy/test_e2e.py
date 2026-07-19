@@ -32,7 +32,12 @@ def repo(tmp_path):
     root = tmp_path / "tree"
     (root / "headers").mkdir(parents=True)
     for name in ("A.h", "B.h", "C.h"):
-        (root / "headers" / name).write_text("\n".join(f"line {i}" for i in range(1, 11)) + "\n")
+        # Region line 5 carries a bare `double` keyword token so the plain-edit
+        # `-to-float` speedup rung is applicable (WI3a gates it only for
+        # template-typed regions with no literal `double` to rewrite).
+        body = [f"line {i}" for i in range(1, 11)]
+        body[4] = "    double v = a - b;   // line 5 region"
+        (root / "headers" / name).write_text("\n".join(body) + "\n")
     _git(root, "init", "-q")
     _git(root, "config", "user.email", "t@t.t")
     _git(root, "config", "user.name", "t")

@@ -75,7 +75,9 @@ _CACHE_DIR = _VALIDATOR_ROOT / "cache"
 def validate(base_state: dict, candidate_patch: str | None, tolerance: float = 8.0,
              snapshot: dict | None = None, *, max_regression: float = 0.5,
              chunk: int = 0, workers: int = 1,
-             run_id: str | None = None, persist: bool = True) -> dict:
+             run_id: str | None = None, persist: bool = True,
+             reuse_binary: str | None = None,
+             reuse_tree_hash: str | None = None) -> dict:
     """Precision-loss acceptance test for one ``candidate_patch``.
 
     Returns the verdict object (see module docstring / the task contract).
@@ -141,7 +143,8 @@ def validate(base_state: dict, candidate_patch: str | None, tolerance: float = 8
     with tempfile.TemporaryDirectory(prefix="qcdloop_cand_") as scratch:
         candidate_coeffs = _run_vanilla(
             vanilla_headers, accepted, candidate_patch, kokkos_root,
-            Path(scratch), total, chunk, workers)
+            Path(scratch), total, chunk, workers,
+            reuse_binary=reuse_binary, reuse_tree_hash=reuse_tree_hash)
 
     # ---- 4. precise-digits vs DD, min + hotspot, persist ----
     if run_id is None:
@@ -295,15 +298,30 @@ def _score(cand: runner.CoeffArrays, ref: runner.CoeffArrays, label: str,
 
 def _run_vanilla(vanilla_headers: Path, accepted: list, candidate_patch: str | None,
                  kokkos_root: Path, scratch: Path, total: int, chunk: int,
-                 workers: int) -> runner.CoeffArrays:
-    """Copy the working tree, apply patches, build+run the vanilla driver."""
+                 workers: int, *, reuse_binary: str | None = None,
+                 reuse_tree_hash: str | None = None) -> runner.CoeffArrays:
+    """Copy the working tree, apply patches, build+run the vanilla driver.
+
+    Build-fuse (CALIBRATION.md §Bug 5): when ``reuse_binary`` is given and
+    ``reuse_tree_hash`` matches the content hash of the (patched) candidate tree,
+    reuse that binary — the Patcher already built this exact translation unit at its
+    gate, so a second cmake build of the byte-identical tree is redundant.  Falls
+    back to a fresh build on any mismatch (defensive; a hash mismatch should never
+    happen in normal flow but guards against a race / stale artifact).
+    """
     tree = scratch / "tree"
     shutil.copytree(vanilla_headers, tree)
     for patch in accepted:
         _git_apply(tree, patch)
     if candidate_patch:
         _git_apply(tree, candidate_patch)
-    binary = runner.build_driver(tree, "vanilla", scratch / "build", kokkos_root)
+
+    if (reuse_binary and reuse_tree_hash
+            and Path(reuse_binary).is_file()
+            and _hashcache.hash_header_dir(tree) == reuse_tree_hash):
+        binary = Path(reuse_binary)
+    else:
+        binary = runner.build_driver(tree, "vanilla", scratch / "build", kokkos_root)
     return runner.run_and_aggregate(binary, total, chunk=chunk, workers=workers)
 
 

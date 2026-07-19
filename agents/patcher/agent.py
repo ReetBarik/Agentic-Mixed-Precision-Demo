@@ -204,6 +204,8 @@ class _Patcher:
                     boundary_patch_path=gen.boundary_patch_path,
                     build_log_path=gate.build_log_path,
                     runtime_log_path=gate.runtime_log_path,
+                    gate_binary=gate.binary_path,
+                    gate_tree_hash=gate.tree_hash,
                     llm_tokens=gen.llm_tokens)
 
 

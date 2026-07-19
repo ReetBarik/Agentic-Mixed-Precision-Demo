@@ -192,7 +192,10 @@ def _gen_plain_edit(intent: RemediationIntent, deps: PatchDeps) -> Gen:
         edits.rewrite_types(deps.target_path, intent.target.line_start,
                             intent.target.line_end, src, dst)
     except edits.EditError as exc:
-        return Gen(False, R.PATCH_APPLY_FAILED, R.ERR_APPLY, str(exc))
+        # No bare `src` keyword token on the region line → the region is
+        # template-typed, so this plain-edit rung is *inapplicable*, not a
+        # malformed intent (benign; Strategy advances the walk).
+        return Gen(False, R.PATCH_INAPPLICABLE, R.ERR_APPLY, str(exc))
     return Gen(True)
 
 
@@ -206,12 +209,14 @@ def _gen_revert(intent: RemediationIntent, deps: PatchDeps) -> Gen:
     if not rv.ok:
         return rv
     if intent.kind == "ff-to-float":
-        # composite: after stripping ff (back to double), demote double → float
+        # composite: after stripping ff (back to double), demote double → float.
+        # A template-typed region has no bare `double` token to rewrite → the
+        # float rung is inapplicable (benign), not a strategy_bug.
         try:
             edits.rewrite_types(deps.target_path, intent.target.line_start,
                                 intent.target.line_end, "double", "float")
         except edits.EditError as exc:
-            return Gen(False, R.PATCH_APPLY_FAILED, R.ERR_APPLY, str(exc))
+            return Gen(False, R.PATCH_INAPPLICABLE, R.ERR_APPLY, str(exc))
     return Gen(True)
 
 

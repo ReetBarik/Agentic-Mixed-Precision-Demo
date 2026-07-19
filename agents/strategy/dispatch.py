@@ -71,6 +71,13 @@ DISPATCH: dict[str, DispatchEntry] = {
     "empty_candidate": DispatchEntry(
         action="advance", log_tag="empty_candidate", counts_budget=True,
         is_reject=True, dd_untested=True),
+    # A plain-edit `-to-float` rung inapplicable to a template-typed region (no bare
+    # `double` token to rewrite).  Benign — NOT a strategy_bug: advance the walk
+    # (speedup settles at the current rung).  Doesn't count vs budget (git-only, no
+    # build) and doesn't bump the DR streak (it is not a physics/quality signal).
+    "patch_inapplicable": DispatchEntry(
+        action="advance", log_tag="patch_inapplicable", counts_budget=False,
+        is_reject=False, dd_untested=True),
 }
 
 

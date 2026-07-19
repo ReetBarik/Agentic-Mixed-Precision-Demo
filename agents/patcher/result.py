@@ -37,10 +37,19 @@ TIMEOUT = "timeout"
 # candidate is benign — the remediation produced no distinct change — so Strategy
 # advances the walk instead of aborting the run.
 EMPTY_CANDIDATE = "empty_candidate"
+# A plain-type-edit rung (``double-to-float`` / the ``ff-to-float`` composite tail)
+# that cannot apply because the region source carries no bare ``double`` token to
+# rewrite — the region is template-typed (``T``, not a literal ``double``), so the
+# transition is *inapplicable to this code*, not a malformed Strategy intent.
+# Distinct from PATCH_APPLY_FAILED (a genuine strategy_bug: bad intent / missing
+# revert commit): an inapplicable rung is benign — Strategy advances the walk
+# (settling at the current rung) instead of flagging a bug.
+PATCH_INAPPLICABLE = "patch_inapplicable"
 
 STATUSES = frozenset({
     OK, LLM_GEN_FAILED, PATCH_APPLY_FAILED, COMMIT_FAILED,
     BUILD_FAILED, RUNTIME_CRASHED, RUNTIME_NAN, TIMEOUT, EMPTY_CANDIDATE,
+    PATCH_INAPPLICABLE,
 })
 
 # error.kind vocabulary (design §P2).
@@ -56,7 +65,8 @@ ERR_EMPTY = "empty"
 
 
 def _artifacts(shim_paths=None, boundary_patch_path=None,
-               build_log_path=None, runtime_log_path=None) -> dict:
+               build_log_path=None, runtime_log_path=None,
+               gate_binary=None, gate_tree_hash=None) -> dict:
     def _s(p):
         return str(p) if p is not None else None
     return {
@@ -64,18 +74,25 @@ def _artifacts(shim_paths=None, boundary_patch_path=None,
         "boundary_patch_path": _s(boundary_patch_path),
         "build_log_path": _s(build_log_path),
         "runtime_log_path": _s(runtime_log_path),
+        # Build-fuse handoff: the gate's built binary + the content hash of the tree
+        # it was built against (CALIBRATION.md §Bug 5).  The Validator reuses the
+        # binary for its candidate run when this hash matches the tree it would
+        # build, halving the per-accept build cost.
+        "gate_binary": _s(gate_binary),
+        "gate_tree_hash": gate_tree_hash,
     }
 
 
 def ok(candidate_sha: str, parent_sha: str, *, shim_paths=None,
        boundary_patch_path=None, build_log_path=None, runtime_log_path=None,
-       llm_tokens: int = 0) -> dict:
+       gate_binary=None, gate_tree_hash=None, llm_tokens: int = 0) -> dict:
     return {
         "status": OK,
         "candidate_sha": candidate_sha,
         "parent_sha": parent_sha,
         "artifacts": _artifacts(shim_paths, boundary_patch_path,
-                                build_log_path, runtime_log_path),
+                                build_log_path, runtime_log_path,
+                                gate_binary, gate_tree_hash),
         "error": None,
         "llm_tokens": llm_tokens,
     }

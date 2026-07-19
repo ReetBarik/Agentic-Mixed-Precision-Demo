@@ -57,6 +57,22 @@ def test_plain_edit_double_to_float(repo, make_ctx):
     assert "float_traits" in committed          # identifier survived
 
 
+def test_plain_edit_no_bare_double_is_inapplicable(repo, make_ctx):
+    # Line 8 ("struct float_traits { int x; }") carries no bare `double` token, so
+    # the `double-to-float` plain edit cannot apply — this is a template-typed-style
+    # inapplicable rung, NOT a malformed intent, so the status is patch_inapplicable
+    # (benign), not the strategy_bug patch_apply_failed.
+    root, start = repo
+    fn = make_patcher_fn(gate_fn=ok_gate)
+    resp = fn(intent("double-to-float", line_start=8, line_end=8, flavor="speedup",
+                     variables=["x"]),
+              make_ctx(root, start))
+    assert resp["status"] == R.PATCH_INAPPLICABLE
+    assert "no bare `double`" in resp["error"]["detail"]
+    # nothing committed; the tree is reset back to the parent
+    assert _branch_commit_count(root, start) == "0"
+
+
 # -- 3. git-revert ----------------------------------------------------------
 
 def _install_ff(root):

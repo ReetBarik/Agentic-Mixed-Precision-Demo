@@ -160,6 +160,39 @@ def test_speedup_no_floor_demotes_to_float():
     assert walk.result().final_precision == "float"
 
 
+# ---- template-typed float rung gate (CALIBRATION.md §Bug 4) ----
+
+def test_speedup_template_region_skips_float_rung():
+    # float_demote_ok=False (no bare `double` token to rewrite): after the ff
+    # demotion the walk settles at ff WITHOUT ever proposing ff-to-float — no
+    # wasted iteration, no patch_inapplicable.
+    rec = make_region("B1", "f.h", 10, "stable", pred_float=1e-30)
+    walk = RetryWalk(rec, "speedup", tolerance=10.0, baseline="double",
+                     float_demote_ok=False)
+    proposed = []
+    intent = walk.propose("iter_0")
+    proposed.append(intent.kind)
+    walk.resolve(accepted=True)                 # double-to-ff accepts
+    assert walk.propose("iter_1") is None        # float rung gated → no proposal
+    res = walk.result()
+    assert proposed == ["double-to-ff"]
+    assert res.status == "settled" and res.final_precision == "ff"
+
+
+def test_speedup_non_template_region_still_reaches_float():
+    # Control: float_demote_ok=True (default) keeps the float rung for non-template
+    # code, so the same region walks down to float.
+    rec = make_region("B1", "f.h", 10, "stable", pred_float=1e-30)
+    walk = RetryWalk(rec, "speedup", tolerance=10.0, baseline="double",
+                     float_demote_ok=True)
+    kinds = []
+    while (intent := walk.propose("iter")) is not None:
+        kinds.append(intent.kind)
+        walk.resolve(accepted=True)
+    assert kinds == ["double-to-ff", "ff-to-float"]
+    assert walk.result().final_precision == "float"
+
+
 # ---- float-baseline edge (float-to-dd unsupported) ----
 
 def test_float_baseline_exhausts_without_dd():

@@ -49,7 +49,11 @@ def make_validator_fn(base_state: dict, starting_sha: str, repo_path: str,
         patch = _diff(repo_path, starting_sha, candidate_sha)
         snapshot = ctx.get("snapshot")
         tol = ctx.get("tolerance", tolerance)
-        return vfn(base_state, patch, tol, snapshot)
+        # Build-fuse: reuse the Patcher's gate binary for the candidate run when the
+        # tree it was built against matches the candidate tree (CALIBRATION.md §Bug 5).
+        return vfn(base_state, patch, tol, snapshot,
+                   reuse_binary=ctx.get("gate_binary"),
+                   reuse_tree_hash=ctx.get("gate_tree_hash"))
 
     return validator_fn
 

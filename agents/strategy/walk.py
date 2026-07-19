@@ -73,7 +73,8 @@ def _rewrites_for(signal_class: str) -> list[tuple[str, str | None]]:
 
 class RetryWalk:
     def __init__(self, record: RegionRecord, mode: str, tolerance: float,
-                 baseline: str = "double", floor: str | None = None):
+                 baseline: str = "double", floor: str | None = None,
+                 float_demote_ok: bool = True):
         if mode not in (INTENT_CORRECTNESS, INTENT_SPEEDUP):
             raise ValueError(f"unknown walk mode {mode!r}")
         self.record = record
@@ -85,6 +86,12 @@ class RetryWalk:
         # region may be demoted to, because a promoted cascade chain still claims
         # one of its lines at that precision.  None → no floor (down to float).
         self.floor = floor
+        # False → the plain-edit ``-to-float`` rung is inapplicable to this region
+        # (template-typed: no bare ``double`` token to rewrite).  The speedup walk
+        # settles at the current rung instead of proposing a doomed float demotion
+        # (CALIBRATION.md §Bug 4).  Correctness walks never target float, so this is
+        # a no-op there.
+        self.float_demote_ok = float_demote_ok
 
         # correctness: higher rungs reachable from baseline via a supported kind
         base_i = LADDER.index(baseline)
@@ -145,6 +152,13 @@ class RetryWalk:
     def _propose_speedup(self, rationale_id: str) -> RemediationIntent | None:
         target_level = next_down(self.installed)
         if target_level is None or f"{self.installed}-to-{target_level}" not in TRANSITION_KINDS:
+            self._result = WalkResult(status="settled", final_precision=self.installed)
+            return None
+        # Skip the plain-edit `-to-float` rung for template-typed regions: there is
+        # no bare `double` token to rewrite, so the demotion can only fail
+        # (patch_inapplicable).  Settle at the current rung instead of wasting the
+        # iteration (CALIBRATION.md §Bug 4).
+        if target_level == "float" and not self.float_demote_ok:
             self._result = WalkResult(status="settled", final_precision=self.installed)
             return None
         # required_by floor: never demote a line below the precision a promoted
