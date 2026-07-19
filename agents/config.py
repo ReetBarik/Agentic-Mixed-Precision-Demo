@@ -67,7 +67,11 @@ class StrategyConfig:
 
     tolerance: float = 10.0
     budget: StrategyBudget = field(default_factory=StrategyBudget)
-    diminishing_returns_k: int = 20
+    # 60 (was 20): the cascade-chain phase produces long non-accept streaks of
+    # llm_gen_failed which don't consume budget but DO bump the DR counter, so 20
+    # tripped `partial` before the correctness budget could bind even after the
+    # chain-representative dedup (see runs/qcdloop/CALIBRATION.md §50k recommendation).
+    diminishing_returns_k: int = 60
     recharacterize_after_n: int = 10**9      # effectively disabled (fixed-report-only)
     snapshot: dict = field(default_factory=lambda: {"seed": 12345, "sample_count": 100000})
     runs_root: Path | None = None
