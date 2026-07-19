@@ -13,10 +13,13 @@ def _report(tmp_path, integrals):
     return str(p)
 
 
-def _region(sig, cond=1.0, rel=1e-16, pf=1e-16, prov=("v",), ops=None):
-    return {"signal_class": sig, "max_cond": cond, "max_rel_err": rel,
-            "predicted_rel_err_if_float": pf, "prov_vars": list(prov),
-            "ops": ops or {"mul": 1}, "n": 100, "non_localizable": False}
+def _region(sig, cond=1.0, rel=1e-16, pf=1e-16, prov=("v",), ops=None, pff=None):
+    r = {"signal_class": sig, "max_cond": cond, "max_rel_err": rel,
+         "predicted_rel_err_if_float": pf, "prov_vars": list(prov),
+         "ops": ops or {"mul": 1}, "n": 100, "non_localizable": False}
+    if pff is not None:
+        r["predicted_rel_err_if_ff"] = pff
+    return r
 
 
 def test_non_localizable_skipped(tmp_path):
@@ -52,9 +55,31 @@ def test_merge_same_line_across_integrals(tmp_path):
     assert r.max_cond == 1e16                          # worst-case
     assert r.max_rel_err == 1e-3
     assert r.predicted_rel_err_if_float == 1e-2        # unsafe if unsafe anywhere
+    assert r.predicted_rel_err_if_ff == 1e-2           # ff falls back to float, worst-case
     assert r.integral == "B"                           # highest-cond representative
     assert set(r.integrals) == {"A", "B"}
     assert r.target.variables == ["a", "b"]            # union, order-preserving
+
+
+def test_predicted_ff_loaded_and_merged_worst_case(tmp_path):
+    # a report carrying a distinct ff signal: loaded verbatim, merged worst-case.
+    integrals = {
+        "A": {"regions": {"f.h:10": _region("stable", cond=10.0, pf=1e-8, pff=1e-13,
+                                            prov=("a",))}},
+        "B": {"regions": {"f.h:10": _region("stable", cond=20.0, pf=1e-7, pff=1e-11,
+                                            prov=("b",))}},
+    }
+    regs, _ = load_regions(_report(tmp_path, integrals))
+    r = regs[0]
+    assert r.predicted_rel_err_if_ff == 1e-11          # max across integrals
+    assert r.predicted_rel_err_if_float == 1e-7
+
+
+def test_predicted_ff_falls_back_to_float_when_absent(tmp_path):
+    # legacy report (report_1k/100k): no ff field → conservative float fallback.
+    integrals = {"A": {"regions": {"f.h:10": _region("stable", pf=3e-9)}}}
+    regs, _ = load_regions(_report(tmp_path, integrals))
+    assert regs[0].predicted_rel_err_if_ff == 3e-9
 
 
 def test_no_merge_keeps_per_integral(tmp_path):
@@ -95,6 +120,9 @@ def test_load_chains_builds_multiline_records(tmp_path):
     assert [ (t.file, t.line_start, t.line_end) for t in c.lines ] == [
         ("B2m.h", 355, 355), ("B0m.h", 230, 230)]
     assert c.op_count == 2
+    # ff falls back to the chain's float prediction and propagates to walk_record
+    assert c.predicted_rel_err_if_ff == 1e-2
+    assert c.walk_record().predicted_rel_err_if_ff == 1e-2
     # walk_record's representative target is the first chain line
     assert c.walk_record().target.location == "B2m.h:355"
 

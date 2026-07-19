@@ -65,9 +65,28 @@ def test_speedup_ranked_by_op_count_desc():
     assert [r.op_count for r in q] == [99, 20, 3]
 
 
-def test_speedup_only_when_float_safe():
-    unsafe = make_region("B1", "f.h", 1, "stable", pred_float=1e-7, op_count=50)  # float ~7 digits
+def test_speedup_excluded_when_not_even_ff_safe():
+    # pred_ff defaults to pred_float here (1e-7 > 1e-10 at tol=10): can't meet
+    # tolerance even in ff → not demotable at all → excluded.
+    unsafe = make_region("B1", "f.h", 1, "stable", pred_float=1e-7, op_count=50)
     assert build_speedup_queue([unsafe], TOL) == []
+
+
+def test_speedup_admits_ff_only_safe_region():
+    # float-unsafe (1e-7 > 1e-10) but ff-safe (1e-12 <= 1e-10): admitted for a
+    # double->ff demotion, which the strict float gate used to drop entirely.
+    ff_only = make_region("B1", "f.h", 1, "stable", pred_float=1e-7, pred_ff=1e-12,
+                          op_count=50)
+    q = build_speedup_queue([ff_only], TOL)
+    assert [r.target.location for r in q] == ["f.h:1"]
+
+
+def test_speedup_ff_gate_subsumes_float_at_low_tolerance():
+    # At tolerance 6 (thr 1e-6) a float-safe region is still admitted (ff <= float
+    # <= thr); the walk can demote it all the way to float.
+    float_safe = make_region("B1", "f.h", 1, "stable", pred_float=1e-8, pred_ff=1e-13,
+                             op_count=50)
+    assert len(build_speedup_queue([float_safe], 6.0)) == 1
 
 
 def test_speedup_excludes_correctness_regions():

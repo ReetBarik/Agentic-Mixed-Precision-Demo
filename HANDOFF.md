@@ -39,6 +39,74 @@ state when next run under the module+proxy env.
 includes with a license banner, idempotency). **Offline delta: 8 → 13** in that
 file (full `tests/integrator_base/` 45 → 50).
 
+## Task 2 — speedup gate: wire `predicted_rel_err_if_ff` into Strategy
+
+**RECONCILIATION — the task has the two fields backwards; read this first.** The
+task asked to *add* `predicted_rel_err_if_float` "peer to the existing
+`predicted_rel_err_if_ff`". In the actual tree it is the **other way round**:
+
+* `predicted_rel_err_if_float` (`U_FLOAT = 2**-24`, the textbook float unit
+  roundoff — kept, *not* changed to the task's approximate `2**-23`) has existed
+  since the first reducer commit (`bc4907f`), is emitted at every classify site
+  (region / variable / chain), **is already carried into Strategy's
+  `RegionRecord`, already gates `build_speedup_queue`, and already has reducer +
+  ranking test coverage.** The double→float speedup gate the task describes was
+  already live (fires at tolerance ≤ 6; excluded at 10 — correct).
+* `predicted_rel_err_if_ff` (`U_FF = 2**-46`) was added *later* (`0e7233b`,
+  2026-07-17, "unlock double→ff speedups at high tolerance") **in the reducer
+  only** — Strategy dropped it at the boundary (`RegionRecord` never carried it;
+  no gate referenced it). The HANDOFF for that change claims "Strategy's speedup
+  gate can now queue double→ff at tolerance 10" — but that half was **never
+  wired**. `grep predicted_rel_err_if_ff agents/strategy/` returned nothing.
+
+So the literal Task-2 deliverable was already done; the genuine gap was the
+**mirror image**. This commit wires the ff half — the change that actually makes
+the speedup queue non-empty on qcdloop (tol=10), which is also the precondition
+for Task 3's speedup phase to have anything to walk.
+
+**What changed:**
+- `characterization.py`: `RegionRecord` + `ChainRecord` now carry
+  `predicted_rel_err_if_ff`; `load_regions` / `load_chains` read it (helper
+  `_pred_ff`, **float-fallback** when absent — see below), the per-line merge
+  propagates it worst-case, and `ChainRecord.walk_record()` forwards it.
+- `ranking.build_speedup_queue`: admission now gates on
+  `predicted_rel_err_if_ff <= thr` instead of `predicted_rel_err_if_float`. ff is
+  the *loosest* cheaper-than-double rung (ff ~14 digits < float's ~7), so `pred_ff
+  <= thr` **subsumes** the old float gate — strictly more regions admitted, never
+  fewer. The walk + per-step Validator still decide how far down each region
+  actually settles (double→ff, or on to float when float-safe).
+
+**Float-fallback (why existing reports don't regress):** a report predating the
+ff signal (`report_1k` / `report_100k`) has no `predicted_rel_err_if_ff`; the
+loader falls back to that region's `predicted_rel_err_if_float` — a conservative
+*upper* bound (ff is never worse than float), so a stale report admits **no ff
+speedup it couldn't already make as a float speedup**. No silent new admissions
+from missing data; the true (tighter) ff value requires the backfill or a fresh
+run.
+
+**Backfill utility:** `agents/shared/backfill_ff_prediction.py` (+ CLI) rewrites
+`predicted_rel_err_if_ff` onto a frozen report without re-characterizing, derived
+from `U_FF * max_sensitivity` (exact) or `pred_float * (U_FF/U_FLOAT)` when
+sensitivity is absent. **Not run on the on-disk frozen reports** — they are
+untracked and enormous (`report_100k.json` is **13.7 GB**, `report_1k.json`
+247 MB; a whole-file `json.loads` is impractical). The float-fallback keeps them
+usable as-is; the **50k / next characterization run emits `predicted_rel_err_if_ff`
+natively**, so backfill is only for one-off use on a normal-sized frozen report.
+
+**Not done / flagged:** I did **not** change `U_FLOAT` to `2**-23` (the existing
+`2**-24` is the correct unit roundoff and is asserted exactly by reducer tests).
+I did **not** touch the reducer emission (both fields already emitted). If you
+*want* the strict float bar back for admission (only demote regions safe all the
+way to float), revert the one-line gate in `build_speedup_queue`; the ff field is
+still carried for reporting either way.
+
+**Tests:** `tests/strategy/` 56 → **60** (ff carry-through + worst-case merge +
+float-fallback in `test_characterization`; ff-only-safe admission, ff-subsumes-
+float-at-low-tol, and the renamed not-even-ff-safe exclusion in `test_ranking`).
+New `tests/shared/test_backfill_ff_prediction.py` **+8** (sensitivity-exact and
+float-derived, idempotent, skip-no-float, report/variable/chain coverage,
+dict-shaped chains, file round-trip, dry-run). **Offline delta: +12.**
+
 ---
 
 # HANDOFF — Gap A (namespace-qualified bridge) + Gap B (source-derivable constants) (2026-07-18, langgraph-agents)

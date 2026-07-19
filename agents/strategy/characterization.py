@@ -49,6 +49,7 @@ class ChainRecord:
     max_cond: float
     max_rel_err: float
     predicted_rel_err_if_float: float
+    predicted_rel_err_if_ff: float
     op_count: int
     n: int
     variables: list[str] = field(default_factory=list)
@@ -67,6 +68,7 @@ class ChainRecord:
             integral=self.integral, target=rep, signal_class=self.signal_class,
             max_cond=self.max_cond, max_rel_err=self.max_rel_err,
             predicted_rel_err_if_float=self.predicted_rel_err_if_float,
+            predicted_rel_err_if_ff=self.predicted_rel_err_if_ff,
             op_count=self.op_count, n=self.n, integrals=[self.integral])
 
 
@@ -87,6 +89,7 @@ class RegionRecord:
     max_cond: float
     max_rel_err: float
     predicted_rel_err_if_float: float
+    predicted_rel_err_if_ff: float
     op_count: int
     n: int
     integrals: list[str] = field(default_factory=list)
@@ -168,6 +171,7 @@ def load_chains(report_path: str | Path) -> tuple[list[ChainRecord], dict]:
             if not lines:
                 continue
             ops = chain.get("ops", {}) or {}
+            pred_float = float(chain.get("predicted_rel_err_if_float", 0.0) or 0.0)
             chains.append(ChainRecord(
                 integral=integral,
                 chain_id=chain["chain_id"],
@@ -175,12 +179,26 @@ def load_chains(report_path: str | Path) -> tuple[list[ChainRecord], dict]:
                 signal_class=chain.get("signal_class", "cancellation_cascade"),
                 max_cond=float(chain.get("max_cond", 0.0) or 0.0),
                 max_rel_err=float(chain.get("max_rel_err", 0.0) or 0.0),
-                predicted_rel_err_if_float=float(
-                    chain.get("predicted_rel_err_if_float", 0.0) or 0.0),
+                predicted_rel_err_if_float=pred_float,
+                predicted_rel_err_if_ff=_pred_ff(chain, pred_float),
                 op_count=int(sum(ops.values())),
                 n=int(chain.get("n", 0) or 0),
                 variables=list(chain.get("region_local_vars", []) or [])))
     return chains, {"n_chains": len(chains)}
+
+
+def _pred_ff(entry: dict, pred_float: float) -> float:
+    """Read ``predicted_rel_err_if_ff`` from a region/chain dict.
+
+    Reports predating the reducer's ff signal (report_1k/100k) carry only
+    ``predicted_rel_err_if_float``.  Fall back to the float prediction — a
+    conservative upper bound (ff is never *worse* than float), so a stale report
+    never admits an ff speedup it can't actually make.  Run the backfill utility
+    (``agents/shared/backfill_ff_prediction.py``) to compute the true, tighter ff
+    value on such reports.
+    """
+    val = entry.get("predicted_rel_err_if_ff")
+    return float(val) if val is not None else pred_float
 
 
 def _region_vars(region: dict) -> list[str]:
@@ -199,6 +217,7 @@ def _region_vars(region: dict) -> list[str]:
 
 def _one_record(integral: str, region: dict, file: str, line: int) -> RegionRecord:
     ops = region.get("ops", {}) or {}
+    pred_float = float(region.get("predicted_rel_err_if_float", 0.0) or 0.0)
     return RegionRecord(
         integral=integral,
         target=RegionTarget(file=file, line_start=line, line_end=line,
@@ -206,7 +225,8 @@ def _one_record(integral: str, region: dict, file: str, line: int) -> RegionReco
         signal_class=region.get("signal_class", "stable"),
         max_cond=float(region.get("max_cond", 0.0) or 0.0),
         max_rel_err=float(region.get("max_rel_err", 0.0) or 0.0),
-        predicted_rel_err_if_float=float(region.get("predicted_rel_err_if_float", 0.0) or 0.0),
+        predicted_rel_err_if_float=pred_float,
+        predicted_rel_err_if_ff=_pred_ff(region, pred_float),
         op_count=int(sum(ops.values())),
         n=int(region.get("n", 0) or 0),
         integrals=[integral],
@@ -231,9 +251,11 @@ def _merge_by_line(raw: list[tuple[str, dict, str, int]]) -> list[RegionRecord]:
         cur.integrals.append(integral)
         cur.max_cond = max(cur.max_cond, rec.max_cond)
         cur.max_rel_err = max(cur.max_rel_err, rec.max_rel_err)
-        # worst-case float safety: unsafe if unsafe in ANY integral
+        # worst-case float/ff safety: unsafe if unsafe in ANY integral
         cur.predicted_rel_err_if_float = max(
             cur.predicted_rel_err_if_float, rec.predicted_rel_err_if_float)
+        cur.predicted_rel_err_if_ff = max(
+            cur.predicted_rel_err_if_ff, rec.predicted_rel_err_if_ff)
         cur.op_count = max(cur.op_count, rec.op_count)
         cur.n = max(cur.n, rec.n)
         if _SEVERITY.get(rec.signal_class, 0) > _SEVERITY.get(cur.signal_class, 0):

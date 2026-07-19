@@ -7,9 +7,14 @@ Correctness queue (fixed 4-tier order, drained first):
   3. ``log_near_root`` regions with ``max_rel_err > 10^-tolerance``.
   4. ``stable`` regions that surprisingly show ``max_rel_err > 10^-tolerance``.
 
-Speedup queue: ``stable`` regions whose ``predicted_rel_err_if_float`` is at or
-below the tolerance bar (float alone already meets tolerance), ranked by
-``op_count`` descending — biggest hardware win first.
+Speedup queue: ``stable`` regions demotable to a cheaper-than-baseline rung that
+still meets tolerance, ranked by ``op_count`` descending — biggest hardware win
+first.  Admission gates on ``predicted_rel_err_if_ff`` (the *loosest* cheaper
+rung: ff ~14 digits < float's ~7, so ``pred_ff <= thr`` subsumes ``pred_float <=
+thr``).  At high tolerance (qcdloop's 10) float never clears but ff can, so this
+is what actually populates the speedup queue for a ``double→ff`` demotion; at low
+tolerance (≤6) both clear and the walk demotes all the way to float.  The
+per-step Validator decides how far down the walk actually settles.
 
 Intra-tier order (design leaves it open): ``max_cond`` desc then ``location``
 for a deterministic, worst-first walk.  The downstream-leverage tiebreaker
@@ -55,8 +60,11 @@ def build_correctness_queue(regions: list[RegionRecord], tolerance: float) -> li
 
 def build_speedup_queue(regions: list[RegionRecord], tolerance: float,
                         exclude: set[tuple[str, int, int]] | None = None) -> list[RegionRecord]:
-    """Stable regions safe to demote, ranked by op_count descending.
+    """Stable regions demotable to a cheaper rung, ranked by op_count descending.
 
+    Admits a region if it is safe at its cheapest reachable rung — ff (the loosest
+    cheaper-than-double bar): ``predicted_rel_err_if_ff <= thr``.  A region that
+    cannot even meet tolerance in ff can't be demoted at all, so it is excluded.
     ``exclude`` drops region keys already queued for correctness so a region is
     never worked in both phases.
     """
@@ -65,7 +73,7 @@ def build_speedup_queue(regions: list[RegionRecord], tolerance: float,
     candidates = [
         r for r in regions
         if r.signal_class == SIGNAL_STABLE
-        and r.predicted_rel_err_if_float <= thr
+        and r.predicted_rel_err_if_ff <= thr
         and r.key not in exclude
     ]
     # op_count desc; location tiebreak for determinism
