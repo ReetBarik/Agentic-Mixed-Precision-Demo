@@ -82,9 +82,16 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--dd-ref", default="ddfun_enabled")
     ap.add_argument("--kokkos-root", default=str(Path.home() / "kokkos-install"))
     ap.add_argument("--max-iters", type=int, default=8,
-                    help="StrategyBudget cap (smoke default 8; the report's ~53k "
-                         "cascade chains make the design default of 500 intractable "
-                         "at real-Validator cost).")
+                    help="Total StrategyBudget cap (smoke default 8). Used only to "
+                         "derive the 70/30 phase split when --max-iters-correctness "
+                         "/ --max-iters-speedup are not both given.")
+    ap.add_argument("--max-iters-correctness", type=int, default=None,
+                    help="Phase-1 (correctness) counting-iteration cap. Overrides the "
+                         "70%% split of --max-iters. Unused phase-1 budget spills "
+                         "forward into phase 2.")
+    ap.add_argument("--max-iters-speedup", type=int, default=None,
+                    help="Phase-2 (speedup) counting-iteration cap. Overrides the "
+                         "30%% split of --max-iters. Phase-1 spill is added on top.")
     ap.add_argument("--max-wall-hours", type=float, default=4.0,
                     help="Wall-clock ceiling (safety net; iters should bind first).")
     args = ap.parse_args(argv)
@@ -109,6 +116,8 @@ def main(argv: list[str] | None = None) -> int:
 
     budget = StrategyBudget(
         max_iters=args.max_iters,
+        max_iters_correctness=args.max_iters_correctness,
+        max_iters_speedup=args.max_iters_speedup,
         max_wall_clock_sec=args.max_wall_hours * 3600.0,
     )
     strategy_config = StrategyConfig(
@@ -152,8 +161,14 @@ def main(argv: list[str] | None = None) -> int:
     print(f"  kokkos_root     : {args.kokkos_root}", flush=True)
     print(f"  tolerance       : {args.tolerance}", flush=True)
     print(f"  snapshot        : {snapshot}", flush=True)
+    cap_c, cap_s = budget.phase_caps()
     print(f"  budget          : max_iters={budget.max_iters} "
           f"wall={args.max_wall_hours}h tokens={budget.max_llm_tokens}", flush=True)
+    print(f"  phase caps      : correctness={cap_c} speedup={cap_s} "
+          f"(speedup gets phase-1 spill on top)", flush=True)
+    print(f"  dr_k            : {strategy_config.diminishing_returns_k}", flush=True)
+    print(f"  model           : {PipelineConfig().model}", flush=True)
+    print(f"  base_url        : {PipelineConfig().base_url}", flush=True)
     print("===========================", flush=True)
 
     delta = strategy_agent.run(state)
