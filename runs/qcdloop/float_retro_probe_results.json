@@ -1,0 +1,3297 @@
+{
+  "summary": {
+    "run_id": "20260719_185132_033cbe69",
+    "n_regions": 86,
+    "snapshot": {
+      "seed": 12345,
+      "sample_count": 1000
+    },
+    "max_regression": 0.5,
+    "tolerances": [
+      8,
+      9,
+      10,
+      11
+    ],
+    "survival": {
+      "8": 86,
+      "9": 0,
+      "10": 0,
+      "11": 0,
+      "7": 86
+    },
+    "xcheck_failures": 0,
+    "monotonicity_violations": [],
+    "total_wall_seconds": 804.2
+  },
+  "regions": [
+    {
+      "iter_id": 111,
+      "file": "B1m.h",
+      "line": 106,
+      "line_end": 106,
+      "candidate_sha": "86fc82798be15c556174a71658222237d89e9274",
+      "cand_min_precise_digits": 8.8399,
+      "curr_min_precise_digits": 8.8399,
+      "delta": 0.0,
+      "recorded_cand_min": 8.8399,
+      "xcheck_ok": true,
+      "hotspot_integral": "BIN1",
+      "hotspot_component": "coeff0.imag",
+      "hotspot_precise_digits": 8.8399,
+      "survive": {
+        "8": {
+          "verdict": "accept",
+          "reason": "accept",
+          "accept": true
+        },
+        "9": {
+          "verdict": "reject",
+          "reason": "insufficient_fix",
+          "accept": false
+        },
+        "10": {
+          "verdict": "reject",
+          "reason": "insufficient_fix",
+          "accept": false
+        },
+        "11": {
+          "verdict": "reject",
+          "reason": "insufficient_fix",
+          "accept": false
+        }
+      },
+      "wall_seconds": 9.62
+    },
+    {
+      "iter_id": 112,
+      "file": "B4m.h",
+      "line": 122,
+      "line_end": 122,
+      "candidate_sha": "3ed1ad1b62312193cec9c22e55439f182e5b0708",
+      "cand_min_precise_digits": 8.8399,
+      "curr_min_precise_digits": 8.8399,
+      "delta": 0.0,
+      "recorded_cand_min": 8.8399,
+      "xcheck_ok": true,
+      "hotspot_integral": "BIN1",
+      "hotspot_component": "coeff0.imag",
+      "hotspot_precise_digits": 8.8399,
+      "survive": {
+        "8": {
+          "verdict": "accept",
+          "reason": "accept",
+          "accept": true
+        },
+        "9": {
+          "verdict": "reject",
+          "reason": "insufficient_fix",
+          "accept": false
+        },
+        "10": {
+          "verdict": "reject",
+          "reason": "insufficient_fix",
+          "accept": false
+        },
+        "11": {
+          "verdict": "reject",
+          "reason": "insufficient_fix",
+          "accept": false
+        }
+      },
+      "wall_seconds": 8.72
+    },
+    {
+      "iter_id": 113,
+      "file": "B2m.h",
+      "line": 151,
+      "line_end": 151,
+      "candidate_sha": "79eb1a5ab85b3a1722560d905134762e274afac1",
+      "cand_min_precise_digits": 8.8399,
+      "curr_min_precise_digits": 8.8399,
+      "delta": 0.0,
+      "recorded_cand_min": 8.8399,
+      "xcheck_ok": true,
+      "hotspot_integral": "BIN1",
+      "hotspot_component": "coeff0.imag",
+      "hotspot_precise_digits": 8.8399,
+      "survive": {
+        "8": {
+          "verdict": "accept",
+          "reason": "accept",
+          "accept": true
+        },
+        "9": {
+          "verdict": "reject",
+          "reason": "insufficient_fix",
+          "accept": false
+        },
+        "10": {
+          "verdict": "reject",
+          "reason": "insufficient_fix",
+          "accept": false
+        },
+        "11": {
+          "verdict": "reject",
+          "reason": "insufficient_fix",
+          "accept": false
+        }
+      },
+      "wall_seconds": 8.93
+    },
+    {
+      "iter_id": 114,
+      "file": "B0m.h",
+      "line": 126,
+      "line_end": 126,
+      "candidate_sha": "8ac58d7476023584fb284cd461f0fc743e8780aa",
+      "cand_min_precise_digits": 8.8399,
+      "curr_min_precise_digits": 8.8399,
+      "delta": 0.0,
+      "recorded_cand_min": 8.8399,
+      "xcheck_ok": true,
+      "hotspot_integral": "BIN1",
+      "hotspot_component": "coeff0.imag",
+      "hotspot_precise_digits": 8.8399,
+      "survive": {
+        "8": {
+          "verdict": "accept",
+          "reason": "accept",
+          "accept": true
+        },
+        "9": {
+          "verdict": "reject",
+          "reason": "insufficient_fix",
+          "accept": false
+        },
+        "10": {
+          "verdict": "reject",
+          "reason": "insufficient_fix",
+          "accept": false
+        },
+        "11": {
+          "verdict": "reject",
+          "reason": "insufficient_fix",
+          "accept": false
+        }
+      },
+      "wall_seconds": 9.04
+    },
+    {
+      "iter_id": 115,
+      "file": "B1m.h",
+      "line": 111,
+      "line_end": 111,
+      "candidate_sha": "cc3fcee30e4fa434fa14096d926502c9be545149",
+      "cand_min_precise_digits": 8.8399,
+      "curr_min_precise_digits": 8.8399,
+      "delta": 0.0,
+      "recorded_cand_min": 8.8399,
+      "xcheck_ok": true,
+      "hotspot_integral": "BIN1",
+      "hotspot_component": "coeff0.imag",
+      "hotspot_precise_digits": 8.8399,
+      "survive": {
+        "8": {
+          "verdict": "accept",
+          "reason": "accept",
+          "accept": true
+        },
+        "9": {
+          "verdict": "reject",
+          "reason": "insufficient_fix",
+          "accept": false
+        },
+        "10": {
+          "verdict": "reject",
+          "reason": "insufficient_fix",
+          "accept": false
+        },
+        "11": {
+          "verdict": "reject",
+          "reason": "insufficient_fix",
+          "accept": false
+        }
+      },
+      "wall_seconds": 9.11
+    },
+    {
+      "iter_id": 116,
+      "file": "B1m.h",
+      "line": 133,
+      "line_end": 133,
+      "candidate_sha": "89061a7312d291445e8370eb78173f4500940f5e",
+      "cand_min_precise_digits": 8.8399,
+      "curr_min_precise_digits": 8.8399,
+      "delta": 0.0,
+      "recorded_cand_min": 8.8399,
+      "xcheck_ok": true,
+      "hotspot_integral": "BIN1",
+      "hotspot_component": "coeff0.imag",
+      "hotspot_precise_digits": 8.8399,
+      "survive": {
+        "8": {
+          "verdict": "accept",
+          "reason": "accept",
+          "accept": true
+        },
+        "9": {
+          "verdict": "reject",
+          "reason": "insufficient_fix",
+          "accept": false
+        },
+        "10": {
+          "verdict": "reject",
+          "reason": "insufficient_fix",
+          "accept": false
+        },
+        "11": {
+          "verdict": "reject",
+          "reason": "insufficient_fix",
+          "accept": false
+        }
+      },
+      "wall_seconds": 9.01
+    },
+    {
+      "iter_id": 117,
+      "file": "kokkosUtils.h",
+      "line": 583,
+      "line_end": 583,
+      "candidate_sha": "85648050300603c8048331b47d43a516c2f32193",
+      "cand_min_precise_digits": 8.8399,
+      "curr_min_precise_digits": 8.8399,
+      "delta": 0.0,
+      "recorded_cand_min": 8.8399,
+      "xcheck_ok": true,
+      "hotspot_integral": "BIN1",
+      "hotspot_component": "coeff0.imag",
+      "hotspot_precise_digits": 8.8399,
+      "survive": {
+        "8": {
+          "verdict": "accept",
+          "reason": "accept",
+          "accept": true
+        },
+        "9": {
+          "verdict": "reject",
+          "reason": "insufficient_fix",
+          "accept": false
+        },
+        "10": {
+          "verdict": "reject",
+          "reason": "insufficient_fix",
+          "accept": false
+        },
+        "11": {
+          "verdict": "reject",
+          "reason": "insufficient_fix",
+          "accept": false
+        }
+      },
+      "wall_seconds": 8.8
+    },
+    {
+      "iter_id": 120,
+      "file": "B4m.h",
+      "line": 125,
+      "line_end": 125,
+      "candidate_sha": "8d8f3233d539ad7f3c2f161220d3f1ef6c7bbd4a",
+      "cand_min_precise_digits": 8.8399,
+      "curr_min_precise_digits": 8.8399,
+      "delta": 0.0,
+      "recorded_cand_min": 8.8399,
+      "xcheck_ok": true,
+      "hotspot_integral": "BIN1",
+      "hotspot_component": "coeff0.imag",
+      "hotspot_precise_digits": 8.8399,
+      "survive": {
+        "8": {
+          "verdict": "accept",
+          "reason": "accept",
+          "accept": true
+        },
+        "9": {
+          "verdict": "reject",
+          "reason": "insufficient_fix",
+          "accept": false
+        },
+        "10": {
+          "verdict": "reject",
+          "reason": "insufficient_fix",
+          "accept": false
+        },
+        "11": {
+          "verdict": "reject",
+          "reason": "insufficient_fix",
+          "accept": false
+        }
+      },
+      "wall_seconds": 9.37
+    },
+    {
+      "iter_id": 123,
+      "file": "B0m.h",
+      "line": 125,
+      "line_end": 125,
+      "candidate_sha": "d21059e43e52e22a13f1f08f0dabc758f3682972",
+      "cand_min_precise_digits": 8.8399,
+      "curr_min_precise_digits": 8.8399,
+      "delta": 0.0,
+      "recorded_cand_min": 8.8399,
+      "xcheck_ok": true,
+      "hotspot_integral": "BIN1",
+      "hotspot_component": "coeff0.imag",
+      "hotspot_precise_digits": 8.8399,
+      "survive": {
+        "8": {
+          "verdict": "accept",
+          "reason": "accept",
+          "accept": true
+        },
+        "9": {
+          "verdict": "reject",
+          "reason": "insufficient_fix",
+          "accept": false
+        },
+        "10": {
+          "verdict": "reject",
+          "reason": "insufficient_fix",
+          "accept": false
+        },
+        "11": {
+          "verdict": "reject",
+          "reason": "insufficient_fix",
+          "accept": false
+        }
+      },
+      "wall_seconds": 9.26
+    },
+    {
+      "iter_id": 124,
+      "file": "B4m.h",
+      "line": 168,
+      "line_end": 168,
+      "candidate_sha": "ff7419534c4105cd6d61fb08e56b15e37fffacb0",
+      "cand_min_precise_digits": 8.8399,
+      "curr_min_precise_digits": 8.8399,
+      "delta": 0.0,
+      "recorded_cand_min": 8.8399,
+      "xcheck_ok": true,
+      "hotspot_integral": "BIN1",
+      "hotspot_component": "coeff0.imag",
+      "hotspot_precise_digits": 8.8399,
+      "survive": {
+        "8": {
+          "verdict": "accept",
+          "reason": "accept",
+          "accept": true
+        },
+        "9": {
+          "verdict": "reject",
+          "reason": "insufficient_fix",
+          "accept": false
+        },
+        "10": {
+          "verdict": "reject",
+          "reason": "insufficient_fix",
+          "accept": false
+        },
+        "11": {
+          "verdict": "reject",
+          "reason": "insufficient_fix",
+          "accept": false
+        }
+      },
+      "wall_seconds": 9.21
+    },
+    {
+      "iter_id": 125,
+      "file": "kokkosUtils.h",
+      "line": 580,
+      "line_end": 580,
+      "candidate_sha": "fcc54bac8eb15d002d1a01c53e2f1a07df1eb4fb",
+      "cand_min_precise_digits": 8.8399,
+      "curr_min_precise_digits": 8.8399,
+      "delta": 0.0,
+      "recorded_cand_min": 8.8399,
+      "xcheck_ok": true,
+      "hotspot_integral": "BIN1",
+      "hotspot_component": "coeff0.imag",
+      "hotspot_precise_digits": 8.8399,
+      "survive": {
+        "8": {
+          "verdict": "accept",
+          "reason": "accept",
+          "accept": true
+        },
+        "9": {
+          "verdict": "reject",
+          "reason": "insufficient_fix",
+          "accept": false
+        },
+        "10": {
+          "verdict": "reject",
+          "reason": "insufficient_fix",
+          "accept": false
+        },
+        "11": {
+          "verdict": "reject",
+          "reason": "insufficient_fix",
+          "accept": false
+        }
+      },
+      "wall_seconds": 9.16
+    },
+    {
+      "iter_id": 128,
+      "file": "B0m.h",
+      "line": 124,
+      "line_end": 124,
+      "candidate_sha": "f5cc03f037b6b1fe03e2a2c329ef39f9544a3509",
+      "cand_min_precise_digits": 8.8399,
+      "curr_min_precise_digits": 8.8399,
+      "delta": 0.0,
+      "recorded_cand_min": 8.8399,
+      "xcheck_ok": true,
+      "hotspot_integral": "BIN1",
+      "hotspot_component": "coeff0.imag",
+      "hotspot_precise_digits": 8.8399,
+      "survive": {
+        "8": {
+          "verdict": "accept",
+          "reason": "accept",
+          "accept": true
+        },
+        "9": {
+          "verdict": "reject",
+          "reason": "insufficient_fix",
+          "accept": false
+        },
+        "10": {
+          "verdict": "reject",
+          "reason": "insufficient_fix",
+          "accept": false
+        },
+        "11": {
+          "verdict": "reject",
+          "reason": "insufficient_fix",
+          "accept": false
+        }
+      },
+      "wall_seconds": 9.15
+    },
+    {
+      "iter_id": 131,
+      "file": "B0m.h",
+      "line": 329,
+      "line_end": 329,
+      "candidate_sha": "4f1d59176b7bd3a091a224f2b8e2b193dcf58ca8",
+      "cand_min_precise_digits": 8.8399,
+      "curr_min_precise_digits": 8.8399,
+      "delta": 0.0,
+      "recorded_cand_min": 8.8399,
+      "xcheck_ok": true,
+      "hotspot_integral": "BIN1",
+      "hotspot_component": "coeff0.imag",
+      "hotspot_precise_digits": 8.8399,
+      "survive": {
+        "8": {
+          "verdict": "accept",
+          "reason": "accept",
+          "accept": true
+        },
+        "9": {
+          "verdict": "reject",
+          "reason": "insufficient_fix",
+          "accept": false
+        },
+        "10": {
+          "verdict": "reject",
+          "reason": "insufficient_fix",
+          "accept": false
+        },
+        "11": {
+          "verdict": "reject",
+          "reason": "insufficient_fix",
+          "accept": false
+        }
+      },
+      "wall_seconds": 10.12
+    },
+    {
+      "iter_id": 132,
+      "file": "B0m.h",
+      "line": 118,
+      "line_end": 118,
+      "candidate_sha": "886b591581d9d5052da27151286cdc920825cc73",
+      "cand_min_precise_digits": 8.8399,
+      "curr_min_precise_digits": 8.8399,
+      "delta": 0.0,
+      "recorded_cand_min": 8.8399,
+      "xcheck_ok": true,
+      "hotspot_integral": "BIN1",
+      "hotspot_component": "coeff0.imag",
+      "hotspot_precise_digits": 8.8399,
+      "survive": {
+        "8": {
+          "verdict": "accept",
+          "reason": "accept",
+          "accept": true
+        },
+        "9": {
+          "verdict": "reject",
+          "reason": "insufficient_fix",
+          "accept": false
+        },
+        "10": {
+          "verdict": "reject",
+          "reason": "insufficient_fix",
+          "accept": false
+        },
+        "11": {
+          "verdict": "reject",
+          "reason": "insufficient_fix",
+          "accept": false
+        }
+      },
+      "wall_seconds": 9.17
+    },
+    {
+      "iter_id": 133,
+      "file": "B0m.h",
+      "line": 150,
+      "line_end": 150,
+      "candidate_sha": "bd15182114d9076d9775f33bec4230384f25a885",
+      "cand_min_precise_digits": 8.8399,
+      "curr_min_precise_digits": 8.8399,
+      "delta": 0.0,
+      "recorded_cand_min": 8.8399,
+      "xcheck_ok": true,
+      "hotspot_integral": "BIN1",
+      "hotspot_component": "coeff0.imag",
+      "hotspot_precise_digits": 8.8399,
+      "survive": {
+        "8": {
+          "verdict": "accept",
+          "reason": "accept",
+          "accept": true
+        },
+        "9": {
+          "verdict": "reject",
+          "reason": "insufficient_fix",
+          "accept": false
+        },
+        "10": {
+          "verdict": "reject",
+          "reason": "insufficient_fix",
+          "accept": false
+        },
+        "11": {
+          "verdict": "reject",
+          "reason": "insufficient_fix",
+          "accept": false
+        }
+      },
+      "wall_seconds": 9.12
+    },
+    {
+      "iter_id": 134,
+      "file": "B0m.h",
+      "line": 160,
+      "line_end": 160,
+      "candidate_sha": "24a74f42e4b63187b0d4e213558c3bd37b2a5939",
+      "cand_min_precise_digits": 8.8399,
+      "curr_min_precise_digits": 8.8399,
+      "delta": 0.0,
+      "recorded_cand_min": 8.8399,
+      "xcheck_ok": true,
+      "hotspot_integral": "BIN1",
+      "hotspot_component": "coeff0.imag",
+      "hotspot_precise_digits": 8.8399,
+      "survive": {
+        "8": {
+          "verdict": "accept",
+          "reason": "accept",
+          "accept": true
+        },
+        "9": {
+          "verdict": "reject",
+          "reason": "insufficient_fix",
+          "accept": false
+        },
+        "10": {
+          "verdict": "reject",
+          "reason": "insufficient_fix",
+          "accept": false
+        },
+        "11": {
+          "verdict": "reject",
+          "reason": "insufficient_fix",
+          "accept": false
+        }
+      },
+      "wall_seconds": 9.11
+    },
+    {
+      "iter_id": 135,
+      "file": "B0m.h",
+      "line": 261,
+      "line_end": 261,
+      "candidate_sha": "3091af9c30f76187eff961837fe89c337262a037",
+      "cand_min_precise_digits": 8.8399,
+      "curr_min_precise_digits": 8.8399,
+      "delta": 0.0,
+      "recorded_cand_min": 8.8399,
+      "xcheck_ok": true,
+      "hotspot_integral": "BIN1",
+      "hotspot_component": "coeff0.imag",
+      "hotspot_precise_digits": 8.8399,
+      "survive": {
+        "8": {
+          "verdict": "accept",
+          "reason": "accept",
+          "accept": true
+        },
+        "9": {
+          "verdict": "reject",
+          "reason": "insufficient_fix",
+          "accept": false
+        },
+        "10": {
+          "verdict": "reject",
+          "reason": "insufficient_fix",
+          "accept": false
+        },
+        "11": {
+          "verdict": "reject",
+          "reason": "insufficient_fix",
+          "accept": false
+        }
+      },
+      "wall_seconds": 9.17
+    },
+    {
+      "iter_id": 136,
+      "file": "B1m.h",
+      "line": 105,
+      "line_end": 105,
+      "candidate_sha": "634ae4a0c1e098f0b5f4141d6195406b7a6a0943",
+      "cand_min_precise_digits": 8.8399,
+      "curr_min_precise_digits": 8.8399,
+      "delta": 0.0,
+      "recorded_cand_min": 8.8399,
+      "xcheck_ok": true,
+      "hotspot_integral": "BIN1",
+      "hotspot_component": "coeff0.imag",
+      "hotspot_precise_digits": 8.8399,
+      "survive": {
+        "8": {
+          "verdict": "accept",
+          "reason": "accept",
+          "accept": true
+        },
+        "9": {
+          "verdict": "reject",
+          "reason": "insufficient_fix",
+          "accept": false
+        },
+        "10": {
+          "verdict": "reject",
+          "reason": "insufficient_fix",
+          "accept": false
+        },
+        "11": {
+          "verdict": "reject",
+          "reason": "insufficient_fix",
+          "accept": false
+        }
+      },
+      "wall_seconds": 9.01
+    },
+    {
+      "iter_id": 137,
+      "file": "B0m.h",
+      "line": 331,
+      "line_end": 331,
+      "candidate_sha": "8b72d178ae059a72dddb5333181194a791b93479",
+      "cand_min_precise_digits": 8.8399,
+      "curr_min_precise_digits": 8.8399,
+      "delta": 0.0,
+      "recorded_cand_min": 8.8399,
+      "xcheck_ok": true,
+      "hotspot_integral": "BIN1",
+      "hotspot_component": "coeff0.imag",
+      "hotspot_precise_digits": 8.8399,
+      "survive": {
+        "8": {
+          "verdict": "accept",
+          "reason": "accept",
+          "accept": true
+        },
+        "9": {
+          "verdict": "reject",
+          "reason": "insufficient_fix",
+          "accept": false
+        },
+        "10": {
+          "verdict": "reject",
+          "reason": "insufficient_fix",
+          "accept": false
+        },
+        "11": {
+          "verdict": "reject",
+          "reason": "insufficient_fix",
+          "accept": false
+        }
+      },
+      "wall_seconds": 10.17
+    },
+    {
+      "iter_id": 138,
+      "file": "B1m.h",
+      "line": 200,
+      "line_end": 200,
+      "candidate_sha": "345c05fbf72a234530b3b5b685a47a06e7f433ba",
+      "cand_min_precise_digits": 8.8399,
+      "curr_min_precise_digits": 8.8399,
+      "delta": 0.0,
+      "recorded_cand_min": 8.8399,
+      "xcheck_ok": true,
+      "hotspot_integral": "BIN1",
+      "hotspot_component": "coeff0.imag",
+      "hotspot_precise_digits": 8.8399,
+      "survive": {
+        "8": {
+          "verdict": "accept",
+          "reason": "accept",
+          "accept": true
+        },
+        "9": {
+          "verdict": "reject",
+          "reason": "insufficient_fix",
+          "accept": false
+        },
+        "10": {
+          "verdict": "reject",
+          "reason": "insufficient_fix",
+          "accept": false
+        },
+        "11": {
+          "verdict": "reject",
+          "reason": "insufficient_fix",
+          "accept": false
+        }
+      },
+      "wall_seconds": 9.08
+    },
+    {
+      "iter_id": 139,
+      "file": "B0m.h",
+      "line": 330,
+      "line_end": 330,
+      "candidate_sha": "c29a32d5223981ffe10bacd106540eef5b7ee548",
+      "cand_min_precise_digits": 8.8399,
+      "curr_min_precise_digits": 8.8399,
+      "delta": 0.0,
+      "recorded_cand_min": 8.8399,
+      "xcheck_ok": true,
+      "hotspot_integral": "BIN1",
+      "hotspot_component": "coeff0.imag",
+      "hotspot_precise_digits": 8.8399,
+      "survive": {
+        "8": {
+          "verdict": "accept",
+          "reason": "accept",
+          "accept": true
+        },
+        "9": {
+          "verdict": "reject",
+          "reason": "insufficient_fix",
+          "accept": false
+        },
+        "10": {
+          "verdict": "reject",
+          "reason": "insufficient_fix",
+          "accept": false
+        },
+        "11": {
+          "verdict": "reject",
+          "reason": "insufficient_fix",
+          "accept": false
+        }
+      },
+      "wall_seconds": 9.02
+    },
+    {
+      "iter_id": 140,
+      "file": "B1m.h",
+      "line": 132,
+      "line_end": 132,
+      "candidate_sha": "94b93b878736cdcf7d94f817bf0b040096e240e8",
+      "cand_min_precise_digits": 8.8399,
+      "curr_min_precise_digits": 8.8399,
+      "delta": 0.0,
+      "recorded_cand_min": 8.8399,
+      "xcheck_ok": true,
+      "hotspot_integral": "BIN1",
+      "hotspot_component": "coeff0.imag",
+      "hotspot_precise_digits": 8.8399,
+      "survive": {
+        "8": {
+          "verdict": "accept",
+          "reason": "accept",
+          "accept": true
+        },
+        "9": {
+          "verdict": "reject",
+          "reason": "insufficient_fix",
+          "accept": false
+        },
+        "10": {
+          "verdict": "reject",
+          "reason": "insufficient_fix",
+          "accept": false
+        },
+        "11": {
+          "verdict": "reject",
+          "reason": "insufficient_fix",
+          "accept": false
+        }
+      },
+      "wall_seconds": 9.76
+    },
+    {
+      "iter_id": 141,
+      "file": "B1m.h",
+      "line": 61,
+      "line_end": 61,
+      "candidate_sha": "0360e83e96ec99bf39b8e29865111c80e1b8d8d2",
+      "cand_min_precise_digits": 8.8399,
+      "curr_min_precise_digits": 8.8399,
+      "delta": 0.0,
+      "recorded_cand_min": 8.8399,
+      "xcheck_ok": true,
+      "hotspot_integral": "BIN1",
+      "hotspot_component": "coeff0.imag",
+      "hotspot_precise_digits": 8.8399,
+      "survive": {
+        "8": {
+          "verdict": "accept",
+          "reason": "accept",
+          "accept": true
+        },
+        "9": {
+          "verdict": "reject",
+          "reason": "insufficient_fix",
+          "accept": false
+        },
+        "10": {
+          "verdict": "reject",
+          "reason": "insufficient_fix",
+          "accept": false
+        },
+        "11": {
+          "verdict": "reject",
+          "reason": "insufficient_fix",
+          "accept": false
+        }
+      },
+      "wall_seconds": 9.13
+    },
+    {
+      "iter_id": 142,
+      "file": "boxGPU.h",
+      "line": 141,
+      "line_end": 141,
+      "candidate_sha": "4529930e0720bf407f11f104985e797ea6bd859d",
+      "cand_min_precise_digits": 8.8399,
+      "curr_min_precise_digits": 8.8399,
+      "delta": 0.0,
+      "recorded_cand_min": 8.8399,
+      "xcheck_ok": true,
+      "hotspot_integral": "BIN1",
+      "hotspot_component": "coeff0.imag",
+      "hotspot_precise_digits": 8.8399,
+      "survive": {
+        "8": {
+          "verdict": "accept",
+          "reason": "accept",
+          "accept": true
+        },
+        "9": {
+          "verdict": "reject",
+          "reason": "insufficient_fix",
+          "accept": false
+        },
+        "10": {
+          "verdict": "reject",
+          "reason": "insufficient_fix",
+          "accept": false
+        },
+        "11": {
+          "verdict": "reject",
+          "reason": "insufficient_fix",
+          "accept": false
+        }
+      },
+      "wall_seconds": 9.17
+    },
+    {
+      "iter_id": 143,
+      "file": "boxGPU.h",
+      "line": 142,
+      "line_end": 142,
+      "candidate_sha": "51866ace0185290092caf56ec9cbf00f12f293fe",
+      "cand_min_precise_digits": 8.8399,
+      "curr_min_precise_digits": 8.8399,
+      "delta": 0.0,
+      "recorded_cand_min": 8.8399,
+      "xcheck_ok": true,
+      "hotspot_integral": "BIN1",
+      "hotspot_component": "coeff0.imag",
+      "hotspot_precise_digits": 8.8399,
+      "survive": {
+        "8": {
+          "verdict": "accept",
+          "reason": "accept",
+          "accept": true
+        },
+        "9": {
+          "verdict": "reject",
+          "reason": "insufficient_fix",
+          "accept": false
+        },
+        "10": {
+          "verdict": "reject",
+          "reason": "insufficient_fix",
+          "accept": false
+        },
+        "11": {
+          "verdict": "reject",
+          "reason": "insufficient_fix",
+          "accept": false
+        }
+      },
+      "wall_seconds": 8.96
+    },
+    {
+      "iter_id": 144,
+      "file": "kokkosUtils.h",
+      "line": 657,
+      "line_end": 657,
+      "candidate_sha": "88ab9931e250486270717d9579ab92d26b74be0e",
+      "cand_min_precise_digits": 8.8399,
+      "curr_min_precise_digits": 8.8399,
+      "delta": 0.0,
+      "recorded_cand_min": 8.8399,
+      "xcheck_ok": true,
+      "hotspot_integral": "BIN1",
+      "hotspot_component": "coeff0.imag",
+      "hotspot_precise_digits": 8.8399,
+      "survive": {
+        "8": {
+          "verdict": "accept",
+          "reason": "accept",
+          "accept": true
+        },
+        "9": {
+          "verdict": "reject",
+          "reason": "insufficient_fix",
+          "accept": false
+        },
+        "10": {
+          "verdict": "reject",
+          "reason": "insufficient_fix",
+          "accept": false
+        },
+        "11": {
+          "verdict": "reject",
+          "reason": "insufficient_fix",
+          "accept": false
+        }
+      },
+      "wall_seconds": 9.3
+    },
+    {
+      "iter_id": 145,
+      "file": "B0m.h",
+      "line": 224,
+      "line_end": 224,
+      "candidate_sha": "61446f5958d500be39f211ae1cda4ce0f3b212f7",
+      "cand_min_precise_digits": 8.8399,
+      "curr_min_precise_digits": 8.8399,
+      "delta": 0.0,
+      "recorded_cand_min": 8.8399,
+      "xcheck_ok": true,
+      "hotspot_integral": "BIN1",
+      "hotspot_component": "coeff0.imag",
+      "hotspot_precise_digits": 8.8399,
+      "survive": {
+        "8": {
+          "verdict": "accept",
+          "reason": "accept",
+          "accept": true
+        },
+        "9": {
+          "verdict": "reject",
+          "reason": "insufficient_fix",
+          "accept": false
+        },
+        "10": {
+          "verdict": "reject",
+          "reason": "insufficient_fix",
+          "accept": false
+        },
+        "11": {
+          "verdict": "reject",
+          "reason": "insufficient_fix",
+          "accept": false
+        }
+      },
+      "wall_seconds": 9.24
+    },
+    {
+      "iter_id": 146,
+      "file": "B0m.h",
+      "line": 159,
+      "line_end": 159,
+      "candidate_sha": "514d8de2c40d2cafd701be8fa74f5cd43387bf0a",
+      "cand_min_precise_digits": 8.8399,
+      "curr_min_precise_digits": 8.8399,
+      "delta": 0.0,
+      "recorded_cand_min": 8.8399,
+      "xcheck_ok": true,
+      "hotspot_integral": "BIN1",
+      "hotspot_component": "coeff0.imag",
+      "hotspot_precise_digits": 8.8399,
+      "survive": {
+        "8": {
+          "verdict": "accept",
+          "reason": "accept",
+          "accept": true
+        },
+        "9": {
+          "verdict": "reject",
+          "reason": "insufficient_fix",
+          "accept": false
+        },
+        "10": {
+          "verdict": "reject",
+          "reason": "insufficient_fix",
+          "accept": false
+        },
+        "11": {
+          "verdict": "reject",
+          "reason": "insufficient_fix",
+          "accept": false
+        }
+      },
+      "wall_seconds": 9.14
+    },
+    {
+      "iter_id": 147,
+      "file": "B0m.h",
+      "line": 346,
+      "line_end": 346,
+      "candidate_sha": "57ac29e317359bc8a5b96ddbba82d3629efe0dfb",
+      "cand_min_precise_digits": 8.8399,
+      "curr_min_precise_digits": 8.8399,
+      "delta": 0.0,
+      "recorded_cand_min": 8.8399,
+      "xcheck_ok": true,
+      "hotspot_integral": "BIN1",
+      "hotspot_component": "coeff0.imag",
+      "hotspot_precise_digits": 8.8399,
+      "survive": {
+        "8": {
+          "verdict": "accept",
+          "reason": "accept",
+          "accept": true
+        },
+        "9": {
+          "verdict": "reject",
+          "reason": "insufficient_fix",
+          "accept": false
+        },
+        "10": {
+          "verdict": "reject",
+          "reason": "insufficient_fix",
+          "accept": false
+        },
+        "11": {
+          "verdict": "reject",
+          "reason": "insufficient_fix",
+          "accept": false
+        }
+      },
+      "wall_seconds": 9.13
+    },
+    {
+      "iter_id": 148,
+      "file": "B2m.h",
+      "line": 354,
+      "line_end": 354,
+      "candidate_sha": "8c4974f1870c92d74325ea21ebab3a44916ac13c",
+      "cand_min_precise_digits": 8.8399,
+      "curr_min_precise_digits": 8.8399,
+      "delta": 0.0,
+      "recorded_cand_min": 8.8399,
+      "xcheck_ok": true,
+      "hotspot_integral": "BIN1",
+      "hotspot_component": "coeff0.imag",
+      "hotspot_precise_digits": 8.8399,
+      "survive": {
+        "8": {
+          "verdict": "accept",
+          "reason": "accept",
+          "accept": true
+        },
+        "9": {
+          "verdict": "reject",
+          "reason": "insufficient_fix",
+          "accept": false
+        },
+        "10": {
+          "verdict": "reject",
+          "reason": "insufficient_fix",
+          "accept": false
+        },
+        "11": {
+          "verdict": "reject",
+          "reason": "insufficient_fix",
+          "accept": false
+        }
+      },
+      "wall_seconds": 9.08
+    },
+    {
+      "iter_id": 149,
+      "file": "B2m.h",
+      "line": 125,
+      "line_end": 125,
+      "candidate_sha": "bdb235653f3de22f840f6bbdf3dd1a2da23631ee",
+      "cand_min_precise_digits": 8.8399,
+      "curr_min_precise_digits": 8.8399,
+      "delta": 0.0,
+      "recorded_cand_min": 8.8399,
+      "xcheck_ok": true,
+      "hotspot_integral": "BIN1",
+      "hotspot_component": "coeff0.imag",
+      "hotspot_precise_digits": 8.8399,
+      "survive": {
+        "8": {
+          "verdict": "accept",
+          "reason": "accept",
+          "accept": true
+        },
+        "9": {
+          "verdict": "reject",
+          "reason": "insufficient_fix",
+          "accept": false
+        },
+        "10": {
+          "verdict": "reject",
+          "reason": "insufficient_fix",
+          "accept": false
+        },
+        "11": {
+          "verdict": "reject",
+          "reason": "insufficient_fix",
+          "accept": false
+        }
+      },
+      "wall_seconds": 9.1
+    },
+    {
+      "iter_id": 150,
+      "file": "B2m.h",
+      "line": 127,
+      "line_end": 127,
+      "candidate_sha": "369fda5498e12cde7314f445234bce4206d116a5",
+      "cand_min_precise_digits": 8.8399,
+      "curr_min_precise_digits": 8.8399,
+      "delta": 0.0,
+      "recorded_cand_min": 8.8399,
+      "xcheck_ok": true,
+      "hotspot_integral": "BIN1",
+      "hotspot_component": "coeff0.imag",
+      "hotspot_precise_digits": 8.8399,
+      "survive": {
+        "8": {
+          "verdict": "accept",
+          "reason": "accept",
+          "accept": true
+        },
+        "9": {
+          "verdict": "reject",
+          "reason": "insufficient_fix",
+          "accept": false
+        },
+        "10": {
+          "verdict": "reject",
+          "reason": "insufficient_fix",
+          "accept": false
+        },
+        "11": {
+          "verdict": "reject",
+          "reason": "insufficient_fix",
+          "accept": false
+        }
+      },
+      "wall_seconds": 9.12
+    },
+    {
+      "iter_id": 151,
+      "file": "boxGPU.h",
+      "line": 99,
+      "line_end": 99,
+      "candidate_sha": "fe2668b5ed8a5775a270e33aa338eb3f2772efce",
+      "cand_min_precise_digits": 8.8399,
+      "curr_min_precise_digits": 8.8399,
+      "delta": 0.0,
+      "recorded_cand_min": 8.8399,
+      "xcheck_ok": true,
+      "hotspot_integral": "BIN1",
+      "hotspot_component": "coeff0.imag",
+      "hotspot_precise_digits": 8.8399,
+      "survive": {
+        "8": {
+          "verdict": "accept",
+          "reason": "accept",
+          "accept": true
+        },
+        "9": {
+          "verdict": "reject",
+          "reason": "insufficient_fix",
+          "accept": false
+        },
+        "10": {
+          "verdict": "reject",
+          "reason": "insufficient_fix",
+          "accept": false
+        },
+        "11": {
+          "verdict": "reject",
+          "reason": "insufficient_fix",
+          "accept": false
+        }
+      },
+      "wall_seconds": 9.1
+    },
+    {
+      "iter_id": 152,
+      "file": "B0m.h",
+      "line": 191,
+      "line_end": 191,
+      "candidate_sha": "d02aad0b6bfae78811fdca7910fdc5b48ccdfe3e",
+      "cand_min_precise_digits": 8.8399,
+      "curr_min_precise_digits": 8.8399,
+      "delta": 0.0,
+      "recorded_cand_min": 8.8399,
+      "xcheck_ok": true,
+      "hotspot_integral": "BIN1",
+      "hotspot_component": "coeff0.imag",
+      "hotspot_precise_digits": 8.8399,
+      "survive": {
+        "8": {
+          "verdict": "accept",
+          "reason": "accept",
+          "accept": true
+        },
+        "9": {
+          "verdict": "reject",
+          "reason": "insufficient_fix",
+          "accept": false
+        },
+        "10": {
+          "verdict": "reject",
+          "reason": "insufficient_fix",
+          "accept": false
+        },
+        "11": {
+          "verdict": "reject",
+          "reason": "insufficient_fix",
+          "accept": false
+        }
+      },
+      "wall_seconds": 9.48
+    },
+    {
+      "iter_id": 153,
+      "file": "B0m.h",
+      "line": 307,
+      "line_end": 307,
+      "candidate_sha": "2643fdee02c1df42de01d6aacf49690e60307361",
+      "cand_min_precise_digits": 8.8399,
+      "curr_min_precise_digits": 8.8399,
+      "delta": 0.0,
+      "recorded_cand_min": 8.8399,
+      "xcheck_ok": true,
+      "hotspot_integral": "BIN1",
+      "hotspot_component": "coeff0.imag",
+      "hotspot_precise_digits": 8.8399,
+      "survive": {
+        "8": {
+          "verdict": "accept",
+          "reason": "accept",
+          "accept": true
+        },
+        "9": {
+          "verdict": "reject",
+          "reason": "insufficient_fix",
+          "accept": false
+        },
+        "10": {
+          "verdict": "reject",
+          "reason": "insufficient_fix",
+          "accept": false
+        },
+        "11": {
+          "verdict": "reject",
+          "reason": "insufficient_fix",
+          "accept": false
+        }
+      },
+      "wall_seconds": 9.85
+    },
+    {
+      "iter_id": 154,
+      "file": "B0m.h",
+      "line": 338,
+      "line_end": 338,
+      "candidate_sha": "174b5e4d7c3eeee51d4d61cb56864b41c76adbf7",
+      "cand_min_precise_digits": 8.8399,
+      "curr_min_precise_digits": 8.8399,
+      "delta": 0.0,
+      "recorded_cand_min": 8.8399,
+      "xcheck_ok": true,
+      "hotspot_integral": "BIN1",
+      "hotspot_component": "coeff0.imag",
+      "hotspot_precise_digits": 8.8399,
+      "survive": {
+        "8": {
+          "verdict": "accept",
+          "reason": "accept",
+          "accept": true
+        },
+        "9": {
+          "verdict": "reject",
+          "reason": "insufficient_fix",
+          "accept": false
+        },
+        "10": {
+          "verdict": "reject",
+          "reason": "insufficient_fix",
+          "accept": false
+        },
+        "11": {
+          "verdict": "reject",
+          "reason": "insufficient_fix",
+          "accept": false
+        }
+      },
+      "wall_seconds": 9.04
+    },
+    {
+      "iter_id": 157,
+      "file": "B1m.h",
+      "line": 203,
+      "line_end": 203,
+      "candidate_sha": "bb98221b0652826946f4d39a7a274c4e504cef8a",
+      "cand_min_precise_digits": 8.8399,
+      "curr_min_precise_digits": 8.8399,
+      "delta": 0.0,
+      "recorded_cand_min": 8.8399,
+      "xcheck_ok": true,
+      "hotspot_integral": "BIN1",
+      "hotspot_component": "coeff0.imag",
+      "hotspot_precise_digits": 8.8399,
+      "survive": {
+        "8": {
+          "verdict": "accept",
+          "reason": "accept",
+          "accept": true
+        },
+        "9": {
+          "verdict": "reject",
+          "reason": "insufficient_fix",
+          "accept": false
+        },
+        "10": {
+          "verdict": "reject",
+          "reason": "insufficient_fix",
+          "accept": false
+        },
+        "11": {
+          "verdict": "reject",
+          "reason": "insufficient_fix",
+          "accept": false
+        }
+      },
+      "wall_seconds": 9.18
+    },
+    {
+      "iter_id": 158,
+      "file": "B2m.h",
+      "line": 155,
+      "line_end": 155,
+      "candidate_sha": "49a4eafdc077cadc965889635d43fcdc55f9e41b",
+      "cand_min_precise_digits": 8.8399,
+      "curr_min_precise_digits": 8.8399,
+      "delta": 0.0,
+      "recorded_cand_min": 8.8399,
+      "xcheck_ok": true,
+      "hotspot_integral": "BIN1",
+      "hotspot_component": "coeff0.imag",
+      "hotspot_precise_digits": 8.8399,
+      "survive": {
+        "8": {
+          "verdict": "accept",
+          "reason": "accept",
+          "accept": true
+        },
+        "9": {
+          "verdict": "reject",
+          "reason": "insufficient_fix",
+          "accept": false
+        },
+        "10": {
+          "verdict": "reject",
+          "reason": "insufficient_fix",
+          "accept": false
+        },
+        "11": {
+          "verdict": "reject",
+          "reason": "insufficient_fix",
+          "accept": false
+        }
+      },
+      "wall_seconds": 9.07
+    },
+    {
+      "iter_id": 159,
+      "file": "B2m.h",
+      "line": 193,
+      "line_end": 193,
+      "candidate_sha": "01a75fae39515ae8297723c46dc1ae2a29d28956",
+      "cand_min_precise_digits": 8.8399,
+      "curr_min_precise_digits": 8.8399,
+      "delta": 0.0,
+      "recorded_cand_min": 8.8399,
+      "xcheck_ok": true,
+      "hotspot_integral": "BIN1",
+      "hotspot_component": "coeff0.imag",
+      "hotspot_precise_digits": 8.8399,
+      "survive": {
+        "8": {
+          "verdict": "accept",
+          "reason": "accept",
+          "accept": true
+        },
+        "9": {
+          "verdict": "reject",
+          "reason": "insufficient_fix",
+          "accept": false
+        },
+        "10": {
+          "verdict": "reject",
+          "reason": "insufficient_fix",
+          "accept": false
+        },
+        "11": {
+          "verdict": "reject",
+          "reason": "insufficient_fix",
+          "accept": false
+        }
+      },
+      "wall_seconds": 9.28
+    },
+    {
+      "iter_id": 160,
+      "file": "kokkosUtils.h",
+      "line": 79,
+      "line_end": 79,
+      "candidate_sha": "e5084672dba915faf7300abdcff33222459cf1ea",
+      "cand_min_precise_digits": 8.8399,
+      "curr_min_precise_digits": 8.8399,
+      "delta": 0.0,
+      "recorded_cand_min": 8.8399,
+      "xcheck_ok": true,
+      "hotspot_integral": "BIN1",
+      "hotspot_component": "coeff0.imag",
+      "hotspot_precise_digits": 8.8399,
+      "survive": {
+        "8": {
+          "verdict": "accept",
+          "reason": "accept",
+          "accept": true
+        },
+        "9": {
+          "verdict": "reject",
+          "reason": "insufficient_fix",
+          "accept": false
+        },
+        "10": {
+          "verdict": "reject",
+          "reason": "insufficient_fix",
+          "accept": false
+        },
+        "11": {
+          "verdict": "reject",
+          "reason": "insufficient_fix",
+          "accept": false
+        }
+      },
+      "wall_seconds": 9.16
+    },
+    {
+      "iter_id": 161,
+      "file": "B1m.h",
+      "line": 227,
+      "line_end": 227,
+      "candidate_sha": "203156b8945f491a54e3640d78d6657c8dd22a04",
+      "cand_min_precise_digits": 8.8399,
+      "curr_min_precise_digits": 8.8399,
+      "delta": 0.0,
+      "recorded_cand_min": 8.8399,
+      "xcheck_ok": true,
+      "hotspot_integral": "BIN1",
+      "hotspot_component": "coeff0.imag",
+      "hotspot_precise_digits": 8.8399,
+      "survive": {
+        "8": {
+          "verdict": "accept",
+          "reason": "accept",
+          "accept": true
+        },
+        "9": {
+          "verdict": "reject",
+          "reason": "insufficient_fix",
+          "accept": false
+        },
+        "10": {
+          "verdict": "reject",
+          "reason": "insufficient_fix",
+          "accept": false
+        },
+        "11": {
+          "verdict": "reject",
+          "reason": "insufficient_fix",
+          "accept": false
+        }
+      },
+      "wall_seconds": 9.21
+    },
+    {
+      "iter_id": 162,
+      "file": "B2m.h",
+      "line": 574,
+      "line_end": 574,
+      "candidate_sha": "6f2e2f71ad9360d2e8eb94cb3c12e64ff98d4280",
+      "cand_min_precise_digits": 8.8399,
+      "curr_min_precise_digits": 8.8399,
+      "delta": 0.0,
+      "recorded_cand_min": 8.8399,
+      "xcheck_ok": true,
+      "hotspot_integral": "BIN1",
+      "hotspot_component": "coeff0.imag",
+      "hotspot_precise_digits": 8.8399,
+      "survive": {
+        "8": {
+          "verdict": "accept",
+          "reason": "accept",
+          "accept": true
+        },
+        "9": {
+          "verdict": "reject",
+          "reason": "insufficient_fix",
+          "accept": false
+        },
+        "10": {
+          "verdict": "reject",
+          "reason": "insufficient_fix",
+          "accept": false
+        },
+        "11": {
+          "verdict": "reject",
+          "reason": "insufficient_fix",
+          "accept": false
+        }
+      },
+      "wall_seconds": 9.33
+    },
+    {
+      "iter_id": 163,
+      "file": "B2m.h",
+      "line": 576,
+      "line_end": 576,
+      "candidate_sha": "a57e1ae188f49387d5b58302f5cdfb59d275aeaf",
+      "cand_min_precise_digits": 8.8399,
+      "curr_min_precise_digits": 8.8399,
+      "delta": 0.0,
+      "recorded_cand_min": 8.8399,
+      "xcheck_ok": true,
+      "hotspot_integral": "BIN1",
+      "hotspot_component": "coeff0.imag",
+      "hotspot_precise_digits": 8.8399,
+      "survive": {
+        "8": {
+          "verdict": "accept",
+          "reason": "accept",
+          "accept": true
+        },
+        "9": {
+          "verdict": "reject",
+          "reason": "insufficient_fix",
+          "accept": false
+        },
+        "10": {
+          "verdict": "reject",
+          "reason": "insufficient_fix",
+          "accept": false
+        },
+        "11": {
+          "verdict": "reject",
+          "reason": "insufficient_fix",
+          "accept": false
+        }
+      },
+      "wall_seconds": 9.27
+    },
+    {
+      "iter_id": 164,
+      "file": "B4m.h",
+      "line": 188,
+      "line_end": 188,
+      "candidate_sha": "410f722f1cddf908f03af658ef9525d907dffbd2",
+      "cand_min_precise_digits": 8.8399,
+      "curr_min_precise_digits": 8.8399,
+      "delta": 0.0,
+      "recorded_cand_min": 8.8399,
+      "xcheck_ok": true,
+      "hotspot_integral": "BIN1",
+      "hotspot_component": "coeff0.imag",
+      "hotspot_precise_digits": 8.8399,
+      "survive": {
+        "8": {
+          "verdict": "accept",
+          "reason": "accept",
+          "accept": true
+        },
+        "9": {
+          "verdict": "reject",
+          "reason": "insufficient_fix",
+          "accept": false
+        },
+        "10": {
+          "verdict": "reject",
+          "reason": "insufficient_fix",
+          "accept": false
+        },
+        "11": {
+          "verdict": "reject",
+          "reason": "insufficient_fix",
+          "accept": false
+        }
+      },
+      "wall_seconds": 9.13
+    },
+    {
+      "iter_id": 167,
+      "file": "B1m.h",
+      "line": 163,
+      "line_end": 163,
+      "candidate_sha": "025446d579806742f03918b39ef6c4f066d8f5a9",
+      "cand_min_precise_digits": 8.8399,
+      "curr_min_precise_digits": 8.8399,
+      "delta": 0.0,
+      "recorded_cand_min": 8.8399,
+      "xcheck_ok": true,
+      "hotspot_integral": "BIN1",
+      "hotspot_component": "coeff0.imag",
+      "hotspot_precise_digits": 8.8399,
+      "survive": {
+        "8": {
+          "verdict": "accept",
+          "reason": "accept",
+          "accept": true
+        },
+        "9": {
+          "verdict": "reject",
+          "reason": "insufficient_fix",
+          "accept": false
+        },
+        "10": {
+          "verdict": "reject",
+          "reason": "insufficient_fix",
+          "accept": false
+        },
+        "11": {
+          "verdict": "reject",
+          "reason": "insufficient_fix",
+          "accept": false
+        }
+      },
+      "wall_seconds": 8.77
+    },
+    {
+      "iter_id": 168,
+      "file": "B1m.h",
+      "line": 189,
+      "line_end": 189,
+      "candidate_sha": "91de281366ed03402aa359c18e06d8ed1d07664c",
+      "cand_min_precise_digits": 8.8399,
+      "curr_min_precise_digits": 8.8399,
+      "delta": 0.0,
+      "recorded_cand_min": 8.8399,
+      "xcheck_ok": true,
+      "hotspot_integral": "BIN1",
+      "hotspot_component": "coeff0.imag",
+      "hotspot_precise_digits": 8.8399,
+      "survive": {
+        "8": {
+          "verdict": "accept",
+          "reason": "accept",
+          "accept": true
+        },
+        "9": {
+          "verdict": "reject",
+          "reason": "insufficient_fix",
+          "accept": false
+        },
+        "10": {
+          "verdict": "reject",
+          "reason": "insufficient_fix",
+          "accept": false
+        },
+        "11": {
+          "verdict": "reject",
+          "reason": "insufficient_fix",
+          "accept": false
+        }
+      },
+      "wall_seconds": 9.05
+    },
+    {
+      "iter_id": 169,
+      "file": "B1m.h",
+      "line": 199,
+      "line_end": 199,
+      "candidate_sha": "f7dc3e830059436329de7e636dbc3f3399e24ec3",
+      "cand_min_precise_digits": 8.8399,
+      "curr_min_precise_digits": 8.8399,
+      "delta": 0.0,
+      "recorded_cand_min": 8.8399,
+      "xcheck_ok": true,
+      "hotspot_integral": "BIN1",
+      "hotspot_component": "coeff0.imag",
+      "hotspot_precise_digits": 8.8399,
+      "survive": {
+        "8": {
+          "verdict": "accept",
+          "reason": "accept",
+          "accept": true
+        },
+        "9": {
+          "verdict": "reject",
+          "reason": "insufficient_fix",
+          "accept": false
+        },
+        "10": {
+          "verdict": "reject",
+          "reason": "insufficient_fix",
+          "accept": false
+        },
+        "11": {
+          "verdict": "reject",
+          "reason": "insufficient_fix",
+          "accept": false
+        }
+      },
+      "wall_seconds": 9.22
+    },
+    {
+      "iter_id": 170,
+      "file": "B1m.h",
+      "line": 225,
+      "line_end": 225,
+      "candidate_sha": "25ced4b548a5aaf509fd40dc930c8e2339f346fb",
+      "cand_min_precise_digits": 8.8399,
+      "curr_min_precise_digits": 8.8399,
+      "delta": 0.0,
+      "recorded_cand_min": 8.8399,
+      "xcheck_ok": true,
+      "hotspot_integral": "BIN1",
+      "hotspot_component": "coeff0.imag",
+      "hotspot_precise_digits": 8.8399,
+      "survive": {
+        "8": {
+          "verdict": "accept",
+          "reason": "accept",
+          "accept": true
+        },
+        "9": {
+          "verdict": "reject",
+          "reason": "insufficient_fix",
+          "accept": false
+        },
+        "10": {
+          "verdict": "reject",
+          "reason": "insufficient_fix",
+          "accept": false
+        },
+        "11": {
+          "verdict": "reject",
+          "reason": "insufficient_fix",
+          "accept": false
+        }
+      },
+      "wall_seconds": 9.22
+    },
+    {
+      "iter_id": 171,
+      "file": "B1m.h",
+      "line": 237,
+      "line_end": 237,
+      "candidate_sha": "8d650cb156d582bcb53cd8683c0d076d7160be91",
+      "cand_min_precise_digits": 8.8399,
+      "curr_min_precise_digits": 8.8399,
+      "delta": 0.0,
+      "recorded_cand_min": 8.8399,
+      "xcheck_ok": true,
+      "hotspot_integral": "BIN1",
+      "hotspot_component": "coeff0.imag",
+      "hotspot_precise_digits": 8.8399,
+      "survive": {
+        "8": {
+          "verdict": "accept",
+          "reason": "accept",
+          "accept": true
+        },
+        "9": {
+          "verdict": "reject",
+          "reason": "insufficient_fix",
+          "accept": false
+        },
+        "10": {
+          "verdict": "reject",
+          "reason": "insufficient_fix",
+          "accept": false
+        },
+        "11": {
+          "verdict": "reject",
+          "reason": "insufficient_fix",
+          "accept": false
+        }
+      },
+      "wall_seconds": 9.13
+    },
+    {
+      "iter_id": 172,
+      "file": "B2m.h",
+      "line": 108,
+      "line_end": 108,
+      "candidate_sha": "20c47a0177b96b1ae11bfa7fe73152e70b42fa15",
+      "cand_min_precise_digits": 8.8399,
+      "curr_min_precise_digits": 8.8399,
+      "delta": 0.0,
+      "recorded_cand_min": 8.8399,
+      "xcheck_ok": true,
+      "hotspot_integral": "BIN1",
+      "hotspot_component": "coeff0.imag",
+      "hotspot_precise_digits": 8.8399,
+      "survive": {
+        "8": {
+          "verdict": "accept",
+          "reason": "accept",
+          "accept": true
+        },
+        "9": {
+          "verdict": "reject",
+          "reason": "insufficient_fix",
+          "accept": false
+        },
+        "10": {
+          "verdict": "reject",
+          "reason": "insufficient_fix",
+          "accept": false
+        },
+        "11": {
+          "verdict": "reject",
+          "reason": "insufficient_fix",
+          "accept": false
+        }
+      },
+      "wall_seconds": 9.19
+    },
+    {
+      "iter_id": 173,
+      "file": "B2m.h",
+      "line": 109,
+      "line_end": 109,
+      "candidate_sha": "b999023f6cf50a5c821bb20b7cf9804b1df5b3f4",
+      "cand_min_precise_digits": 8.8399,
+      "curr_min_precise_digits": 8.8399,
+      "delta": 0.0,
+      "recorded_cand_min": 8.8399,
+      "xcheck_ok": true,
+      "hotspot_integral": "BIN1",
+      "hotspot_component": "coeff0.imag",
+      "hotspot_precise_digits": 8.8399,
+      "survive": {
+        "8": {
+          "verdict": "accept",
+          "reason": "accept",
+          "accept": true
+        },
+        "9": {
+          "verdict": "reject",
+          "reason": "insufficient_fix",
+          "accept": false
+        },
+        "10": {
+          "verdict": "reject",
+          "reason": "insufficient_fix",
+          "accept": false
+        },
+        "11": {
+          "verdict": "reject",
+          "reason": "insufficient_fix",
+          "accept": false
+        }
+      },
+      "wall_seconds": 9.17
+    },
+    {
+      "iter_id": 174,
+      "file": "B2m.h",
+      "line": 240,
+      "line_end": 240,
+      "candidate_sha": "32e3637ec3da5e88f11b183641f4cbb2392aa408",
+      "cand_min_precise_digits": 8.8399,
+      "curr_min_precise_digits": 8.8399,
+      "delta": 0.0,
+      "recorded_cand_min": 8.8399,
+      "xcheck_ok": true,
+      "hotspot_integral": "BIN1",
+      "hotspot_component": "coeff0.imag",
+      "hotspot_precise_digits": 8.8399,
+      "survive": {
+        "8": {
+          "verdict": "accept",
+          "reason": "accept",
+          "accept": true
+        },
+        "9": {
+          "verdict": "reject",
+          "reason": "insufficient_fix",
+          "accept": false
+        },
+        "10": {
+          "verdict": "reject",
+          "reason": "insufficient_fix",
+          "accept": false
+        },
+        "11": {
+          "verdict": "reject",
+          "reason": "insufficient_fix",
+          "accept": false
+        }
+      },
+      "wall_seconds": 9.25
+    },
+    {
+      "iter_id": 175,
+      "file": "B4m.h",
+      "line": 146,
+      "line_end": 146,
+      "candidate_sha": "fb2a533ba8959675c9e510ec4ceeb6d381618783",
+      "cand_min_precise_digits": 8.8399,
+      "curr_min_precise_digits": 8.8399,
+      "delta": 0.0,
+      "recorded_cand_min": 8.8399,
+      "xcheck_ok": true,
+      "hotspot_integral": "BIN1",
+      "hotspot_component": "coeff0.imag",
+      "hotspot_precise_digits": 8.8399,
+      "survive": {
+        "8": {
+          "verdict": "accept",
+          "reason": "accept",
+          "accept": true
+        },
+        "9": {
+          "verdict": "reject",
+          "reason": "insufficient_fix",
+          "accept": false
+        },
+        "10": {
+          "verdict": "reject",
+          "reason": "insufficient_fix",
+          "accept": false
+        },
+        "11": {
+          "verdict": "reject",
+          "reason": "insufficient_fix",
+          "accept": false
+        }
+      },
+      "wall_seconds": 9.19
+    },
+    {
+      "iter_id": 176,
+      "file": "B4m.h",
+      "line": 147,
+      "line_end": 147,
+      "candidate_sha": "46595a598a880bac0f5d594622497d61a4195dbf",
+      "cand_min_precise_digits": 8.8399,
+      "curr_min_precise_digits": 8.8399,
+      "delta": 0.0,
+      "recorded_cand_min": 8.8399,
+      "xcheck_ok": true,
+      "hotspot_integral": "BIN1",
+      "hotspot_component": "coeff0.imag",
+      "hotspot_precise_digits": 8.8399,
+      "survive": {
+        "8": {
+          "verdict": "accept",
+          "reason": "accept",
+          "accept": true
+        },
+        "9": {
+          "verdict": "reject",
+          "reason": "insufficient_fix",
+          "accept": false
+        },
+        "10": {
+          "verdict": "reject",
+          "reason": "insufficient_fix",
+          "accept": false
+        },
+        "11": {
+          "verdict": "reject",
+          "reason": "insufficient_fix",
+          "accept": false
+        }
+      },
+      "wall_seconds": 9.25
+    },
+    {
+      "iter_id": 177,
+      "file": "B4m.h",
+      "line": 148,
+      "line_end": 148,
+      "candidate_sha": "e48f0a85db1ef31565171c6899988e6ef536b62e",
+      "cand_min_precise_digits": 8.8399,
+      "curr_min_precise_digits": 8.8399,
+      "delta": 0.0,
+      "recorded_cand_min": 8.8399,
+      "xcheck_ok": true,
+      "hotspot_integral": "BIN1",
+      "hotspot_component": "coeff0.imag",
+      "hotspot_precise_digits": 8.8399,
+      "survive": {
+        "8": {
+          "verdict": "accept",
+          "reason": "accept",
+          "accept": true
+        },
+        "9": {
+          "verdict": "reject",
+          "reason": "insufficient_fix",
+          "accept": false
+        },
+        "10": {
+          "verdict": "reject",
+          "reason": "insufficient_fix",
+          "accept": false
+        },
+        "11": {
+          "verdict": "reject",
+          "reason": "insufficient_fix",
+          "accept": false
+        }
+      },
+      "wall_seconds": 9.35
+    },
+    {
+      "iter_id": 178,
+      "file": "B4m.h",
+      "line": 149,
+      "line_end": 149,
+      "candidate_sha": "dbb1481b6bc8eb5230be6e5c2a243469bc32bc7e",
+      "cand_min_precise_digits": 8.8399,
+      "curr_min_precise_digits": 8.8399,
+      "delta": 0.0,
+      "recorded_cand_min": 8.8399,
+      "xcheck_ok": true,
+      "hotspot_integral": "BIN1",
+      "hotspot_component": "coeff0.imag",
+      "hotspot_precise_digits": 8.8399,
+      "survive": {
+        "8": {
+          "verdict": "accept",
+          "reason": "accept",
+          "accept": true
+        },
+        "9": {
+          "verdict": "reject",
+          "reason": "insufficient_fix",
+          "accept": false
+        },
+        "10": {
+          "verdict": "reject",
+          "reason": "insufficient_fix",
+          "accept": false
+        },
+        "11": {
+          "verdict": "reject",
+          "reason": "insufficient_fix",
+          "accept": false
+        }
+      },
+      "wall_seconds": 9.74
+    },
+    {
+      "iter_id": 179,
+      "file": "B4m.h",
+      "line": 150,
+      "line_end": 150,
+      "candidate_sha": "4ca10e4dc01a4944a96b301e69281d255f7c8771",
+      "cand_min_precise_digits": 8.8399,
+      "curr_min_precise_digits": 8.8399,
+      "delta": 0.0,
+      "recorded_cand_min": 8.8399,
+      "xcheck_ok": true,
+      "hotspot_integral": "BIN1",
+      "hotspot_component": "coeff0.imag",
+      "hotspot_precise_digits": 8.8399,
+      "survive": {
+        "8": {
+          "verdict": "accept",
+          "reason": "accept",
+          "accept": true
+        },
+        "9": {
+          "verdict": "reject",
+          "reason": "insufficient_fix",
+          "accept": false
+        },
+        "10": {
+          "verdict": "reject",
+          "reason": "insufficient_fix",
+          "accept": false
+        },
+        "11": {
+          "verdict": "reject",
+          "reason": "insufficient_fix",
+          "accept": false
+        }
+      },
+      "wall_seconds": 9.14
+    },
+    {
+      "iter_id": 180,
+      "file": "B4m.h",
+      "line": 151,
+      "line_end": 151,
+      "candidate_sha": "71e48a8833a5e649764fdaec505a0f7f55f674c8",
+      "cand_min_precise_digits": 8.8399,
+      "curr_min_precise_digits": 8.8399,
+      "delta": 0.0,
+      "recorded_cand_min": 8.8399,
+      "xcheck_ok": true,
+      "hotspot_integral": "BIN1",
+      "hotspot_component": "coeff0.imag",
+      "hotspot_precise_digits": 8.8399,
+      "survive": {
+        "8": {
+          "verdict": "accept",
+          "reason": "accept",
+          "accept": true
+        },
+        "9": {
+          "verdict": "reject",
+          "reason": "insufficient_fix",
+          "accept": false
+        },
+        "10": {
+          "verdict": "reject",
+          "reason": "insufficient_fix",
+          "accept": false
+        },
+        "11": {
+          "verdict": "reject",
+          "reason": "insufficient_fix",
+          "accept": false
+        }
+      },
+      "wall_seconds": 9.23
+    },
+    {
+      "iter_id": 181,
+      "file": "B4m.h",
+      "line": 180,
+      "line_end": 180,
+      "candidate_sha": "70710f49813195e31c556b27d55807efb61c187f",
+      "cand_min_precise_digits": 8.8399,
+      "curr_min_precise_digits": 8.8399,
+      "delta": 0.0,
+      "recorded_cand_min": 8.8399,
+      "xcheck_ok": true,
+      "hotspot_integral": "BIN1",
+      "hotspot_component": "coeff0.imag",
+      "hotspot_precise_digits": 8.8399,
+      "survive": {
+        "8": {
+          "verdict": "accept",
+          "reason": "accept",
+          "accept": true
+        },
+        "9": {
+          "verdict": "reject",
+          "reason": "insufficient_fix",
+          "accept": false
+        },
+        "10": {
+          "verdict": "reject",
+          "reason": "insufficient_fix",
+          "accept": false
+        },
+        "11": {
+          "verdict": "reject",
+          "reason": "insufficient_fix",
+          "accept": false
+        }
+      },
+      "wall_seconds": 9.06
+    },
+    {
+      "iter_id": 182,
+      "file": "boxGPU.h",
+      "line": 114,
+      "line_end": 114,
+      "candidate_sha": "d8e9127d24ba14201105d2c7fd5144815664271c",
+      "cand_min_precise_digits": 8.8399,
+      "curr_min_precise_digits": 8.8399,
+      "delta": 0.0,
+      "recorded_cand_min": 8.8399,
+      "xcheck_ok": true,
+      "hotspot_integral": "BIN1",
+      "hotspot_component": "coeff0.imag",
+      "hotspot_precise_digits": 8.8399,
+      "survive": {
+        "8": {
+          "verdict": "accept",
+          "reason": "accept",
+          "accept": true
+        },
+        "9": {
+          "verdict": "reject",
+          "reason": "insufficient_fix",
+          "accept": false
+        },
+        "10": {
+          "verdict": "reject",
+          "reason": "insufficient_fix",
+          "accept": false
+        },
+        "11": {
+          "verdict": "reject",
+          "reason": "insufficient_fix",
+          "accept": false
+        }
+      },
+      "wall_seconds": 9.23
+    },
+    {
+      "iter_id": 183,
+      "file": "boxGPU.h",
+      "line": 115,
+      "line_end": 115,
+      "candidate_sha": "888a3c5f4cc3ff26e4b1ee2490153b83a34dab4c",
+      "cand_min_precise_digits": 8.8399,
+      "curr_min_precise_digits": 8.8399,
+      "delta": 0.0,
+      "recorded_cand_min": 8.8399,
+      "xcheck_ok": true,
+      "hotspot_integral": "BIN1",
+      "hotspot_component": "coeff0.imag",
+      "hotspot_precise_digits": 8.8399,
+      "survive": {
+        "8": {
+          "verdict": "accept",
+          "reason": "accept",
+          "accept": true
+        },
+        "9": {
+          "verdict": "reject",
+          "reason": "insufficient_fix",
+          "accept": false
+        },
+        "10": {
+          "verdict": "reject",
+          "reason": "insufficient_fix",
+          "accept": false
+        },
+        "11": {
+          "verdict": "reject",
+          "reason": "insufficient_fix",
+          "accept": false
+        }
+      },
+      "wall_seconds": 9.15
+    },
+    {
+      "iter_id": 186,
+      "file": "B0m.h",
+      "line": 117,
+      "line_end": 117,
+      "candidate_sha": "b1c07c3baac68098c9abf2e6ded48b2a2cb2a547",
+      "cand_min_precise_digits": 8.8399,
+      "curr_min_precise_digits": 8.8399,
+      "delta": 0.0,
+      "recorded_cand_min": 8.8399,
+      "xcheck_ok": true,
+      "hotspot_integral": "BIN1",
+      "hotspot_component": "coeff0.imag",
+      "hotspot_precise_digits": 8.8399,
+      "survive": {
+        "8": {
+          "verdict": "accept",
+          "reason": "accept",
+          "accept": true
+        },
+        "9": {
+          "verdict": "reject",
+          "reason": "insufficient_fix",
+          "accept": false
+        },
+        "10": {
+          "verdict": "reject",
+          "reason": "insufficient_fix",
+          "accept": false
+        },
+        "11": {
+          "verdict": "reject",
+          "reason": "insufficient_fix",
+          "accept": false
+        }
+      },
+      "wall_seconds": 9.14
+    },
+    {
+      "iter_id": 189,
+      "file": "B0m.h",
+      "line": 305,
+      "line_end": 305,
+      "candidate_sha": "6516e23c3e25847b587dae7a1daa7659deadf826",
+      "cand_min_precise_digits": 8.8399,
+      "curr_min_precise_digits": 8.8399,
+      "delta": 0.0,
+      "recorded_cand_min": 8.8399,
+      "xcheck_ok": true,
+      "hotspot_integral": "BIN1",
+      "hotspot_component": "coeff0.imag",
+      "hotspot_precise_digits": 8.8399,
+      "survive": {
+        "8": {
+          "verdict": "accept",
+          "reason": "accept",
+          "accept": true
+        },
+        "9": {
+          "verdict": "reject",
+          "reason": "insufficient_fix",
+          "accept": false
+        },
+        "10": {
+          "verdict": "reject",
+          "reason": "insufficient_fix",
+          "accept": false
+        },
+        "11": {
+          "verdict": "reject",
+          "reason": "insufficient_fix",
+          "accept": false
+        }
+      },
+      "wall_seconds": 9.36
+    },
+    {
+      "iter_id": 190,
+      "file": "B1m.h",
+      "line": 109,
+      "line_end": 109,
+      "candidate_sha": "6f2a22d1174282e074e91e34d798cbfe9b3c2481",
+      "cand_min_precise_digits": 8.8399,
+      "curr_min_precise_digits": 8.8399,
+      "delta": 0.0,
+      "recorded_cand_min": 8.8399,
+      "xcheck_ok": true,
+      "hotspot_integral": "BIN1",
+      "hotspot_component": "coeff0.imag",
+      "hotspot_precise_digits": 8.8399,
+      "survive": {
+        "8": {
+          "verdict": "accept",
+          "reason": "accept",
+          "accept": true
+        },
+        "9": {
+          "verdict": "reject",
+          "reason": "insufficient_fix",
+          "accept": false
+        },
+        "10": {
+          "verdict": "reject",
+          "reason": "insufficient_fix",
+          "accept": false
+        },
+        "11": {
+          "verdict": "reject",
+          "reason": "insufficient_fix",
+          "accept": false
+        }
+      },
+      "wall_seconds": 9.21
+    },
+    {
+      "iter_id": 191,
+      "file": "B1m.h",
+      "line": 125,
+      "line_end": 125,
+      "candidate_sha": "8b9af2ae4115806fd4d843509cbe120e3fce489f",
+      "cand_min_precise_digits": 8.8399,
+      "curr_min_precise_digits": 8.8399,
+      "delta": 0.0,
+      "recorded_cand_min": 8.8399,
+      "xcheck_ok": true,
+      "hotspot_integral": "BIN1",
+      "hotspot_component": "coeff0.imag",
+      "hotspot_precise_digits": 8.8399,
+      "survive": {
+        "8": {
+          "verdict": "accept",
+          "reason": "accept",
+          "accept": true
+        },
+        "9": {
+          "verdict": "reject",
+          "reason": "insufficient_fix",
+          "accept": false
+        },
+        "10": {
+          "verdict": "reject",
+          "reason": "insufficient_fix",
+          "accept": false
+        },
+        "11": {
+          "verdict": "reject",
+          "reason": "insufficient_fix",
+          "accept": false
+        }
+      },
+      "wall_seconds": 9.13
+    },
+    {
+      "iter_id": 192,
+      "file": "B1m.h",
+      "line": 138,
+      "line_end": 138,
+      "candidate_sha": "bc6af8917023813f83b401691a7bdbfb5aa24ad3",
+      "cand_min_precise_digits": 8.8399,
+      "curr_min_precise_digits": 8.8399,
+      "delta": 0.0,
+      "recorded_cand_min": 8.8399,
+      "xcheck_ok": true,
+      "hotspot_integral": "BIN1",
+      "hotspot_component": "coeff0.imag",
+      "hotspot_precise_digits": 8.8399,
+      "survive": {
+        "8": {
+          "verdict": "accept",
+          "reason": "accept",
+          "accept": true
+        },
+        "9": {
+          "verdict": "reject",
+          "reason": "insufficient_fix",
+          "accept": false
+        },
+        "10": {
+          "verdict": "reject",
+          "reason": "insufficient_fix",
+          "accept": false
+        },
+        "11": {
+          "verdict": "reject",
+          "reason": "insufficient_fix",
+          "accept": false
+        }
+      },
+      "wall_seconds": 9.53
+    },
+    {
+      "iter_id": 193,
+      "file": "B1m.h",
+      "line": 174,
+      "line_end": 174,
+      "candidate_sha": "ec097dc1f52d06f68bbdba14e29ab972ee5e9db6",
+      "cand_min_precise_digits": 8.8399,
+      "curr_min_precise_digits": 8.8399,
+      "delta": 0.0,
+      "recorded_cand_min": 8.8399,
+      "xcheck_ok": true,
+      "hotspot_integral": "BIN1",
+      "hotspot_component": "coeff0.imag",
+      "hotspot_precise_digits": 8.8399,
+      "survive": {
+        "8": {
+          "verdict": "accept",
+          "reason": "accept",
+          "accept": true
+        },
+        "9": {
+          "verdict": "reject",
+          "reason": "insufficient_fix",
+          "accept": false
+        },
+        "10": {
+          "verdict": "reject",
+          "reason": "insufficient_fix",
+          "accept": false
+        },
+        "11": {
+          "verdict": "reject",
+          "reason": "insufficient_fix",
+          "accept": false
+        }
+      },
+      "wall_seconds": 10.0
+    },
+    {
+      "iter_id": 194,
+      "file": "B1m.h",
+      "line": 194,
+      "line_end": 194,
+      "candidate_sha": "6dde18368e78fffc94acf8b8f1760f71764ac5a8",
+      "cand_min_precise_digits": 8.8399,
+      "curr_min_precise_digits": 8.8399,
+      "delta": 0.0,
+      "recorded_cand_min": 8.8399,
+      "xcheck_ok": true,
+      "hotspot_integral": "BIN1",
+      "hotspot_component": "coeff0.imag",
+      "hotspot_precise_digits": 8.8399,
+      "survive": {
+        "8": {
+          "verdict": "accept",
+          "reason": "accept",
+          "accept": true
+        },
+        "9": {
+          "verdict": "reject",
+          "reason": "insufficient_fix",
+          "accept": false
+        },
+        "10": {
+          "verdict": "reject",
+          "reason": "insufficient_fix",
+          "accept": false
+        },
+        "11": {
+          "verdict": "reject",
+          "reason": "insufficient_fix",
+          "accept": false
+        }
+      },
+      "wall_seconds": 9.14
+    },
+    {
+      "iter_id": 203,
+      "file": "B2m.h",
+      "line": 129,
+      "line_end": 129,
+      "candidate_sha": "c511c94d84085ccbcf0503d8c2fe1fa8ecfd4917",
+      "cand_min_precise_digits": 8.8399,
+      "curr_min_precise_digits": 8.8399,
+      "delta": 0.0,
+      "recorded_cand_min": 8.8399,
+      "xcheck_ok": true,
+      "hotspot_integral": "BIN1",
+      "hotspot_component": "coeff0.imag",
+      "hotspot_precise_digits": 8.8399,
+      "survive": {
+        "8": {
+          "verdict": "accept",
+          "reason": "accept",
+          "accept": true
+        },
+        "9": {
+          "verdict": "reject",
+          "reason": "insufficient_fix",
+          "accept": false
+        },
+        "10": {
+          "verdict": "reject",
+          "reason": "insufficient_fix",
+          "accept": false
+        },
+        "11": {
+          "verdict": "reject",
+          "reason": "insufficient_fix",
+          "accept": false
+        }
+      },
+      "wall_seconds": 9.19
+    },
+    {
+      "iter_id": 204,
+      "file": "B2m.h",
+      "line": 130,
+      "line_end": 130,
+      "candidate_sha": "9321db2af18e3bf5c791ffde66d0a0f7fb5ca625",
+      "cand_min_precise_digits": 8.8399,
+      "curr_min_precise_digits": 8.8399,
+      "delta": 0.0,
+      "recorded_cand_min": 8.8399,
+      "xcheck_ok": true,
+      "hotspot_integral": "BIN1",
+      "hotspot_component": "coeff0.imag",
+      "hotspot_precise_digits": 8.8399,
+      "survive": {
+        "8": {
+          "verdict": "accept",
+          "reason": "accept",
+          "accept": true
+        },
+        "9": {
+          "verdict": "reject",
+          "reason": "insufficient_fix",
+          "accept": false
+        },
+        "10": {
+          "verdict": "reject",
+          "reason": "insufficient_fix",
+          "accept": false
+        },
+        "11": {
+          "verdict": "reject",
+          "reason": "insufficient_fix",
+          "accept": false
+        }
+      },
+      "wall_seconds": 9.21
+    },
+    {
+      "iter_id": 205,
+      "file": "B2m.h",
+      "line": 160,
+      "line_end": 160,
+      "candidate_sha": "cc15529c4d134d485316611137eaf41a451f5552",
+      "cand_min_precise_digits": 8.8399,
+      "curr_min_precise_digits": 8.8399,
+      "delta": 0.0,
+      "recorded_cand_min": 8.8399,
+      "xcheck_ok": true,
+      "hotspot_integral": "BIN1",
+      "hotspot_component": "coeff0.imag",
+      "hotspot_precise_digits": 8.8399,
+      "survive": {
+        "8": {
+          "verdict": "accept",
+          "reason": "accept",
+          "accept": true
+        },
+        "9": {
+          "verdict": "reject",
+          "reason": "insufficient_fix",
+          "accept": false
+        },
+        "10": {
+          "verdict": "reject",
+          "reason": "insufficient_fix",
+          "accept": false
+        },
+        "11": {
+          "verdict": "reject",
+          "reason": "insufficient_fix",
+          "accept": false
+        }
+      },
+      "wall_seconds": 9.2
+    },
+    {
+      "iter_id": 206,
+      "file": "B2m.h",
+      "line": 188,
+      "line_end": 188,
+      "candidate_sha": "00e1715a0d3170de0a7df0dd039408e70253ae53",
+      "cand_min_precise_digits": 8.8399,
+      "curr_min_precise_digits": 8.8399,
+      "delta": 0.0,
+      "recorded_cand_min": 8.8399,
+      "xcheck_ok": true,
+      "hotspot_integral": "BIN1",
+      "hotspot_component": "coeff0.imag",
+      "hotspot_precise_digits": 8.8399,
+      "survive": {
+        "8": {
+          "verdict": "accept",
+          "reason": "accept",
+          "accept": true
+        },
+        "9": {
+          "verdict": "reject",
+          "reason": "insufficient_fix",
+          "accept": false
+        },
+        "10": {
+          "verdict": "reject",
+          "reason": "insufficient_fix",
+          "accept": false
+        },
+        "11": {
+          "verdict": "reject",
+          "reason": "insufficient_fix",
+          "accept": false
+        }
+      },
+      "wall_seconds": 9.18
+    },
+    {
+      "iter_id": 207,
+      "file": "B2m.h",
+      "line": 646,
+      "line_end": 646,
+      "candidate_sha": "8b5d66c1a6351792f1bdbd9ea80cb05a51294a3d",
+      "cand_min_precise_digits": 8.8399,
+      "curr_min_precise_digits": 8.8399,
+      "delta": 0.0,
+      "recorded_cand_min": 8.8399,
+      "xcheck_ok": true,
+      "hotspot_integral": "BIN1",
+      "hotspot_component": "coeff0.imag",
+      "hotspot_precise_digits": 8.8399,
+      "survive": {
+        "8": {
+          "verdict": "accept",
+          "reason": "accept",
+          "accept": true
+        },
+        "9": {
+          "verdict": "reject",
+          "reason": "insufficient_fix",
+          "accept": false
+        },
+        "10": {
+          "verdict": "reject",
+          "reason": "insufficient_fix",
+          "accept": false
+        },
+        "11": {
+          "verdict": "reject",
+          "reason": "insufficient_fix",
+          "accept": false
+        }
+      },
+      "wall_seconds": 9.2
+    },
+    {
+      "iter_id": 208,
+      "file": "B3m.h",
+      "line": 101,
+      "line_end": 101,
+      "candidate_sha": "f60d60ec1c4da74248abd1a5665cbdc1f7f671f6",
+      "cand_min_precise_digits": 8.8399,
+      "curr_min_precise_digits": 8.8399,
+      "delta": 0.0,
+      "recorded_cand_min": 8.8399,
+      "xcheck_ok": true,
+      "hotspot_integral": "BIN1",
+      "hotspot_component": "coeff0.imag",
+      "hotspot_precise_digits": 8.8399,
+      "survive": {
+        "8": {
+          "verdict": "accept",
+          "reason": "accept",
+          "accept": true
+        },
+        "9": {
+          "verdict": "reject",
+          "reason": "insufficient_fix",
+          "accept": false
+        },
+        "10": {
+          "verdict": "reject",
+          "reason": "insufficient_fix",
+          "accept": false
+        },
+        "11": {
+          "verdict": "reject",
+          "reason": "insufficient_fix",
+          "accept": false
+        }
+      },
+      "wall_seconds": 9.19
+    },
+    {
+      "iter_id": 209,
+      "file": "B3m.h",
+      "line": 102,
+      "line_end": 102,
+      "candidate_sha": "8a14d733aff642642dfdaf57969ae9f1c6951aa8",
+      "cand_min_precise_digits": 8.8399,
+      "curr_min_precise_digits": 8.8399,
+      "delta": 0.0,
+      "recorded_cand_min": 8.8399,
+      "xcheck_ok": true,
+      "hotspot_integral": "BIN1",
+      "hotspot_component": "coeff0.imag",
+      "hotspot_precise_digits": 8.8399,
+      "survive": {
+        "8": {
+          "verdict": "accept",
+          "reason": "accept",
+          "accept": true
+        },
+        "9": {
+          "verdict": "reject",
+          "reason": "insufficient_fix",
+          "accept": false
+        },
+        "10": {
+          "verdict": "reject",
+          "reason": "insufficient_fix",
+          "accept": false
+        },
+        "11": {
+          "verdict": "reject",
+          "reason": "insufficient_fix",
+          "accept": false
+        }
+      },
+      "wall_seconds": 9.34
+    },
+    {
+      "iter_id": 210,
+      "file": "B3m.h",
+      "line": 104,
+      "line_end": 104,
+      "candidate_sha": "f2cb8687772776951b7209b603412904226259e9",
+      "cand_min_precise_digits": 8.8399,
+      "curr_min_precise_digits": 8.8399,
+      "delta": 0.0,
+      "recorded_cand_min": 8.8399,
+      "xcheck_ok": true,
+      "hotspot_integral": "BIN1",
+      "hotspot_component": "coeff0.imag",
+      "hotspot_precise_digits": 8.8399,
+      "survive": {
+        "8": {
+          "verdict": "accept",
+          "reason": "accept",
+          "accept": true
+        },
+        "9": {
+          "verdict": "reject",
+          "reason": "insufficient_fix",
+          "accept": false
+        },
+        "10": {
+          "verdict": "reject",
+          "reason": "insufficient_fix",
+          "accept": false
+        },
+        "11": {
+          "verdict": "reject",
+          "reason": "insufficient_fix",
+          "accept": false
+        }
+      },
+      "wall_seconds": 9.23
+    },
+    {
+      "iter_id": 213,
+      "file": "boxGPU.h",
+      "line": 139,
+      "line_end": 139,
+      "candidate_sha": "08b0c018b25f8a487c5cf620a8c709ecb7922856",
+      "cand_min_precise_digits": 8.8399,
+      "curr_min_precise_digits": 8.8399,
+      "delta": 0.0,
+      "recorded_cand_min": 8.8399,
+      "xcheck_ok": true,
+      "hotspot_integral": "BIN1",
+      "hotspot_component": "coeff0.imag",
+      "hotspot_precise_digits": 8.8399,
+      "survive": {
+        "8": {
+          "verdict": "accept",
+          "reason": "accept",
+          "accept": true
+        },
+        "9": {
+          "verdict": "reject",
+          "reason": "insufficient_fix",
+          "accept": false
+        },
+        "10": {
+          "verdict": "reject",
+          "reason": "insufficient_fix",
+          "accept": false
+        },
+        "11": {
+          "verdict": "reject",
+          "reason": "insufficient_fix",
+          "accept": false
+        }
+      },
+      "wall_seconds": 9.56
+    },
+    {
+      "iter_id": 216,
+      "file": "kokkosUtils.h",
+      "line": 232,
+      "line_end": 232,
+      "candidate_sha": "3a15e25e59153fd8a1d29f041744cb8b03054e07",
+      "cand_min_precise_digits": 8.8399,
+      "curr_min_precise_digits": 8.8399,
+      "delta": 0.0,
+      "recorded_cand_min": 8.8399,
+      "xcheck_ok": true,
+      "hotspot_integral": "BIN1",
+      "hotspot_component": "coeff0.imag",
+      "hotspot_precise_digits": 8.8399,
+      "survive": {
+        "8": {
+          "verdict": "accept",
+          "reason": "accept",
+          "accept": true
+        },
+        "9": {
+          "verdict": "reject",
+          "reason": "insufficient_fix",
+          "accept": false
+        },
+        "10": {
+          "verdict": "reject",
+          "reason": "insufficient_fix",
+          "accept": false
+        },
+        "11": {
+          "verdict": "reject",
+          "reason": "insufficient_fix",
+          "accept": false
+        }
+      },
+      "wall_seconds": 9.17
+    },
+    {
+      "iter_id": 217,
+      "file": "kokkosUtils.h",
+      "line": 367,
+      "line_end": 367,
+      "candidate_sha": "fa1718374e3bdd9f7992761250f181c7844fe5df",
+      "cand_min_precise_digits": 8.8399,
+      "curr_min_precise_digits": 8.8399,
+      "delta": 0.0,
+      "recorded_cand_min": 8.8399,
+      "xcheck_ok": true,
+      "hotspot_integral": "BIN1",
+      "hotspot_component": "coeff0.imag",
+      "hotspot_precise_digits": 8.8399,
+      "survive": {
+        "8": {
+          "verdict": "accept",
+          "reason": "accept",
+          "accept": true
+        },
+        "9": {
+          "verdict": "reject",
+          "reason": "insufficient_fix",
+          "accept": false
+        },
+        "10": {
+          "verdict": "reject",
+          "reason": "insufficient_fix",
+          "accept": false
+        },
+        "11": {
+          "verdict": "reject",
+          "reason": "insufficient_fix",
+          "accept": false
+        }
+      },
+      "wall_seconds": 9.07
+    },
+    {
+      "iter_id": 222,
+      "file": "kokkosUtils.h",
+      "line": 227,
+      "line_end": 227,
+      "candidate_sha": "f31c78fcec3adfbecfca1ea63ca98c2951046d4c",
+      "cand_min_precise_digits": 8.8399,
+      "curr_min_precise_digits": 8.8399,
+      "delta": 0.0,
+      "recorded_cand_min": 8.8399,
+      "xcheck_ok": true,
+      "hotspot_integral": "BIN1",
+      "hotspot_component": "coeff0.imag",
+      "hotspot_precise_digits": 8.8399,
+      "survive": {
+        "8": {
+          "verdict": "accept",
+          "reason": "accept",
+          "accept": true
+        },
+        "9": {
+          "verdict": "reject",
+          "reason": "insufficient_fix",
+          "accept": false
+        },
+        "10": {
+          "verdict": "reject",
+          "reason": "insufficient_fix",
+          "accept": false
+        },
+        "11": {
+          "verdict": "reject",
+          "reason": "insufficient_fix",
+          "accept": false
+        }
+      },
+      "wall_seconds": 9.33
+    },
+    {
+      "iter_id": 223,
+      "file": "kokkosUtils.h",
+      "line": 369,
+      "line_end": 369,
+      "candidate_sha": "9c79218f6181dcb2e815ae675a6ce011e4a3bcca",
+      "cand_min_precise_digits": 8.8399,
+      "curr_min_precise_digits": 8.8399,
+      "delta": 0.0,
+      "recorded_cand_min": 8.8399,
+      "xcheck_ok": true,
+      "hotspot_integral": "BIN1",
+      "hotspot_component": "coeff0.imag",
+      "hotspot_precise_digits": 8.8399,
+      "survive": {
+        "8": {
+          "verdict": "accept",
+          "reason": "accept",
+          "accept": true
+        },
+        "9": {
+          "verdict": "reject",
+          "reason": "insufficient_fix",
+          "accept": false
+        },
+        "10": {
+          "verdict": "reject",
+          "reason": "insufficient_fix",
+          "accept": false
+        },
+        "11": {
+          "verdict": "reject",
+          "reason": "insufficient_fix",
+          "accept": false
+        }
+      },
+      "wall_seconds": 9.24
+    },
+    {
+      "iter_id": 224,
+      "file": "kokkosUtils.h",
+      "line": 354,
+      "line_end": 354,
+      "candidate_sha": "8d14e559cbbb9c040989ee0670dab19d0f8bf7f2",
+      "cand_min_precise_digits": 8.8399,
+      "curr_min_precise_digits": 8.8399,
+      "delta": 0.0,
+      "recorded_cand_min": 8.8399,
+      "xcheck_ok": true,
+      "hotspot_integral": "BIN1",
+      "hotspot_component": "coeff0.imag",
+      "hotspot_precise_digits": 8.8399,
+      "survive": {
+        "8": {
+          "verdict": "accept",
+          "reason": "accept",
+          "accept": true
+        },
+        "9": {
+          "verdict": "reject",
+          "reason": "insufficient_fix",
+          "accept": false
+        },
+        "10": {
+          "verdict": "reject",
+          "reason": "insufficient_fix",
+          "accept": false
+        },
+        "11": {
+          "verdict": "reject",
+          "reason": "insufficient_fix",
+          "accept": false
+        }
+      },
+      "wall_seconds": 9.2
+    },
+    {
+      "iter_id": 225,
+      "file": "B2m.h",
+      "line": 235,
+      "line_end": 235,
+      "candidate_sha": "0fe3d3904878ec28a7fbdb5c56148fcfa601b811",
+      "cand_min_precise_digits": 8.8399,
+      "curr_min_precise_digits": 8.8399,
+      "delta": 0.0,
+      "recorded_cand_min": 8.8399,
+      "xcheck_ok": true,
+      "hotspot_integral": "BIN1",
+      "hotspot_component": "coeff0.imag",
+      "hotspot_precise_digits": 8.8399,
+      "survive": {
+        "8": {
+          "verdict": "accept",
+          "reason": "accept",
+          "accept": true
+        },
+        "9": {
+          "verdict": "reject",
+          "reason": "insufficient_fix",
+          "accept": false
+        },
+        "10": {
+          "verdict": "reject",
+          "reason": "insufficient_fix",
+          "accept": false
+        },
+        "11": {
+          "verdict": "reject",
+          "reason": "insufficient_fix",
+          "accept": false
+        }
+      },
+      "wall_seconds": 9.26
+    },
+    {
+      "iter_id": 226,
+      "file": "B2m.h",
+      "line": 236,
+      "line_end": 236,
+      "candidate_sha": "c65900a5af24456439f9b1e28404e6826929ced7",
+      "cand_min_precise_digits": 8.8399,
+      "curr_min_precise_digits": 8.8399,
+      "delta": 0.0,
+      "recorded_cand_min": 8.8399,
+      "xcheck_ok": true,
+      "hotspot_integral": "BIN1",
+      "hotspot_component": "coeff0.imag",
+      "hotspot_precise_digits": 8.8399,
+      "survive": {
+        "8": {
+          "verdict": "accept",
+          "reason": "accept",
+          "accept": true
+        },
+        "9": {
+          "verdict": "reject",
+          "reason": "insufficient_fix",
+          "accept": false
+        },
+        "10": {
+          "verdict": "reject",
+          "reason": "insufficient_fix",
+          "accept": false
+        },
+        "11": {
+          "verdict": "reject",
+          "reason": "insufficient_fix",
+          "accept": false
+        }
+      },
+      "wall_seconds": 9.02
+    },
+    {
+      "iter_id": 227,
+      "file": "B2m.h",
+      "line": 232,
+      "line_end": 232,
+      "candidate_sha": "c13c1b27aa5ce55ec555637d29fcd7c896ed8ab2",
+      "cand_min_precise_digits": 8.8399,
+      "curr_min_precise_digits": 8.8399,
+      "delta": 0.0,
+      "recorded_cand_min": 8.8399,
+      "xcheck_ok": true,
+      "hotspot_integral": "BIN1",
+      "hotspot_component": "coeff0.imag",
+      "hotspot_precise_digits": 8.8399,
+      "survive": {
+        "8": {
+          "verdict": "accept",
+          "reason": "accept",
+          "accept": true
+        },
+        "9": {
+          "verdict": "reject",
+          "reason": "insufficient_fix",
+          "accept": false
+        },
+        "10": {
+          "verdict": "reject",
+          "reason": "insufficient_fix",
+          "accept": false
+        },
+        "11": {
+          "verdict": "reject",
+          "reason": "insufficient_fix",
+          "accept": false
+        }
+      },
+      "wall_seconds": 9.29
+    },
+    {
+      "iter_id": 228,
+      "file": "B2m.h",
+      "line": 233,
+      "line_end": 233,
+      "candidate_sha": "36845eb9ac4bd36454babe4be4cff5fb35bfdcc7",
+      "cand_min_precise_digits": 8.8399,
+      "curr_min_precise_digits": 8.8399,
+      "delta": 0.0,
+      "recorded_cand_min": 8.8399,
+      "xcheck_ok": true,
+      "hotspot_integral": "BIN1",
+      "hotspot_component": "coeff0.imag",
+      "hotspot_precise_digits": 8.8399,
+      "survive": {
+        "8": {
+          "verdict": "accept",
+          "reason": "accept",
+          "accept": true
+        },
+        "9": {
+          "verdict": "reject",
+          "reason": "insufficient_fix",
+          "accept": false
+        },
+        "10": {
+          "verdict": "reject",
+          "reason": "insufficient_fix",
+          "accept": false
+        },
+        "11": {
+          "verdict": "reject",
+          "reason": "insufficient_fix",
+          "accept": false
+        }
+      },
+      "wall_seconds": 9.19
+    }
+  ]
+}
