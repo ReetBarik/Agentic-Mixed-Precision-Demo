@@ -393,15 +393,93 @@ def synthesize_boundary_patch(
 
 
 def _insert_shim_include(lines: list[str], shim_include: str) -> list[str]:
-    """Insert ``#include "<shim>"`` after the first ``#pragma once`` (idempotent)."""
+    """Insert ``#include "<shim>"`` into a target header (idempotent).
+
+    Placement (design fix, HANDOFF 2026-07-19): the shim *specializes* templates
+    (``Constants<...>``, the extended-precision ops) that the header's own app
+    ``#include``s declare.  If the shim lands before those includes, the compiler
+    sees the specialization before the primary template — ``"Constants is not a
+    class template"``.  So the shim goes **after every #include in the header
+    preamble** (system or app — after the last one is trivially after all app
+    ones) and **before the first code/decl**.  When the header has no includes we
+    fall back to the top of the file, preserving ``#pragma once`` / include-guard
+    semantics (insert *after* them, never before).
+    """
     include_line = f'#include "{shim_include}"'
     if any(line.strip() == include_line for line in lines):
         return lines
-    for idx, line in enumerate(lines):
-        if line.strip() == "#pragma once":
-            return lines[:idx + 1] + [include_line] + lines[idx + 1:]
-    # no pragma once — prepend at the very top
-    return [include_line] + lines
+    at = _shim_insert_index(lines)
+    return lines[:at] + [include_line] + lines[at:]
+
+
+def _shim_insert_index(lines: list[str]) -> int:
+    """Index at which to splice the shim include (comment-aware preamble scan).
+
+    Priority within the leading preamble (everything before the first code/decl
+    line): after the last ``#include`` > after an include-guard ``#define`` >
+    after ``#pragma once`` > top of file.  Block/line comments (e.g. a license
+    header) are skipped so a copyright banner never looks like code and truncates
+    the scan before the include block.
+    """
+    last_include = None
+    guard_define = None
+    pragma_once = None
+    pending_ifndef: str | None = None
+    in_block_comment = False
+
+    for idx, raw in enumerate(lines):
+        line = raw
+
+        # -- consume an open block comment (may close mid-line) --
+        if in_block_comment:
+            close = line.find("*/")
+            if close == -1:
+                continue                      # whole line still inside the comment
+            in_block_comment = False
+            line = line[close + 2:]           # scan whatever trails the close
+
+        stripped = line.strip()
+        if stripped == "":
+            continue                          # blank / comment-only remainder
+        if stripped.startswith("//"):
+            continue                          # line comment
+        if stripped.startswith("/*"):
+            # one-line /* ... */ → comment; otherwise open a block comment.
+            if "*/" not in stripped[2:]:
+                in_block_comment = True
+            continue
+
+        if stripped.startswith("#"):
+            directive = stripped[1:].lstrip()
+            if directive.startswith("include"):
+                last_include = idx
+                pending_ifndef = None
+            elif directive.startswith("pragma") and directive.split()[1:2] == ["once"]:
+                pragma_once = idx
+                pending_ifndef = None
+            elif directive.startswith("ifndef"):
+                toks = directive.split()
+                pending_ifndef = toks[1] if len(toks) > 1 else None
+            elif directive.startswith("define"):
+                toks = directive.split()
+                if pending_ifndef is not None and len(toks) > 1 and toks[1] == pending_ifndef:
+                    guard_define = idx        # classic include-guard #define
+                pending_ifndef = None
+            else:
+                # any other directive breaks the classic #ifndef/#define adjacency
+                pending_ifndef = None
+            continue
+
+        # first genuine code/decl line → the preamble is over.
+        break
+
+    if last_include is not None:
+        return last_include + 1
+    if guard_define is not None:
+        return guard_define + 1
+    if pragma_once is not None:
+        return pragma_once + 1
+    return 0
 
 
 def _leading_ws(line: str) -> str:

@@ -207,6 +207,137 @@ def test_template_alias_local_uses_original_type_on_demote():
     assert "TMass arg = static_cast<TMass>(arg__ext.hi) + static_cast<TMass>(arg__ext.lo);" in patched
 
 
+def test_shim_include_after_app_includes():
+    # (a) The shim specializes templates the app includes declare, so it must be
+    # spliced AFTER every #include in the preamble, before the first code line.
+    file_text = (
+        "#pragma once\n"
+        '#include "constants.h"\n'
+        '#include "maths.h"\n'
+        "\n"
+        "TOutput f(TMass const& x) {\n"
+        "    TMass r = x + 1.0;\n"
+        "    return g(r);\n"
+        "}\n"
+    )
+    diff = boundary.synthesize_boundary_patch(
+        rel_file="k.h", file_text=file_text, line_start=6, line_end=6,
+        reads=["x"], writes=[], scalar_type=_SCALAR, caller_type="double",
+        shim_include="k_ff.h",
+    )
+    patched = _apply(file_text, diff)
+    lines = patched.split("\n")
+    assert patched.count('#include "k_ff.h"') == 1
+    shim_i = lines.index('#include "k_ff.h"')
+    # after both app includes …
+    assert shim_i > lines.index('#include "maths.h"')
+    assert shim_i > lines.index('#include "constants.h"')
+    # … and before the first code/decl line.
+    assert shim_i < lines.index("TOutput f(TMass const& x) {")
+
+
+def test_shim_include_pragma_once_only_fallback():
+    # (b) No includes: fall back to the top, right after #pragma once.
+    file_text = (
+        "#pragma once\n"
+        "void f() {\n"
+        "    double r = a + 1.0;\n"
+        "}\n"
+    )
+    diff = boundary.synthesize_boundary_patch(
+        rel_file="b.h", file_text=file_text, line_start=3, line_end=3,
+        reads=["a"], writes=[], scalar_type=_SCALAR, caller_type="double",
+        shim_include="b_ff.h",
+    )
+    patched = _apply(file_text, diff)
+    lines = patched.split("\n")
+    assert lines[0] == "#pragma once"
+    assert lines[1] == '#include "b_ff.h"'
+
+
+def test_shim_include_classic_include_guard_fallback():
+    # (c) Classic #ifndef/#define guard, no includes: insert after the #define so
+    # the shim stays *inside* the guard (never before #ifndef).
+    file_text = (
+        "#ifndef BOX_C_H\n"
+        "#define BOX_C_H\n"
+        "\n"
+        "void f() {\n"
+        "    double r = a + 1.0;\n"
+        "}\n"
+        "#endif\n"
+    )
+    diff = boundary.synthesize_boundary_patch(
+        rel_file="c.h", file_text=file_text, line_start=5, line_end=5,
+        reads=["a"], writes=[], scalar_type=_SCALAR, caller_type="double",
+        shim_include="c_ff.h",
+    )
+    patched = _apply(file_text, diff)
+    lines = patched.split("\n")
+    assert lines[0] == "#ifndef BOX_C_H"
+    assert lines[1] == "#define BOX_C_H"
+    assert lines[2] == '#include "c_ff.h"'
+    # guard still closes the file
+    assert lines[-2] == "#endif" or lines[-1] == "#endif"
+
+
+def test_shim_include_mixed_system_and_app_includes():
+    # (d) Mixed <system> + "app" includes (guard + license banner): shim lands
+    # after ALL includes (so trivially after the app include that declares the
+    # specialized templates) and before code.
+    file_text = (
+        "/* Copyright banner\n"
+        " * spanning several lines\n"
+        " */\n"
+        "#ifndef BOX_D_H\n"
+        "#define BOX_D_H\n"
+        "#include <vector>\n"
+        '#include "constants.h"\n'
+        "#include <cmath>\n"
+        "\n"
+        "struct T {\n"
+        "    double compute(double a) {\n"
+        "        double r = a + 1.0;\n"
+        "        return r;\n"
+        "    }\n"
+        "};\n"
+        "#endif\n"
+    )
+    diff = boundary.synthesize_boundary_patch(
+        rel_file="d.h", file_text=file_text, line_start=12, line_end=12,
+        reads=["a"], writes=[], scalar_type=_SCALAR, caller_type="double",
+        shim_include="d_ff.h",
+    )
+    patched = _apply(file_text, diff)
+    lines = patched.split("\n")
+    shim_i = lines.index('#include "d_ff.h"')
+    # after every include (system and app) …
+    assert shim_i > lines.index('#include "constants.h"')
+    assert shim_i > lines.index("#include <cmath>")
+    assert shim_i > lines.index("#include <vector>")
+    # … and before the struct decl; the license banner did not truncate the scan.
+    assert shim_i < lines.index("struct T {")
+
+
+def test_shim_include_idempotent():
+    # Re-inserting an already-present shim is a no-op (no duplicate include line).
+    file_text = (
+        "#pragma once\n"
+        '#include "k_ff.h"\n'
+        '#include "constants.h"\n'
+        "void f() {\n"
+        "    double r = a + 1.0;\n"
+        "}\n"
+    )
+    diff = boundary.synthesize_boundary_patch(
+        rel_file="k.h", file_text=file_text, line_start=5, line_end=5,
+        reads=["a"], writes=[], scalar_type=_SCALAR, caller_type="double",
+        shim_include="k_ff.h",
+    )
+    patched = _apply(file_text, diff)
+    assert patched.count('#include "k_ff.h"') == 1
+
+
 def test_integer_local_not_promoted():
     # An int index derived from a promoted read stays int (Rule 1).
     file_text = (

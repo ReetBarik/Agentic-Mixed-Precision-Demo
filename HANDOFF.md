@@ -1,3 +1,46 @@
+# HANDOFF — three independent tasks (2026-07-19, langgraph-agents)
+
+Three unrelated tasks, shipped one commit each so review/revert is per-task.
+Offline test-count deltas reported per task; no full pipeline / LLM rerun.
+
+## Task 1 — shim-include ORDERING fix (`agents/integrator_base/boundary.py`)
+
+**Symptom (from the e1d774a rerun):** `B0m.h:69` past R4 hit *"Constants is not
+a class template"* because `boundary._insert_shim_include` spliced the shim
+`#include` right after `#pragma once` — i.e. **before** the header's own app
+includes that declare the primary templates the shim specializes. Ordering, not
+include-set.
+
+**Fix:** `_insert_shim_include` now defers to a new comment-aware preamble scan
+`_shim_insert_index`, which places the shim **after the last `#include` in the
+preamble** (any form — after the last is trivially after all app ones) and
+**before the first code/decl line**. When the header has no includes it falls
+back, in priority order, to *after* the last `#include` → include-guard
+`#define` → `#pragma once` → top-of-file, so `#pragma once` / classic
+`#ifndef`/`#define` guard semantics are preserved (shim never lands before the
+guard). A leading `/* license */` block comment no longer truncates the scan
+(block/line comments are skipped).
+
+**Surprising bit:** the old fallback prepended at the very top when no
+`#pragma once` was found — for a classic include-guard header that put the shim
+*outside* the guard. The new fallback handles the `#ifndef`/`#define` idiom
+explicitly.
+
+**Verify:** `rerun_failing_regions.py`'s health report gained two per-region
+fields — `placement` (`OK(after-app-includes)` vs `BAD(before-app-includes)`)
+read off the patched header, and `build_sig` (classifies a build failure as the
+`OLD-ORDERING-BLOCKER('is not a class template')` vs a `NEW-REASON: <first
+error>` to flag). The summary now counts `shim-ordering blocker` regions (Task 1
+target: 0). No full pipeline rerun forced — the script surfaces B0m.h:69's new
+state when next run under the module+proxy env.
+
+**Tests:** `tests/integrator_base/test_boundary.py` +5 (app-includes ordering,
+`#pragma once`-only fallback, classic include-guard fallback, mixed system+app
+includes with a license banner, idempotency). **Offline delta: 8 → 13** in that
+file (full `tests/integrator_base/` 45 → 50).
+
+---
+
 # HANDOFF — Gap A (namespace-qualified bridge) + Gap B (source-derivable constants) (2026-07-18, langgraph-agents)
 
 Two shim-completeness gaps the include-set hardening rerun unmasked (both generic,

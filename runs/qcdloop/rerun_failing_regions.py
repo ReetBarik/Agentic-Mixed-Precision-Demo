@@ -69,6 +69,49 @@ def _shim_health_report(shim_paths: list[str]) -> str:
     return "; ".join(bits)
 
 
+# The shim-include ORDERING blocker (HANDOFF, e1d774a rerun): the boundary patch
+# spliced the shim #include BEFORE the header's own app includes that declare the
+# templates the shim specializes, so the compiler saw the specialization first.
+_ORDERING_ERROR = "is not a class template"
+
+
+def _placement_report(repo: Path, rel_file: str, shim_include: str | None) -> str:
+    """Confirm the boundary-patch fix: the shim #include now lands AFTER the app
+    #includes in the patched header (Task 1).  Reads the header as committed in
+    the run repo; ``n/a`` if the file or shim line is absent."""
+    if not shim_include:
+        return "n/a(no-shim)"
+    target = repo / rel_file
+    if not target.exists():
+        return "n/a(no-file)"
+    lines = target.read_text(encoding="utf-8").splitlines()
+    shim_line = f'#include "{shim_include}"'
+    shim_idx = next((i for i, ln in enumerate(lines) if ln.strip() == shim_line), None)
+    if shim_idx is None:
+        return "n/a(shim-not-in-header)"
+    app_incs = [i for i, ln in enumerate(lines)
+                if ln.strip().startswith('#include "') and i != shim_idx]
+    if not app_incs:
+        return "OK(no-app-includes,top-placed)"
+    return "OK(after-app-includes)" if shim_idx > max(app_incs) else "BAD(before-app-includes)"
+
+
+def _build_signature(build_log_path: str | None) -> str:
+    """Classify a build failure: the OLD shim-ordering error (should be gone now)
+    vs a genuinely new reason to flag.  Returns ``ok`` when no log / no error."""
+    if not build_log_path or not Path(build_log_path).exists():
+        return "no-log"
+    text = Path(build_log_path).read_text(encoding="utf-8", errors="replace")
+    if _ORDERING_ERROR in text:
+        return f"OLD-ORDERING-BLOCKER('{_ORDERING_ERROR}')"
+    # first genuine compiler error line, if any (flag a NEW reason)
+    for ln in text.splitlines():
+        low = ln.lower()
+        if " error:" in low or low.startswith("error:"):
+            return f"NEW-REASON: {ln.strip()[:100]}"
+    return "no-error-in-log"
+
+
 def main() -> int:
     vanilla_headers = REPO / "runs" / "qcdloop_headers_full"
     kokkos_root = str(Path.home() / "kokkos-install")
@@ -110,28 +153,38 @@ def main() -> int:
         status = p2.get("status")
         artifacts = p2.get("artifacts") or {}
         shim_paths = artifacts.get("shim_paths") or []
+        shim_include = Path(shim_paths[0]).name if shim_paths else None
         inc = _shim_include_report(shim_paths)
         health = _shim_health_report(shim_paths)
+        placement = _placement_report(repo, file, shim_include)
         detail = (p2.get("detail") or "")[:200]
         build_log = artifacts.get("build_log_path") or p2.get("build_log_path")
+        signature = _build_signature(build_log) if status != "ok" else "ok"
         print(f"    status     : {status}", flush=True)
         print(f"    includes   : {inc}", flush=True)
+        print(f"    placement  : {placement}", flush=True)   # Task 1: shim after app includes
+        print(f"    build_sig  : {signature}", flush=True)    # OLD ordering blocker vs NEW reason
         print(f"    gapA/gapB  : {health}", flush=True)
         if detail:
             print(f"    detail     : {detail}", flush=True)
         if build_log:
             print(f"    build_log  : {build_log}", flush=True)
-        results.append((f"{file}:{line}", status, inc, note))
+        results.append((f"{file}:{line}", status, inc, placement, signature, note))
 
     print("\n=== SUMMARY ===", flush=True)
     built = 0
-    for loc, status, inc, note in results:
+    ordering_regressions = 0
+    for loc, status, inc, placement, signature, note in results:
         ok = status == "ok"
         built += ok
-        print(f"  {loc:16s} status={status:16s} includes[{inc.split(':')[1].strip() if ':' in inc else inc}]",
+        if signature.startswith("OLD-ORDERING") or placement.startswith("BAD"):
+            ordering_regressions += 1
+        print(f"  {loc:16s} status={status:16s} placement={placement:26s} sig={signature}",
               flush=True)
-    print(f"\n  built (P2 ok): {built}/{len(results)}", flush=True)
-    print(f"  workdir kept : {workdir}", flush=True)
+    print(f"\n  built (P2 ok)        : {built}/{len(results)}", flush=True)
+    print(f"  shim-ordering blocker: {ordering_regressions}/{len(results)}  "
+          f"(Task 1 target: 0 — was the sole B0m.h:69 blocker)", flush=True)
+    print(f"  workdir kept         : {workdir}", flush=True)
     return 0
 
 
