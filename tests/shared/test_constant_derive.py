@@ -67,6 +67,59 @@ def test_double_literal_ff_splits_across_limbs():
     assert d is not None and d.expr.startswith("quad::ffun::make_ff(0x")
 
 
+# --------------------------------------------------------------------------- #
+# complex-container derivation (Wave 2) — the _ieps50 imaginary iε regulator
+#
+# _ieps50 = TOutput{_zero(), TScale(1e-50)} is 0 + 1e-50·i.  Wave-1 surfaced only
+# the bare literal 1e-50 and the model collapsed the container to a REAL
+# ddouble(1e-50) — dropping the imaginary axis the iε prescription lives on, which
+# left B0m.h:68/69 & friends stuck at dd_untested.  The container is now derived
+# WHOLE (both limbs), bit-exact against the ddfun_enabled reference where
+#   ddouble(double h) : hi(h), lo(0.0)   →   dd_real(1e-50) == {1e-50, 0}.
+# --------------------------------------------------------------------------- #
+
+_IEPS50_RHS = "TOutput{Constants<TScale>::_zero(), TScale(1e-50)}"
+# minimal synthetic sources reproducing the B0m.h:68 pattern (no app headers).
+_IEPS50_SOURCES = [
+    "template<class A,class B,class C>\n"
+    "static TOutput _ieps50() { return " + _IEPS50_RHS + "; }\n",
+    "static constexpr T _zero() { return T(0.0); }\n",
+]
+
+
+def test_ieps50_dd_complex_is_bit_exact_imaginary():
+    d = cd.derive_complex_from_rhs("_ieps50", _IEPS50_RHS, "dd", _IEPS50_SOURCES)
+    assert d is not None and d.how == "complex"
+    # imaginary part == dd_real(1e-50) == {bits(1e-50), 0} (bit-exact vs ddfun ref)
+    hi = _dbits(1e-50)
+    assert hi == 0x358DEE7A4AD4B81F                       # the correct hi word
+    assert d.imag == f"quad::ddfun::make_dd(0x{hi:016x}ULL, 0x0000000000000000ULL)"
+    # real part is exactly zero (the _zero() accessor resolved + derived)
+    assert d.real == "quad::ddfun::make_dd(0x0000000000000000ULL, 0x0000000000000000ULL)"
+
+
+def test_ieps50_scalar_derive_returns_none_container_needs_complex_path():
+    # the scalar cascade cannot derive a 2-element container (it is not a literal
+    # or catalog closed form) — that is why the complex path exists.
+    assert cd.derive_from_rhs("_ieps50", _IEPS50_RHS, "dd") is None
+
+
+def test_complex_container_paren_form():
+    # `Type(re, im)` constructor form is recognized too, not only braces.
+    d = cd.derive_complex_from_rhs("c", "cx(0.0, 0.5)", "dd", [])
+    assert d is not None
+    assert d.real == cd._make_call("dd", _dbits(0.0), 0)
+    assert d.imag == cd._make_call("dd", _dbits(0.5), 0)
+
+
+def test_complex_container_requires_two_derivable_parts():
+    # 1 part (a plain cast) is NOT a container.
+    assert cd.derive_complex_from_rhs("x", "TScale(1e-50)", "dd", []) is None
+    # a part that is not derivable (opaque runtime value) → None (falls to R4).
+    assert cd.derive_complex_from_rhs(
+        "x", "TOutput{runtime_val(), TScale(1e-50)}", "dd", []) is None
+
+
 def test_parse_float_literal_strips_casts_and_suffixes():
     assert cd.parse_float_literal("TScale(1e-50)") == 1e-50
     assert cd.parse_float_literal("static_cast<double>(0.5)") == 0.5

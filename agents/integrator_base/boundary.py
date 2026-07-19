@@ -287,10 +287,18 @@ def _apply_spans(text: str, edits: list[tuple[int, int, str]]) -> str:
     return "".join(out)
 
 
-def _demote_expr(name: str, caller_type: str) -> str:
-    """Two-limb reconstruction back to the caller precision (the extended types'
-    own conversion-out idiom; no ``operator double`` exists)."""
+def _demote_expr(name: str, caller_type: str, two_limb: bool = True) -> str:
+    """Demote a promoted region write back to the caller precision.
+
+    For a two-limb extended scalar (``ffloat`` / ``ddouble``) this is two-limb
+    reconstruction — ``static_cast<T>(w.hi) + static_cast<T>(w.lo)`` — the extended
+    types' own conversion-out idiom (no ``operator double`` exists).  For a *native*
+    single-limb scalar (plain ``float``, which has no ``.hi``/``.lo`` members) it is
+    a plain cast — ``static_cast<T>(w)`` — so a float demotion compiles.
+    """
     ext = name + _WRITE_SUFFIX
+    if not two_limb:
+        return f"static_cast<{caller_type}>({ext})"
     return (f"static_cast<{caller_type}>({ext}.hi) + "
             f"static_cast<{caller_type}>({ext}.lo)")
 
@@ -306,6 +314,7 @@ def synthesize_boundary_patch(
     scalar_type: str,
     caller_type: str = "double",
     shim_include: str | None = None,
+    two_limb: bool = True,
 ) -> str | None:
     """Synthesize the region's boundary patch as a ``git apply -p1`` unified diff.
 
@@ -315,8 +324,10 @@ def synthesize_boundary_patch(
     ``reads`` the characterizer's ``region_local_vars``, ``writes`` the Fix-C write
     set, ``scalar_type`` the extended C++ spelling (e.g. ``quad::ffun::ffloat``),
     ``caller_type`` the precision to demote back to, and ``shim_include`` the shim
-    header basename to ``#include``.  Returns the diff, or ``None`` if the region
-    needs no boundary edit (no reads, no writes, no include).
+    header basename to ``#include``.  ``two_limb`` selects the write-demotion idiom:
+    two-limb reconstruction for an extended scalar (default), or a plain cast for a
+    native single-limb ``float``.  Returns the diff, or ``None`` if the region needs
+    no boundary edit (no reads, no writes, no include).
     """
     original_lines = file_text.split("\n")
     if line_start < 1 or line_end > len(original_lines) or line_start > line_end:
@@ -363,10 +374,10 @@ def synthesize_boundary_patch(
     exit_lines: list[str] = []
     for d in decl_writes:   # region-local decl → declare the alias at its own type
         exit_lines.append(
-            f"{indent}{d.type_text} {d.name} = {_demote_expr(d.name, d.type_text)};"
+            f"{indent}{d.type_text} {d.name} = {_demote_expr(d.name, d.type_text, two_limb)};"
             f"  // Rule R1: demote region write to {d.type_text}")
     for w in caseB:         # pre-declared write → assign back at the caller type
-        exit_lines.append(f"{indent}{w} = {_demote_expr(w, caller_type)};"
+        exit_lines.append(f"{indent}{w} = {_demote_expr(w, caller_type, two_limb)};"
                           f"  // Rule R1: demote region write to {caller_type}")
 
     new_block = entry + new_region_text.split("\n") + exit_lines

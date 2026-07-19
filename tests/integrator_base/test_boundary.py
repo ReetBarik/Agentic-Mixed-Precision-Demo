@@ -81,6 +81,32 @@ def test_promote_rename_demote_single_write():
     assert lines[1] == '#include "region_ff.h"'
 
 
+def test_native_float_demote_uses_plain_cast_not_two_limb():
+    # Wave 2: a native single-limb `float` target (two_limb=False) has no .hi/.lo,
+    # so writes are widened with a plain static_cast — the two-limb reconstruction
+    # would reference nonexistent members and never compile.
+    file_text = (
+        "#pragma once\n"
+        "template <class T> T f(T a, T b) {\n"
+        "    T r = a * b;\n"
+        "    return r;\n"
+        "}\n"
+    )
+    diff = boundary.synthesize_boundary_patch(
+        rel_file="k.h", file_text=file_text,
+        line_start=3, line_end=3, reads=["a", "b"], writes=[],
+        scalar_type="float", caller_type="double", shim_include="k_float.h",
+        two_limb=False,
+    )
+    assert diff is not None
+    patched = _apply(file_text, diff)
+    assert "float a__ff = float(a);" in patched
+    assert "float r__ext = a__ff * b__ff;" in patched
+    # plain cast, NOT two-limb reconstruction
+    assert "T r = static_cast<T>(r__ext);" in patched
+    assert ".hi" not in patched and ".lo" not in patched
+
+
 def test_precheck_style_no_edit_returns_none():
     file_text = "#pragma once\nint x = 1;\n"
     # no reads, no writes, no include → nothing to do

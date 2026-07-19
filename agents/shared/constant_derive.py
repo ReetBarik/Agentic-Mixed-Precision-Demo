@@ -320,6 +320,113 @@ def derive_from_rhs(name: str, rhs: str, scalar: str) -> Derivation | None:
 
 
 # --------------------------------------------------------------------------- #
+# complex-container derivation (Gap B, Rule 3 for a container constant)
+# --------------------------------------------------------------------------- #
+# A named constant whose RHS is a 2-element complex container — the iε-prescription
+# regulators the box kernels read, ``_ieps50 = TOutput{_zero(), TScale(1e-50)}``
+# (an *imaginary* infinitesimal 0 + 1e-50·i) and its siblings ``_ieps`` /
+# ``_2ipi`` / ``_ipi`` / ``_ipio2``.  The earlier cascade surfaced only the bare
+# scalar literal (``1e-50``) as a "composite" hint and left the model to assemble
+# the container itself — which it botched, collapsing ``{0, 1e-50}`` to a *real*
+# ``ddouble(1e-50)`` (dropping the imaginary axis the iε prescription lives on) or
+# returning the wrong container type.  This derives BOTH limbs of the container so
+# the engine can hand the model the complete complex value.
+
+
+@dataclass(frozen=True)
+class ComplexDerivation:
+    """A derived complex-container constant: the two component ``make_*`` exprs.
+
+    ``real``/``imag`` are the derived scalar component expressions (a
+    ``make_dd(...)`` / ``make_ff(...)`` call each); the regional engine wraps them
+    in the concrete complex type spelling it owns.  ``how`` records the component
+    provenance for the rule-justification comment.
+    """
+
+    name: str
+    scalar: str          # "dd" | "ff"
+    real: str            # component expr for the real part
+    imag: str            # component expr for the imaginary part
+    how: str             # e.g. "complex(literal, catalog:pi)"
+    rhs: str = ""
+
+
+def _split_top_level(text: str) -> list[str]:
+    """Split ``text`` on top-level commas (ignoring nested ``()[]{}<>``)."""
+    parts: list[str] = []
+    depth = 0
+    start = 0
+    for i, ch in enumerate(text):
+        if ch in "([{<":
+            depth += 1
+        elif ch in ")]}>":
+            depth = max(0, depth - 1)
+        elif ch == "," and depth == 0:
+            parts.append(text[start:i])
+            start = i + 1
+    parts.append(text[start:])
+    return [p.strip() for p in parts]
+
+
+# ``[Type]{ ... }`` or ``[Type]( ... )`` — a (optionally type-named) container
+# initializer.  The captured inner text is split into components downstream.
+_CONTAINER_RE = re.compile(r"^\s*(?:[A-Za-z_][\w:<>]*\s*)?[\{(](.*)[\})]\s*$", re.DOTALL)
+
+# Trailing accessor call in a component (``Constants<TScale>::_zero()`` -> ``_zero``).
+_ACCESSOR_CALL_RE = re.compile(r"(?:::\s*)?(?:template\s+)?([A-Za-z_]\w*)\s*\(")
+
+
+def _derive_component(text: str, scalar: str, sources: list[str],
+                      depth: int = 0) -> str | None:
+    """Derive one container component to a ``make_dd``/``make_ff`` expr.
+
+    Handles a literal / cast-wrapped literal / catalog constant directly, and a
+    named accessor (``Constants<T>::_zero()``) by resolving its own source RHS and
+    recursing (bounded).  Returns ``None`` when the component is not derivable
+    (an opaque expression, a product of accessors we don't compose, …).
+    """
+    text = text.strip()
+    if not text or depth > 3:
+        return None
+    direct = derive_from_rhs("_c", text, scalar)
+    if direct is not None:
+        return direct.expr
+    m = _ACCESSOR_CALL_RE.search(text)
+    if m is not None:
+        inner_rhs = resolve_constant_rhs(m.group(1), sources)
+        if inner_rhs is not None:
+            return _derive_component(inner_rhs, scalar, sources, depth + 1)
+    return None
+
+
+def derive_complex_from_rhs(name: str, rhs: str, scalar: str,
+                            sources: list[str]) -> ComplexDerivation | None:
+    """Derive a 2-element complex-container RHS to its real/imag component exprs.
+
+    Recognizes ``[Type]{re, im}`` / ``[Type](re, im)`` where BOTH components are
+    themselves derivable (a literal, a catalog constant, or a named accessor that
+    resolves to one).  Returns ``None`` for anything else (not a 2-part container,
+    or a component we cannot derive) so the caller falls back to the literal-hint /
+    Rule R4 path unchanged.
+    """
+    if not rhs or not rhs.strip():
+        return None
+    m = _CONTAINER_RE.match(rhs)
+    if m is None:
+        return None
+    parts = _split_top_level(m.group(1))
+    if len(parts) != 2:
+        return None
+    real = _derive_component(parts[0], scalar, sources)
+    imag = _derive_component(parts[1], scalar, sources)
+    if real is None or imag is None:
+        return None
+    return ComplexDerivation(
+        name=name, scalar=scalar, real=real, imag=imag,
+        how="complex", rhs=rhs.strip())
+
+
+# --------------------------------------------------------------------------- #
 # source RHS resolution (walk to a constant's definition by name)
 # --------------------------------------------------------------------------- #
 

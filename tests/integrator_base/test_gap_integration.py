@@ -158,17 +158,63 @@ def test_gapb_no_hint_when_constant_not_derivable(tmp_path):
 # derive_region_constants helper (directly)
 # --------------------------------------------------------------------------- #
 
-def test_derive_region_constants_composite_complex():
-    # qcdloop-shaped: a complex constant {0, 1e-50} accessor
-    region = ("const TOutput k = ql::Constants<TScale>::template "
-              "_ieps50<TOutput, TMass, TScale>();")
-    sources = [
-        region,
-        "template<class A,class B,class C>\n"
-        "static TOutput _ieps50() { return TOutput{Constants<TScale>::_zero(), "
-        "TScale(1e-50)}; }\n",
-    ]
-    got = regional.derive_region_constants(region, sources, "dd")
+_IEPS50_REGION = ("const TOutput k = ql::Constants<TScale>::template "
+                  "_ieps50<TOutput, TMass, TScale>();")
+_IEPS50_SOURCES = [
+    _IEPS50_REGION,
+    "template<class A,class B,class C>\n"
+    "static TOutput _ieps50() { return TOutput{Constants<TScale>::_zero(), "
+    "TScale(1e-50)}; }\n",
+    "static constexpr T _zero() { return T(0.0); }\n",
+]
+
+
+def test_derive_region_constants_composite_complex_legacy_literals():
+    # No complex_type given → legacy behavior: surface the bare literal(s) only.
+    got = regional.derive_region_constants(_IEPS50_REGION, _IEPS50_SOURCES, "dd")
     entry = next(c for c in got if c["name"] == "_ieps50")
     lit_exprs = " ".join(l["expr"] for l in entry["literals"])
     assert "358dee7a4ad4b81f" in lit_exprs   # correct 1e-50 hi bits
+
+
+def test_derive_region_constants_assembles_full_complex_value():
+    # Wave 2: with the complex type, the imaginary iε regulator is derived WHOLE —
+    # a ready-made ddcomplex(re, im) the model uses verbatim (no collapse to real).
+    got = regional.derive_region_constants(
+        _IEPS50_REGION, _IEPS50_SOURCES, "dd", "quad::ddfun::ddcomplex")
+    entry = next(c for c in got if c["name"] == "_ieps50")
+    assert entry["how"] == "complex"
+    assert entry["literals"] == []          # not the fallback literals hint
+    assert entry["expr"] == (
+        "quad::ddfun::ddcomplex("
+        "quad::ddfun::make_dd(0x0000000000000000ULL, 0x0000000000000000ULL), "
+        "quad::ddfun::make_dd(0x358dee7a4ad4b81fULL, 0x0000000000000000ULL))"
+    )
+
+
+def test_dd_integrate_region_hint_carries_full_complex_value(tmp_path):
+    # End-to-end through dd.integrate_region: the user turn hands the model the
+    # complete complex value and the "return the FULL complex value" instruction.
+    kernel = ("#pragma once\n"
+              "template<class TOutput, class TMass, class TScale>\n"
+              "TOutput f() {\n"
+              "  const TOutput k = ql::Constants<TScale>::template "
+              "_ieps50<TOutput, TMass, TScale>();\n"
+              "  return k;\n}\n")
+    defs = ("#pragma once\n"
+            "template<class A,class B,class C>\n"
+            "static TOutput _ieps50() { return TOutput{Constants<TScale>::_zero(), "
+            "TScale(1e-50)}; }\n"
+            "static constexpr T _zero() { return T(0.0); }\n")
+    root = tmp_path / "cand"
+    sha = _init_repo(root, {"kernel.h": kernel, "consts.h": defs})
+    llm = _CapturingLLM(_CLEAN_SHIM)
+    dd.integrate_region(
+        file="kernel.h", line_start=4, line_end=4, variables=[],
+        working_tree=sha, out_dir=tmp_path / "shims", repo_path=str(root), llm_fn=llm,
+    )
+    user = llm.calls[0][1]
+    assert "quad::ddfun::ddcomplex(" in user
+    assert "0x358dee7a4ad4b81fULL" in user           # imaginary limb = 1e-50
+    assert "COMPLEX container" in user                # the preserve-imaginary note
+    assert "do NOT collapse it to a real scalar" in user

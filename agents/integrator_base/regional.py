@@ -271,13 +271,24 @@ def _gather_constant_sources(repo_path: str | None, region_src: str) -> list[str
     return sources
 
 
-def derive_region_constants(region_text: str, sources: list[str], scalar: str):
+def derive_region_constants(region_text: str, sources: list[str], scalar: str,
+                            complex_type: str | None = None):
     """Resolve + derive every source-derivable constant the region reads (Gap B).
 
-    ``scalar`` is ``"dd"`` or ``"ff"``.  Each entry is a dict with the constant
-    ``name``, the resolved source ``rhs``, and either a full ``expr`` (a scalar
-    constant derived whole) or ``literals`` (per-literal derivations for a
-    composite RHS the model must assemble, e.g. a complex ``{re, im}``).
+    ``scalar`` is ``"dd"`` or ``"ff"``; ``complex_type`` is the concrete C++ complex
+    spelling (``quad::ddfun::ddcomplex`` / ``quad::ffun::ffcomplex``) used to
+    assemble a *complex-container* constant into a complete value.  Each entry is a
+    dict with the constant ``name``, the resolved source ``rhs``, and one of:
+
+    * ``expr`` — a full ready-made value (a scalar constant derived whole, OR a
+      complex-container constant assembled as ``<complex_type>(<re>, <im>)``);
+    * ``literals`` — per-literal derivations for a composite RHS the model must
+      assemble itself (only when the whole value could not be derived).
+
+    A complex container (``_ieps50 = TOutput{_zero(), 1e-50}``, an *imaginary* iε
+    regulator) is derived whole so the model can no longer collapse it to a real
+    scalar (the residual dd_untested cause after Wave 1 — see
+    :func:`agents.shared.constant_derive.derive_complex_from_rhs`).
     """
     out: list[dict] = []
     for name in _find_constant_candidates(region_text):
@@ -289,6 +300,15 @@ def derive_region_constants(region_text: str, sources: list[str], scalar: str):
             out.append({"name": name, "rhs": rhs, "expr": whole.expr,
                         "how": whole.how, "literals": []})
             continue
+        # Complex-container constant (imaginary iε regulator etc.): derive BOTH
+        # limbs and assemble the full complex value with the vendored complex type.
+        if complex_type:
+            cx = cderive.derive_complex_from_rhs(name, rhs, scalar, sources)
+            if cx is not None:
+                out.append({"name": name, "rhs": rhs,
+                            "expr": f"{complex_type}({cx.real}, {cx.imag})",
+                            "how": "complex", "literals": []})
+                continue
         lits = cderive.derive_literals_in(rhs, scalar)
         if lits:
             out.append({"name": name, "rhs": rhs, "expr": None, "how": "composite",
@@ -309,6 +329,19 @@ class RegionalSpec:
     # Include-set allowlist for the C1 lint.  ``None`` -> derived from
     # ``vendored_headers`` ∪ the standard-library set; set explicitly to override.
     allowed_includes: list[str] | None = None
+    # --- target-kind knobs -------------------------------------------------- #
+    # A two-limb extended scalar ({hi, lo}: ffloat / ddouble) demotes writes back
+    # to the caller via two-limb reconstruction; a *native* single-limb scalar
+    # (plain ``float``) has no ``.hi``/``.lo`` and demotes with a plain cast.
+    two_limb: bool = True
+    # Run the Gap-A namespace-qualified bridge lint.  Only extended (non-native)
+    # scalars can narrow through a qualified call; a native ``float`` needs no
+    # bridge (a ``float`` argument binds a ``double`` overload by widening).
+    emit_bridges: bool = True
+    # Run the Gap-B two-limb constant derivation.  A native ``float`` carries no
+    # sub-limb precision, so a source literal is just its float literal — the app's
+    # own ``Constants<float>`` (visible at the include site) already supplies them.
+    derive_constants: bool = True
 
 
 def run_integrate_region(
@@ -395,9 +428,13 @@ def run_integrate_region(
     #       ready-made make_dd/make_ff values instead of hitting Rule R4 (Gap B).
     promoted = frozenset(boundary.compute_promoted_names(region_src, list(variables),
                                                          list(writes)))
-    qualified_calls = find_qualified_math_calls(region_src, promoted)
-    sources = _gather_constant_sources(repo_path, src)
-    derived_constants = derive_region_constants(region_src, sources, spec.shim_prefix)
+    qualified_calls = find_qualified_math_calls(region_src, promoted) if spec.emit_bridges else []
+    if spec.derive_constants:
+        sources = _gather_constant_sources(repo_path, src)
+        derived_constants = derive_region_constants(region_src, sources,
+                                                    spec.shim_prefix, spec.cpp_complex)
+    else:
+        derived_constants = []
 
     # 5. Generate the shim (LLM).
     user_msg = _build_user_message(spec, file, region_src, variables, writes,
@@ -435,9 +472,10 @@ def run_integrate_region(
     #     the shim narrows the extended value to a float and breaks the build —
     #     reject as a retryable misgen so the Patcher re-rolls (same semantics as
     #     the C1 lint; never counts against the Strategy transition budget).
-    bad_bridge = _lint_qualified_bridges(region_src, shim_body, promoted)
-    if bad_bridge is not None:
-        return RegionIntegrationResult.failed(bad_bridge, llm_tokens=tokens)
+    if spec.emit_bridges:
+        bad_bridge = _lint_qualified_bridges(region_src, shim_body, promoted)
+        if bad_bridge is not None:
+            return RegionIntegrationResult.failed(bad_bridge, llm_tokens=tokens)
 
     # 6. Stamp the SOURCE_HASH and persist (artifact copy + tree copy for the build).
     shim_text = cache.apply_source_hash(shim_body, cache_key)
@@ -502,7 +540,7 @@ def _boundary(spec, file, src, line_start, line_end, variables, writes,
         line_start=line_start, line_end=line_end,
         reads=list(variables), writes=list(writes),
         scalar_type=spec.cpp_scalar, caller_type=caller_type,
-        shim_include=shim_name,
+        shim_include=shim_name, two_limb=spec.two_limb,
     )
 
 
@@ -661,7 +699,15 @@ def _format_derived_constants(spec: RegionalSpec, derived_constants) -> str:
         "zero low word; this is correct, not a truncation.",
     ]
     for c in derived_constants:
-        if c.get("expr"):
+        if c.get("expr") and c.get("how") == "complex":
+            lines.append(
+                f"- `{c['name']}` (source RHS `{c['rhs']}`) is a COMPLEX container "
+                f"(e.g. an imaginary iε regulator `0 + im·i`) → return the FULL "
+                f"complex value `{c['expr']}` VERBATIM. Your wrapper MUST return the "
+                f"complex type and preserve BOTH the real and imaginary parts — do "
+                f"NOT collapse it to a real scalar (that drops the imaginary axis)."
+            )
+        elif c.get("expr"):
             lines.append(
                 f"- `{c['name']}` (source RHS `{c['rhs']}`, {c['how']}) → `{c['expr']}`"
             )
