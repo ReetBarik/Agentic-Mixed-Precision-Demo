@@ -94,6 +94,12 @@ def main(argv: list[str] | None = None) -> int:
                          "30%% split of --max-iters. Phase-1 spill is added on top.")
     ap.add_argument("--max-wall-hours", type=float, default=4.0,
                     help="Wall-clock ceiling (safety net; iters should bind first).")
+    ap.add_argument("--dr-k", type=int, default=None,
+                    help="diminishing_returns_k: stop 'partial' after K consecutive "
+                         "non-accepts. Default (None) uses StrategyConfig's 20. Raise "
+                         "it when the cascade-chain phase's repeated per-representative "
+                         "llm_gen_failed (which don't consume budget) would trip the "
+                         "streak before the correctness budget cap binds.")
     args = ap.parse_args(argv)
 
     report = Path(args.report).resolve()
@@ -125,6 +131,7 @@ def main(argv: list[str] | None = None) -> int:
         budget=budget,
         snapshot=snapshot,
         runs_root=HERE,                 # runs/qcdloop/strategy/<run_id>/
+        **({"diminishing_returns_k": args.dr_k} if args.dr_k is not None else {}),
     )
 
     build_config = {

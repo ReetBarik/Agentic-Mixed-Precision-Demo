@@ -58,7 +58,9 @@ def phase_metrics(rows: list[dict], phase: str) -> dict:
                           if r["patcher_status"] == "ok" and r.get("validator_verdict") == "reject")
     bucket_a = sum(1 for r in pr if r["patcher_status"] in BUCKET_A)
     llm_gen_failed = sum(1 for r in pr if r["patcher_status"] == "llm_gen_failed")
+    empty_candidate = sum(1 for r in pr if r["patcher_status"] == "empty_candidate")
     strategy_bug = sum(1 for r in pr if r["patcher_status"] == "patch_apply_failed")
+    commit_failed = sum(1 for r in pr if r["patcher_status"] == "commit_failed")
     regions = {_region_key(r) for r in pr}
     by_status = Counter(r["patcher_status"] for r in pr)
 
@@ -80,6 +82,8 @@ def phase_metrics(rows: list[dict], phase: str) -> dict:
         "genuine_rejects": genuine_rejects,
         "bucket_a_rejects": bucket_a,
         "llm_gen_failed": llm_gen_failed,
+        "empty_candidate": empty_candidate,
+        "commit_failed": commit_failed,
         "strategy_bug": strategy_bug,
         "distinct_regions_attempted": len(regions),
         "by_patcher_status": dict(by_status),
