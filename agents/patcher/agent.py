@@ -189,6 +189,13 @@ class _Patcher:
     def _commit(self, intent, deps, gen, gate, parent, repo_root) -> dict:
         try:
             sha = gitops.commit_all(repo_root, _commit_message(intent))
+        except gitops.NothingToCommitError as exc:
+            # Benign: gen+build succeeded but the candidate == parent (no distinct
+            # remediation produced — e.g. a shared shim already covers it).  Advance
+            # the walk instead of aborting the run (Strategy: empty_candidate).
+            gitops.reset_hard(repo_root, parent)
+            return R.failure(R.EMPTY_CANDIDATE, parent, err_kind=R.ERR_EMPTY,
+                             detail=str(exc), llm_tokens=gen.llm_tokens)
         except gitops.GitError as exc:
             gitops.reset_hard(repo_root, parent)
             return R.failure(R.COMMIT_FAILED, parent, err_kind=R.ERR_COMMIT,

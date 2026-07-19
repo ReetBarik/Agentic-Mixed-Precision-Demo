@@ -19,6 +19,15 @@ class GitError(RuntimeError):
     pass
 
 
+class NothingToCommitError(GitError):
+    """``git commit`` refused because the tree is identical to HEAD.
+
+    A benign outcome (the candidate produced no net change vs the parent), not a
+    genuine commit failure — the caller maps it to ``empty_candidate`` rather than
+    the Q3-fatal ``commit_failed``.
+    """
+
+
 def git(repo: str | Path, *args: str, check: bool = True,
         input_text: str | None = None) -> subprocess.CompletedProcess:
     r = subprocess.run(["git", "-C", str(repo), *args],
@@ -61,6 +70,14 @@ def commit_all(repo: str | Path, message: str) -> str:
     r = git(repo, "-c", "user.name=patcher", "-c", "user.email=patcher@local",
             "commit", "--no-gpg-sign", "-q", "-m", message, check=False)
     if r.returncode != 0:
+        out = f"{r.stdout}\n{r.stderr}".lower()
+        # A clean tree ("nothing to commit, working tree clean" / "no changes
+        # added") is benign — the candidate is byte-identical to the parent, not a
+        # real commit failure.  Signal it distinctly so the caller maps it to
+        # empty_candidate rather than the Q3-fatal commit_failed.
+        if "nothing to commit" in out or "no changes added to commit" in out:
+            raise NothingToCommitError(
+                f"nothing to commit in {repo} (candidate == parent):\n{r.stdout.strip()}")
         raise GitError(f"git commit failed:\n{r.stderr.strip()}\n{r.stdout.strip()}")
     return head(repo)
 

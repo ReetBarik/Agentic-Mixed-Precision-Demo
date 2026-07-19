@@ -1,15 +1,24 @@
-"""P6 dispatch table — all 8 Patcher statuses (design: "P6")."""
+"""P6 dispatch table — all Patcher statuses (design: "P6")."""
 
 import pytest
 
 from agents.strategy.dispatch import DISPATCH, dispatch
 
 
-def test_all_eight_statuses_present():
+def test_all_statuses_present():
     assert set(DISPATCH) == {
         "ok", "build_failed", "runtime_nan", "runtime_crashed",
         "llm_gen_failed", "patch_apply_failed", "timeout", "commit_failed",
+        "empty_candidate",
     }
+
+
+def test_empty_candidate_advances_non_fatal():
+    # gen+build ok but candidate == parent: benign no-op, NOT fatal commit_failed.
+    e = dispatch("empty_candidate")
+    assert e.action == "advance"          # advances the walk, run continues
+    assert e.is_reject and e.counts_budget
+    assert e.log_tag == "empty_candidate"
 
 
 def test_ok_hands_to_validator():
@@ -54,7 +63,8 @@ def test_commit_failed_is_fatal():
 def test_non_ok_statuses_flag_dd_untested():
     # P6a: any Patcher failure at the DD rung means DD was never honestly tested.
     for status in ["build_failed", "runtime_nan", "runtime_crashed",
-                   "llm_gen_failed", "patch_apply_failed", "timeout"]:
+                   "llm_gen_failed", "patch_apply_failed", "timeout",
+                   "empty_candidate"]:
         assert dispatch(status).dd_untested is True
     assert dispatch("ok").dd_untested is False
 

@@ -1,4 +1,4 @@
-"""P2 return contract — the 8-value status enum + response builders.
+"""P2 return contract — the 9-value status enum + response builders.
 
 Every Patcher call returns the dict shape locked in design §P2::
 
@@ -22,7 +22,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-# The 8 exhaustive statuses (design §P2).
+# The exhaustive statuses (design §P2).
 OK = "ok"
 LLM_GEN_FAILED = "llm_gen_failed"
 PATCH_APPLY_FAILED = "patch_apply_failed"
@@ -31,10 +31,16 @@ BUILD_FAILED = "build_failed"
 RUNTIME_CRASHED = "runtime_crashed"
 RUNTIME_NAN = "runtime_nan"
 TIMEOUT = "timeout"
+# A gen+build that succeeded but produced NO net tree change vs the parent — the
+# candidate is byte-identical to the baseline, so there is nothing to commit.
+# Distinct from COMMIT_FAILED (a genuine git commit failure, Q3-fatal): an empty
+# candidate is benign — the remediation produced no distinct change — so Strategy
+# advances the walk instead of aborting the run.
+EMPTY_CANDIDATE = "empty_candidate"
 
 STATUSES = frozenset({
     OK, LLM_GEN_FAILED, PATCH_APPLY_FAILED, COMMIT_FAILED,
-    BUILD_FAILED, RUNTIME_CRASHED, RUNTIME_NAN, TIMEOUT,
+    BUILD_FAILED, RUNTIME_CRASHED, RUNTIME_NAN, TIMEOUT, EMPTY_CANDIDATE,
 })
 
 # error.kind vocabulary (design §P2).
@@ -46,6 +52,7 @@ ERR_LLM = "llm"
 ERR_APPLY = "apply"
 ERR_COMMIT = "commit"
 ERR_TIMEOUT = "timeout"
+ERR_EMPTY = "empty"
 
 
 def _artifacts(shim_paths=None, boundary_patch_path=None,

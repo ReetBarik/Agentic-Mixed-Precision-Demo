@@ -65,6 +65,12 @@ DISPATCH: dict[str, DispatchEntry] = {
     "commit_failed": DispatchEntry(
         action="fatal", log_tag="fatal", counts_budget=False,
         is_reject=False, dd_untested=True),
+    # gen+build ok but the candidate == parent (no net change): a benign no-op,
+    # NOT the Q3-fatal commit_failed.  Treat as a Bucket-A reject that advances the
+    # walk; at the dd rung the ceiling was not proven → dd_untested.
+    "empty_candidate": DispatchEntry(
+        action="advance", log_tag="empty_candidate", counts_budget=True,
+        is_reject=True, dd_untested=True),
 }
 
 
