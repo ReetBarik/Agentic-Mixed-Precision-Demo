@@ -2,25 +2,25 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1280 720" font-family="ui-sans-serif, system-ui, -apple-system, sans-serif">
   <style>
     .title { font-size: 26px; font-weight: 700; fill: #172033; }
-    .subtitle { font-size: 14px; fill: #5b6475; }
     .h { font-size: 16px; font-weight: 650; fill: #172033; }
-    .h2 { font-size: 14px; font-weight: 650; fill: #172033; }
+    .panel-title { font-size: 15px; font-weight: 700; fill: #172033; }
     .lbl { font-size: 14px; font-weight: 600; fill: #172033; }
     .sub { font-size: 12px; fill: #5b6475; }
-    .code { font-family: ui-monospace, "SF Mono", Menlo, monospace; font-size: 11px; fill: #172033; }
-    .code-key { font-family: ui-monospace, "SF Mono", Menlo, monospace; font-size: 11px; fill: #0f766e; font-weight: 600; }
-    .math { font-family: "Cambria Math", Georgia, serif; font-style: italic; font-size: 13px; fill: #172033; }
-    .box { stroke: #64748b; stroke-width: 1; fill: #f1f5f9; }
+    .code { font-family: ui-monospace, "SF Mono", Menlo, monospace; font-size: 12px; fill: #172033; }
+    .code-warn { font-family: ui-monospace, "SF Mono", Menlo, monospace; font-size: 12px; fill: #b45309; font-weight: 600; }
+    .code-sing { font-family: ui-monospace, "SF Mono", Menlo, monospace; font-size: 12px; fill: #475569; font-weight: 600; }
+    .box { stroke: #64748b; stroke-width: 1; fill: #f8fafc; }
     .app-box { stroke: #1e40af; stroke-width: 1.6; fill: #dbeafe; }
     .journal-box { stroke: #0f766e; stroke-width: 1.6; fill: #99f6e4; }
     .report-box { stroke: #6d28d9; stroke-width: 1.6; fill: #ede9fe; }
     .reduce-box { stroke: #b45309; stroke-width: 1.6; fill: #fef3c7; }
     .edge { stroke: #475569; stroke-width: 2; fill: none; marker-end: url(#arrow); }
     .edge-big { stroke: #475569; stroke-width: 3; fill: none; marker-end: url(#arrow); }
-    .th { font-size: 11px; font-weight: 700; fill: #172033; }
-    .td { font-size: 11px; fill: #172033; }
-    .caption { font-size: 12px; fill: #5b6475; font-style: italic; }
-    .panel-title { font-size: 15px; font-weight: 700; fill: #172033; }
+    .th { font-size: 12px; font-weight: 700; fill: #172033; }
+    .td { font-size: 12px; fill: #172033; }
+    .row-safe { fill: #bbf7d0; }
+    .row-warn { fill: #fde68a; }
+    .row-sing { fill: #cbd5e1; }
   </style>
   <defs>
     <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
@@ -29,97 +29,140 @@
   </defs>
 
   <!-- Title -->
-  <text x="40" y="44" class="title">Characterizer  →  Report</text>
-  <text x="40" y="66" class="subtitle">Two sub-steps: (a) instrumented sweep produces the journal, (b) offline reduction rolls it into a region-keyed report.  ~80 GB → few MB compression.</text>
+  <text x="40" y="44" class="title">Characterizer:  sweep → journal → report</text>
 
-  <!-- ================= LEFT PANEL: Sample sweep → journal ================= -->
-  <rect x="30" y="90" width="600" height="600" rx="8" fill="none" stroke="#94a3b8" stroke-width="1" stroke-dasharray="4 3"/>
-  <text x="50" y="112" class="panel-title">(a)  Instrumented sweep  →  Journal</text>
+  <!-- ============ LEFT PANEL: Sweep → journal ============ -->
+  <rect x="30" y="80" width="500" height="620" rx="8" fill="none" stroke="#94a3b8" stroke-width="1" stroke-dasharray="4 3"/>
+  <text x="50" y="104" class="panel-title">(a)  Instrumented sweep → journal</text>
 
   <!-- Instrumented app -->
-  <rect x="60" y="130" width="220" height="70" rx="6" class="app-box"/>
-  <text x="170" y="156" text-anchor="middle" class="lbl">Toy app (instrumented)</text>
-  <text x="170" y="176" text-anchor="middle" class="sub">Tracked&lt;double&gt; everywhere</text>
-  <text x="170" y="192" text-anchor="middle" class="sub">R1…R6 scopes annotated</text>
+  <rect x="60" y="130" width="200" height="70" rx="6" class="app-box"/>
+  <text x="160" y="156" text-anchor="middle" class="lbl">Toy app (instrumented)</text>
+  <text x="160" y="176" text-anchor="middle" class="sub">Tracked&lt;double&gt; everywhere</text>
+  <text x="160" y="192" text-anchor="middle" class="sub">R1…R6 scopes annotated</text>
 
   <!-- Sample driver -->
-  <rect x="320" y="130" width="240" height="70" rx="6" class="reduce-box"/>
-  <text x="440" y="156" text-anchor="middle" class="lbl">Sample driver</text>
-  <text x="440" y="176" text-anchor="middle" class="sub">10k seeded inputs</text>
-  <text x="440" y="192" text-anchor="middle" class="sub">(mt19937, srand=12345)</text>
+  <rect x="300" y="130" width="200" height="70" rx="6" class="reduce-box"/>
+  <text x="400" y="156" text-anchor="middle" class="lbl">Sample driver</text>
+  <text x="400" y="176" text-anchor="middle" class="sub">N seeded inputs</text>
+  <text x="400" y="192" text-anchor="middle" class="sub">(mt19937, srand=12345)</text>
 
-  <path d="M280 165 L320 165" class="edge"/>
+  <path d="M260 165 L300 165" class="edge"/>
 
-  <!-- Journal: big block -->
-  <path d="M440 200 L440 250" class="edge-big"/>
-  <rect x="60" y="250" width="500" height="240" rx="6" class="journal-box"/>
-  <text x="310" y="274" text-anchor="middle" class="panel-title">Journal (transient)</text>
-  <text x="310" y="292" text-anchor="middle" class="sub">one entry per op per sample  ·  ~80 GB at 10k×21 integrals in real qcdloop</text>
+  <!-- Journal (trimmed to 3 lines) -->
+  <path d="M400 200 L400 240" class="edge-big"/>
+  <rect x="60" y="240" width="440" height="220" rx="6" class="journal-box"/>
+  <text x="280" y="264" text-anchor="middle" class="panel-title">Journal (JSONL, transient)</text>
+  <text x="280" y="282" text-anchor="middle" class="sub">one entry per op per sample</text>
 
-  <text x="80" y="320" class="code">{scope:"R1_form_A", sample:0, op:"add",  in:[x,z], val:[3.1, 0.5], out_val:3.6, cond:1.28}</text>
-  <text x="80" y="336" class="code">{scope:"R1_form_A", sample:0, op:"mul",  in:[x,y], val:[3.1, 2.0], out_val:6.2, cond:2.0 }</text>
-  <text x="80" y="352" class="code">{scope:"R2_form_B", sample:0, op:"sub",  in:[u,v], val:[7.0, 6.998], out_val:2e-3, cond:7e3}  ← cancel!</text>
-  <text x="80" y="368" class="code">{scope:"R3_form_C", sample:0, op:"log",  in:[w+1],val:[1.001],   out_val:1e-3, cond:1e3 }  ← log near 1</text>
-  <text x="80" y="384" class="code">{scope:"R4_reduce_AB", sample:0, op:"div", in:[a+b,a-b], ...             }</text>
-  <text x="80" y="400" class="code">…</text>
-  <text x="80" y="416" class="code">{scope:"R6_assemble", sample:9999, op:"mul", ...}</text>
+  <text x="80" y="316" class="code">{op: "add", scope: "R1", sample: 0,</text>
+  <text x="80" y="332" class="code"> in: [x,z], out_val: 3.6, rel_err: 3e-16, cond: 1.28}</text>
 
-  <text x="80" y="450" class="sub">• Per-op:   op kind, operand ids, operand values, result id/value, cond proxy</text>
-  <text x="80" y="466" class="sub">• Per-value:  stable TrackedId (name@scope) — carries full provenance</text>
-  <text x="80" y="482" class="sub">• Discarded after reduction — never shipped, never persisted long-term</text>
+  <text x="80" y="362" class="code-warn">{op: "sub", scope: "R2", sample: 0,</text>
+  <text x="80" y="378" class="code-warn"> in: [x², y²], out_val: 2e-3, rel_err: 1e-12, cond: 7e3}</text>
 
-  <!-- ================= REDUCTION arrow ================= -->
-  <path d="M560 370 L680 370" class="edge-big"/>
-  <rect x="580" y="330" width="80" height="80" rx="6" class="reduce-box"/>
-  <text x="620" y="358" text-anchor="middle" class="lbl">reduce</text>
-  <text x="620" y="376" text-anchor="middle" class="sub">offline</text>
-  <text x="620" y="392" text-anchor="middle" class="sub">once</text>
+  <text x="80" y="408" class="code-sing">{op: "log", scope: "R3", sample: 0,</text>
+  <text x="80" y="424" class="code-sing"> in: [1+w], out_val: 1e-3, rel_err: 2e-13, cond: 1e3}</text>
 
-  <!-- ================= RIGHT PANEL: Region-keyed report ================= -->
-  <rect x="680" y="90" width="570" height="600" rx="8" fill="none" stroke="#94a3b8" stroke-width="1" stroke-dasharray="4 3"/>
-  <text x="700" y="112" class="panel-title">(b)  Reduction  →  Region-keyed report</text>
+  <text x="80" y="450" class="code">…  (millions more)</text>
 
-  <!-- Report structure -->
-  <rect x="700" y="130" width="530" height="440" rx="6" class="report-box"/>
-  <text x="965" y="154" text-anchor="middle" class="panel-title">report_10k.json  (few MB)</text>
+  <!-- ============ REDUCE arrow ============ -->
+  <path d="M530 400 L650 400" class="edge-big"/>
+  <rect x="550" y="360" width="80" height="80" rx="6" class="reduce-box"/>
+  <text x="590" y="388" text-anchor="middle" class="lbl">reduce</text>
+  <text x="590" y="406" text-anchor="middle" class="sub">(offline)</text>
 
-  <!-- regions block -->
-  <text x="720" y="180" class="code-key">"regions": {</text>
-  <text x="720" y="196" class="code-key">  "R2_form_B": {</text>
-  <text x="720" y="212" class="code">    "op_counts": {sub: 20000, mul: 20000},</text>
-  <text x="720" y="228" class="code">    "value_range_ok_for_float": false,      ← range prune signal</text>
-  <text x="720" y="244" class="code">    "predicted_rel_err_if_float": 4e-5,</text>
-  <text x="720" y="260" class="code">    "predicted_rel_err_if_ff":    3e-9,</text>
-  <text x="720" y="276" class="code">    "cancellation_hotspots": [{op:sub, cond:7e3, provenance:[x*x, y*y]}, …],</text>
-  <text x="720" y="292" class="code">    "consumers": ["R4_reduce_AB"]           ← DAG edge</text>
-  <text x="720" y="308" class="code-key">  },</text>
-  <text x="720" y="324" class="code-key">  "R3_form_C": {</text>
-  <text x="720" y="340" class="code">    "op_counts": {log: 10000, add: 10000, mul: 10000},</text>
-  <text x="720" y="356" class="code">    "value_range_ok_for_float": true,</text>
-  <text x="720" y="372" class="code">    "predicted_rel_err_if_float": 6e-5,     ← flagged (log near root)</text>
-  <text x="720" y="388" class="code">    "predicted_rel_err_if_ff":    2e-9,</text>
-  <text x="720" y="404" class="code">    "consumers": ["R5_reduce_C"]</text>
-  <text x="720" y="420" class="code-key">  },</text>
-  <text x="720" y="436" class="code">  …R1, R4, R5, R6</text>
-  <text x="720" y="452" class="code-key">},</text>
+  <!-- ============ RIGHT PANEL: Region-keyed report ============ -->
+  <rect x="650" y="80" width="610" height="620" rx="8" fill="none" stroke="#94a3b8" stroke-width="1" stroke-dasharray="4 3"/>
+  <text x="670" y="104" class="panel-title">(b)  Reduction → per-region report</text>
 
-  <!-- tail_samples block -->
-  <text x="720" y="478" class="code-key">"integrals": {</text>
-  <text x="720" y="494" class="code-key">  "toy_kernel": {</text>
-  <text x="720" y="510" class="code-key">    "tail_samples": {</text>
-  <text x="720" y="526" class="code">      "determinism_hash": "sha256:a1b2…",</text>
-  <text x="720" y="542" class="code">      "max_rel_err":  [{offset:3868, comp:"real", val:1.6e-15}, …K=10],</text>
-  <text x="720" y="558" class="code">      "max_cond":     […],   "max_abs_value": […],   "min_abs_value": […]</text>
-  <text x="965" y="574" text-anchor="middle" class="code-key">}}}</text>
+  <!-- Report box -->
+  <rect x="670" y="130" width="570" height="490" rx="6" class="report-box"/>
+  <text x="955" y="154" text-anchor="middle" class="panel-title">report.json  — one entry per region</text>
 
-  <!-- reduction formula callout -->
-  <g transform="translate(700, 590)">
-    <rect x="0" y="0" width="530" height="90" rx="6" class="reduce-box"/>
-    <text x="10" y="20" class="h2">Predicted error: standard forward-error cascade</text>
-    <text x="10" y="42" class="math">rel_err(c)   ≲   κ · ( rel_err(a) + rel_err(b) )   +   u</text>
-    <text x="10" y="62" class="sub">Applied per op along the region's sub-DAG; u = format unit-roundoff  (float: 2⁻²⁴, dd: 2⁻¹⁰⁶).</text>
-    <text x="10" y="78" class="sub">Worst-case bound — often loose. Validator re-measures empirically against the dd oracle later.</text>
+  <!-- Table header -->
+  <g transform="translate(690, 170)">
+    <rect x="0" y="0" width="530" height="26" fill="#e2e8f0" stroke="#64748b" stroke-width="1"/>
+    <text x="14" y="18" class="th">region</text>
+    <text x="80" y="18" class="th">op_counts (dominant)</text>
+    <text x="220" y="18" class="th">range_ok</text>
+    <text x="290" y="18" class="th">pred_err_ff</text>
+    <text x="380" y="18" class="th">pred_err_float</text>
+    <text x="490" y="18" class="th">consumers</text>
+
+    <!-- Row R1 (safe) -->
+    <rect x="0" y="26" width="530" height="52" class="row-safe" stroke="#64748b" stroke-width="0.8"/>
+    <text x="14" y="46" class="td" font-weight="700">R1</text>
+    <text x="14" y="62" class="td" font-size="10" fill="#5b6475">well-cond</text>
+    <text x="80" y="46" class="td">2 add, 2 mul</text>
+    <text x="220" y="46" class="td">✓</text>
+    <text x="290" y="46" class="td">3e-15</text>
+    <text x="380" y="46" class="td">8e-7</text>
+    <text x="490" y="46" class="td">[R4]</text>
+
+    <!-- Row R2 (cancellation) -->
+    <rect x="0" y="78" width="530" height="52" class="row-warn" stroke="#64748b" stroke-width="0.8"/>
+    <text x="14" y="98" class="td" font-weight="700">R2</text>
+    <text x="14" y="114" class="td" font-size="10" fill="#5b6475">cancel</text>
+    <text x="80" y="98" class="td">2 mul, 1 sub</text>
+    <text x="220" y="98" class="td" fill="#b45309" font-weight="700">✗</text>
+    <text x="290" y="98" class="td">2e-9</text>
+    <text x="380" y="98" class="td" fill="#b45309" font-weight="700">4e-5</text>
+    <text x="490" y="98" class="td">[R4]</text>
+
+    <!-- Row R3 (singular) -->
+    <rect x="0" y="130" width="530" height="52" class="row-sing" stroke="#64748b" stroke-width="0.8"/>
+    <text x="14" y="150" class="td" font-weight="700">R3</text>
+    <text x="14" y="166" class="td" font-size="10" fill="#5b6475">singular</text>
+    <text x="80" y="150" class="td">1 log, 1 add</text>
+    <text x="220" y="150" class="td">✓</text>
+    <text x="290" y="150" class="td">4e-10</text>
+    <text x="380" y="150" class="td" fill="#475569" font-weight="700">6e-5</text>
+    <text x="490" y="150" class="td">[R5]</text>
+
+    <!-- Row R4 -->
+    <rect x="0" y="182" width="530" height="52" class="row-safe" stroke="#64748b" stroke-width="0.8"/>
+    <text x="14" y="202" class="td" font-weight="700">R4</text>
+    <text x="14" y="218" class="td" font-size="10" fill="#5b6475">well-cond</text>
+    <text x="80" y="202" class="td">1 div, 1 add, 1 sub</text>
+    <text x="220" y="202" class="td">✓</text>
+    <text x="290" y="202" class="td">6e-15</text>
+    <text x="380" y="202" class="td">1e-6</text>
+    <text x="490" y="202" class="td">[R6]</text>
+
+    <!-- Row R5 -->
+    <rect x="0" y="234" width="530" height="52" class="row-safe" stroke="#64748b" stroke-width="0.8"/>
+    <text x="14" y="254" class="td" font-weight="700">R5</text>
+    <text x="14" y="270" class="td" font-size="10" fill="#5b6475">well-cond</text>
+    <text x="80" y="254" class="td">1 sqrt, 1 mul, 1 add</text>
+    <text x="220" y="254" class="td">✓</text>
+    <text x="290" y="254" class="td">5e-15</text>
+    <text x="380" y="254" class="td">9e-7</text>
+    <text x="490" y="254" class="td">[R6]</text>
+
+    <!-- Row R6 -->
+    <rect x="0" y="286" width="530" height="52" class="row-safe" stroke="#64748b" stroke-width="0.8"/>
+    <text x="14" y="306" class="td" font-weight="700">R6</text>
+    <text x="14" y="322" class="td" font-size="10" fill="#5b6475">well-cond</text>
+    <text x="80" y="306" class="td">1 mul, 1 add, 1 sub</text>
+    <text x="220" y="306" class="td">✓</text>
+    <text x="290" y="306" class="td">7e-15</text>
+    <text x="380" y="306" class="td">1e-6</text>
+    <text x="490" y="306" class="td">[ ]</text>
+
+    <!-- Also-emitted note -->
+    <text x="0" y="368" class="sub">Also emitted per region: cancellation_hotspots (op, cond, provenance trace).</text>
+    <text x="0" y="386" class="sub">Row color = numerical character discovered by the reduction — matches slide 01.</text>
   </g>
 
-  <text x="40" y="710" class="caption">Report is the pipeline's canonical interface between characterization and strategy. Journal is transient; report is the durable artifact.</text>
+  <!-- Legend below report -->
+  <g transform="translate(670, 640)">
+    <text x="0" y="0" class="h">Row colors</text>
+    <rect x="0" y="14" width="18" height="14" class="row-safe" stroke="#64748b"/>
+    <text x="26" y="26" class="sub">well-conditioned</text>
+    <rect x="170" y="14" width="18" height="14" class="row-warn" stroke="#64748b"/>
+    <text x="196" y="26" class="sub">cancellation risk (range_ok = ✗)</text>
+    <rect x="410" y="14" width="18" height="14" class="row-sing" stroke="#64748b"/>
+    <text x="436" y="26" class="sub">near a singular point (pred_err_float flagged)</text>
+  </g>
 </svg>
