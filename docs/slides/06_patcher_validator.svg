@@ -95,12 +95,12 @@
     <text x="280" y="102" text-anchor="middle" class="sub-sm">with shim installed</text>
 
     <!-- Retry back arrow: loop back to LLM, path goes BELOW the boxes -->
-    <path d="M280 114 C 280 148, 100 148, 100 114" class="edge-loop"/>
+    <path d="M280 114 C 280 145, 100 145, 100 114" class="edge-loop"/>
+
+    <!-- Retry label INSIDE the pink block, just under the loop arc -->
+    <text x="190" y="162" text-anchor="middle" class="sub-sm" fill="#be185d">on gen/build failure → retry</text>
   </g>
 
-  <!-- Retry label OUTSIDE the loop container, to the right of the arc -->
-  <text x="1060" y="380" class="sub-sm" fill="#be185d">on gen/build</text>
-  <text x="1060" y="395" class="sub-sm" fill="#be185d">failure → retry</text>
 
   <!-- On-success text OUTSIDE the Patcher container -->
   <text x="850" y="440" text-anchor="middle" class="sub">On success: built binary → Validator.</text>
@@ -145,9 +145,8 @@
     <path d="M240 100 L 180 100" class="edge"/>
   </g>
 
-  <!-- =================== FEEDBACK arrow: verdict box → strategy (straight-line elbows) =================== -->
-  <!-- down from Verdict, left across bottom, up left side to Strategy -->
-  <path d="M400 620 L 400 695 L 20 695 L 20 145 L 40 145" class="edge-back"/>
-  <text x="60" y="680" class="lbl" style="fill:#166534">accept → R4 = dd</text>
-  <text x="260" y="680" class="sub-sm">strategy commits state, dequeues next region</text>
+  <!-- =================== FEEDBACK arrow: verdict left edge → strategy bottom edge (2 segments) =================== -->
+  <path d="M320 580 L 155 580 L 155 180" class="edge-back"/>
+  <text x="170" y="340" class="lbl" style="fill:#166534">strategy commits state</text>
+  <text x="170" y="358" class="sub-sm">{accept: R4 → dd} ; dequeues next region</text>
 </svg>
