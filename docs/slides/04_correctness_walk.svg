@@ -72,15 +72,14 @@
     <text x="278" y="122" class="lbl" style="fill:#b45309">correctness</text>
     <!-- correctness label color matches arrow-corr stroke #b45309 -->
 
-    <!-- Speedup arrows (dotted): one rung down from current state -->
+    <!-- Speedup arrows (dotted): one rung down; same arc radius, arced further out than correctness -->
     <!-- dd → double -->
-    <path d="M215 30 C 330 30, 330 120, 215 120" class="arrow-speed" marker-end="url(#arrow-speed-m)"/>
+    <path d="M215 30 C 385 30, 385 120, 215 120" class="arrow-speed" marker-end="url(#arrow-speed-m)"/>
     <!-- double → ff -->
-    <path d="M215 120 C 380 120, 380 210, 215 210" class="arrow-speed" marker-end="url(#arrow-speed-m)"/>
+    <path d="M215 120 C 385 120, 385 210, 215 210" class="arrow-speed" marker-end="url(#arrow-speed-m)"/>
     <!-- ff → float -->
-    <path d="M215 210 C 430 210, 430 300, 215 300" class="arrow-speed" marker-end="url(#arrow-speed-m)"/>
-    <text x="340" y="250" class="lbl" style="fill:#166534">speedup</text>
-    <text x="340" y="268" class="sub-sm" style="fill:#166534">one rung down from current</text>
+    <path d="M215 210 C 385 210, 385 300, 215 300" class="arrow-speed" marker-end="url(#arrow-speed-m)"/>
+    <text x="395" y="170" class="lbl" style="fill:#166534">speedup</text>
 
     <!-- Note under the ladder -->
     <text x="0" y="380" class="sub">↑ safer / slower</text>
@@ -153,28 +152,28 @@
 
     <!-- rows -->
     <g font-size="12" fill="#172033">
-      <rect x="0" y="26" width="410" height="28" fill="#f8fafc" stroke="#e2e8f0"/>
+      <rect x="0" y="26" width="410" height="28" fill="#bbf7d0" stroke="#86efac"/>
       <text x="10" y="44">1</text>
       <text x="50" y="44">R1</text>
       <text x="115" y="44">double → ff</text>
       <text x="240" y="44" class="verdict-accept">accept</text>
       <text x="320" y="44">R1 = ff</text>
 
-      <rect x="0" y="54" width="410" height="28" fill="#fff" stroke="#e2e8f0"/>
+      <rect x="0" y="54" width="410" height="28" fill="#bbf7d0" stroke="#86efac"/>
       <text x="10" y="72">2</text>
       <text x="50" y="72">R5</text>
       <text x="115" y="72">double → ff</text>
       <text x="240" y="72" class="verdict-accept">accept</text>
       <text x="320" y="72">R5 = ff</text>
 
-      <rect x="0" y="82" width="410" height="28" fill="#f8fafc" stroke="#e2e8f0"/>
+      <rect x="0" y="82" width="410" height="28" fill="#bbf7d0" stroke="#86efac"/>
       <text x="10" y="100">3</text>
       <text x="50" y="100">R6</text>
       <text x="115" y="100">double → ff</text>
       <text x="240" y="100" class="verdict-accept">accept</text>
       <text x="320" y="100">R6 = ff</text>
 
-      <rect x="0" y="110" width="410" height="46" fill="#dcfce7" stroke="#86efac"/>
+      <rect x="0" y="110" width="410" height="46" fill="#bbf7d0" stroke="#86efac"/>
       <text x="10" y="130">4</text>
       <text x="50" y="130">R4</text>
       <text x="115" y="130">double → dd</text>
@@ -182,14 +181,14 @@
       <text x="320" y="130">R4 = dd</text>
       <text x="50" y="148" class="sub-sm" font-style="italic">up-bump: cascade from R1+R2 pushes rel-err past tol at double</text>
 
-      <rect x="0" y="156" width="410" height="28" fill="#fff" stroke="#e2e8f0"/>
+      <rect x="0" y="156" width="410" height="28" fill="#cbd5e1" stroke="#94a3b8"/>
       <text x="10" y="174">5</text>
       <text x="50" y="174">R3</text>
       <text x="115" y="174">double → ff</text>
       <text x="240" y="174" class="verdict-accept">accept</text>
       <text x="320" y="174">R3 = ff</text>
 
-      <rect x="0" y="184" width="410" height="28" fill="#f8fafc" stroke="#e2e8f0"/>
+      <rect x="0" y="184" width="410" height="28" fill="#fde68a" stroke="#fcd34d"/>
       <text x="10" y="202">6</text>
       <text x="50" y="202">R2</text>
       <text x="115" y="202">double → ff</text>

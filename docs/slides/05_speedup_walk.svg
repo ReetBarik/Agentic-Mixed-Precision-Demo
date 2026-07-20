@@ -64,20 +64,16 @@
     <text x="100" y="296" text-anchor="middle" class="rung-lbl">float</text>
     <text x="100" y="316" text-anchor="middle" class="rung-sub">24-bit mantissa · fastest</text>
 
-    <!-- Correctness arrows (solid, on left side): double → dd and double → ff -->
+    <!-- Correctness arrows (solid): double → dd and double → ff -->
     <path d="M215 105 C 270 105, 270 30, 215 30" class="arrow-corr" marker-end="url(#arrow-corr-m)"/>
     <path d="M215 135 C 270 135, 270 210, 215 210" class="arrow-corr" marker-end="url(#arrow-corr-m)"/>
     <text x="278" y="122" class="lbl" style="fill:#b45309">correctness</text>
 
-    <!-- Speedup arrows (dotted): one rung down at each level -->
-    <!-- dd → double -->
-    <path d="M215 30 C 330 30, 330 120, 215 120" class="arrow-speed" marker-end="url(#arrow-speed-m)"/>
-    <!-- double → ff -->
-    <path d="M215 120 C 380 120, 380 210, 215 210" class="arrow-speed" marker-end="url(#arrow-speed-m)"/>
-    <!-- ff → float -->
-    <path d="M215 210 C 430 210, 430 300, 215 300" class="arrow-speed" marker-end="url(#arrow-speed-m)"/>
-    <text x="340" y="250" class="lbl" style="fill:#166534">speedup</text>
-    <text x="340" y="268" class="sub-sm" style="fill:#166534">one rung down from current</text>
+    <!-- Speedup arrows (dotted): same arc radius across all three -->
+    <path d="M215 30 C 385 30, 385 120, 215 120" class="arrow-speed" marker-end="url(#arrow-speed-m)"/>
+    <path d="M215 120 C 385 120, 385 210, 215 210" class="arrow-speed" marker-end="url(#arrow-speed-m)"/>
+    <path d="M215 210 C 385 210, 385 300, 215 300" class="arrow-speed" marker-end="url(#arrow-speed-m)"/>
+    <text x="395" y="170" class="lbl" style="fill:#166534">speedup</text>
 
     <!-- Note under the ladder -->
     <text x="0" y="380" class="sub">↑ safer / slower</text>
@@ -93,7 +89,6 @@
 
     <text x="160" y="26" text-anchor="middle" class="panel-title">6 regions, highest flop weight first</text>
 
-    <!-- queue entries: ordered by flop weight; attempts one-rung-down from post-correctness -->
     <g transform="translate(16, 46)">
       <rect x="0" y="0" width="288" height="46" rx="6" class="rnode-safe"/>
       <text x="10" y="18" class="lbl">1.  R6   ff → float</text>
@@ -148,65 +143,66 @@
     <text x="230" y="18" class="th">verdict</text>
     <text x="310" y="18" class="th">new state</text>
 
-    <!-- rows -->
+    <!-- rows: background matches per-region character (queue color) -->
     <g font-size="12" fill="#172033">
-      <!-- step 1: R6 ff → float accept -->
-      <rect x="0" y="26" width="410" height="28" fill="#f8fafc" stroke="#e2e8f0"/>
+      <!-- step 1: R6 ff → float accept (green region) -->
+      <rect x="0" y="26" width="410" height="28" fill="#bbf7d0" stroke="#86efac"/>
       <text x="10" y="44">1</text>
       <text x="50" y="44">R6</text>
       <text x="115" y="44">ff → float</text>
       <text x="230" y="44" class="verdict-accept">accept</text>
       <text x="310" y="44">R6 = float</text>
 
-      <!-- step 2: R4 dd → double — accept (safe drop from dd) -->
-      <rect x="0" y="54" width="410" height="46" fill="#dcfce7" stroke="#86efac"/>
+      <!-- step 2: R4 dd → double REJECT (safe region background, red verdict text) -->
+      <rect x="0" y="54" width="410" height="62" fill="#bbf7d0" stroke="#86efac"/>
       <text x="10" y="74">2</text>
       <text x="50" y="74">R4</text>
       <text x="115" y="74">dd → double</text>
-      <text x="230" y="74" class="verdict-accept">accept</text>
-      <text x="310" y="74">R4 = double</text>
-      <text x="50" y="92" class="sub-sm" font-style="italic">dd was correctness overshoot; double now sufficient given R2 at ff</text>
+      <text x="230" y="74" class="verdict-reject">reject</text>
+      <text x="310" y="74">R4 = dd</text>
+      <text x="50" y="92" class="sub-sm" font-style="italic">R2 now at ff (worse precision) makes R4's cascade risk</text>
+      <text x="50" y="108" class="sub-sm" font-style="italic">stronger, not weaker — dd stays necessary</text>
 
       <!-- step 3: R5 ff → float accept -->
-      <rect x="0" y="100" width="410" height="28" fill="#fff" stroke="#e2e8f0"/>
-      <text x="10" y="118">3</text>
-      <text x="50" y="118">R5</text>
-      <text x="115" y="118">ff → float</text>
-      <text x="230" y="118" class="verdict-accept">accept</text>
-      <text x="310" y="118">R5 = float</text>
+      <rect x="0" y="116" width="410" height="28" fill="#bbf7d0" stroke="#86efac"/>
+      <text x="10" y="134">3</text>
+      <text x="50" y="134">R5</text>
+      <text x="115" y="134">ff → float</text>
+      <text x="230" y="134" class="verdict-accept">accept</text>
+      <text x="310" y="134">R5 = float</text>
 
       <!-- step 4: R1 ff → float accept -->
-      <rect x="0" y="128" width="410" height="28" fill="#f8fafc" stroke="#e2e8f0"/>
-      <text x="10" y="146">4</text>
-      <text x="50" y="146">R1</text>
-      <text x="115" y="146">ff → float</text>
-      <text x="230" y="146" class="verdict-accept">accept</text>
-      <text x="310" y="146">R1 = float</text>
+      <rect x="0" y="144" width="410" height="28" fill="#bbf7d0" stroke="#86efac"/>
+      <text x="10" y="162">4</text>
+      <text x="50" y="162">R1</text>
+      <text x="115" y="162">ff → float</text>
+      <text x="230" y="162" class="verdict-accept">accept</text>
+      <text x="310" y="162">R1 = float</text>
 
-      <!-- step 5: R3 ff → float reject (log near root) -->
-      <rect x="0" y="156" width="410" height="62" fill="#fee2e2" stroke="#fca5a5"/>
-      <text x="10" y="176">5</text>
-      <text x="50" y="176">R3</text>
-      <text x="115" y="176">ff → float</text>
-      <text x="230" y="176" class="verdict-reject">reject</text>
-      <text x="310" y="176">R3 = ff</text>
-      <text x="50" y="194" class="sub-sm" font-style="italic">log near 1: 24-bit mantissa can't hold small-arg</text>
-      <text x="50" y="210" class="sub-sm" font-style="italic">precision; ff's 48 bits was already the sweet spot</text>
+      <!-- step 5: R3 ff → float reject (grey region, log near root) -->
+      <rect x="0" y="172" width="410" height="62" fill="#cbd5e1" stroke="#94a3b8"/>
+      <text x="10" y="192">5</text>
+      <text x="50" y="192">R3</text>
+      <text x="115" y="192">ff → float</text>
+      <text x="230" y="192" class="verdict-reject">reject</text>
+      <text x="310" y="192">R3 = ff</text>
+      <text x="50" y="210" class="sub-sm" font-style="italic">log near 1: 24-bit mantissa can't hold small-arg</text>
+      <text x="50" y="226" class="sub-sm" font-style="italic">precision; ff's 48 bits was already the sweet spot</text>
 
-      <!-- step 6: R2 float_range_ok prune → ff (no-op, already at ff) -->
-      <rect x="0" y="218" width="410" height="62" fill="#fef3c7" stroke="#fcd34d"/>
-      <text x="10" y="238">6</text>
-      <text x="50" y="238">R2</text>
-      <text x="115" y="238">ff → ff*</text>
-      <text x="230" y="238" class="verdict-downgrade">prune</text>
-      <text x="310" y="238">R2 = ff</text>
-      <text x="50" y="256" class="sub-sm" font-style="italic">* float_range_ok = ✗ downgrades target from float</text>
-      <text x="50" y="272" class="sub-sm" font-style="italic">back to ff; chain-dedup skips build (already at ff)</text>
+      <!-- step 6: R2 float_range_ok prune → ff (amber region, prune text amber) -->
+      <rect x="0" y="234" width="410" height="62" fill="#fde68a" stroke="#fcd34d"/>
+      <text x="10" y="254">6</text>
+      <text x="50" y="254">R2</text>
+      <text x="115" y="254">ff → ff*</text>
+      <text x="230" y="254" class="verdict-downgrade">prune</text>
+      <text x="310" y="254">R2 = ff</text>
+      <text x="50" y="272" class="sub-sm" font-style="italic">* float_range_ok = ✗ downgrades target from float</text>
+      <text x="50" y="288" class="sub-sm" font-style="italic">back to ff; chain-dedup skips build (already at ff)</text>
     </g>
 
-    <g transform="translate(10, 296)">
-      <text x="0" y="0" class="sub-sm">R4 uniquely benefits from the two-phase design: correctness</text>
-      <text x="0" y="16" class="sub-sm">bumps up defensively, speedup relaxes back down safely.</text>
+    <g transform="translate(10, 316)">
+      <text x="0" y="0" class="sub-sm">Correctness up-bumps defensively; speedup relaxes where safe</text>
+      <text x="0" y="16" class="sub-sm">(R6, R5, R1) and leaves the rest at their safe rungs.</text>
       <text x="0" y="38" class="sub-sm">Same no-retry rule: each (region, target) pair tried at most once.</text>
       <text x="0" y="54" class="sub-sm">All accepts monotone-downward — no rollback, no re-promotion.</text>
     </g>
@@ -217,8 +213,8 @@
     <text x="0" y="0" class="h">State after <tspan style="fill:#166534">speedup</tspan> phase</text>
     <rect x="0" y="14" width="410" height="80" rx="6" class="box"/>
 
-    <text x="16" y="38" class="lbl">double: 1</text>
-    <text x="120" y="38" class="sub">R4  (relaxed from dd)</text>
+    <text x="16" y="38" class="lbl">dd: 1</text>
+    <text x="120" y="38" class="sub">R4  (up-bumped in correctness, held)</text>
 
     <text x="16" y="60" class="lbl">float: 3</text>
     <text x="120" y="60" class="sub">R1, R5, R6</text>
