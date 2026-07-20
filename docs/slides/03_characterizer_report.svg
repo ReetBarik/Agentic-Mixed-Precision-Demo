@@ -173,9 +173,9 @@
     <text x="475" y="310" class="td">[ ]</text>
 
     <!-- Notes below the table -->
-    <text x="0" y="370" class="sub">float_range_ok = observed values fit float/ff dynamic range without over/underflow (double/dd unbounded for this workload).</text>
+    <text x="0" y="370" class="sub">float_range_ok = observed values fit float/ff dynamic range without over/underflow.</text>
     <text x="0" y="388" class="sub">Also emitted per region: cancellation_hotspots (op, cond, provenance trace).</text>
-    <text x="0" y="406" class="sub">Row color = numerical character discovered by the reduction — matches slide 01.</text>
+    <text x="0" y="406" class="sub">Row color = numerical character discovered by the reduction.</text>
   </g>
 
   <!-- Legend inside the right panel, tight spacing -->
