@@ -6,42 +6,39 @@
     .panel-title { font-size: 15px; font-weight: 700; fill: #172033; }
     .lbl { font-size: 14px; font-weight: 600; fill: #172033; }
     .sub { font-size: 12px; fill: #5b6475; }
+    .sub-sm { font-size: 11px; fill: #5b6475; }
     .code { font-family: ui-monospace, "SF Mono", Menlo, monospace; font-size: 12px; fill: #172033; }
     .box { stroke: #64748b; stroke-width: 1; fill: #f8fafc; }
-    .report-box { stroke: #6d28d9; stroke-width: 1.6; fill: #ede9fe; }
     .queue-box { stroke: #b45309; stroke-width: 1.6; fill: #fef3c7; }
     .rnode-safe { stroke: #166534; stroke-width: 1.4; fill: #bbf7d0; }
     .rnode-warn { stroke: #b45309; stroke-width: 1.6; fill: #fde68a; }
     .rnode-sing { stroke: #475569; stroke-width: 1.4; fill: #cbd5e1; }
     .rung-safest { fill: #86efac; stroke: #166534; stroke-width: 1.4; }
-    .rung-base   { fill: #f1f5f9; stroke: #475569; stroke-width: 1.4; }
+    .rung-base   { fill: #f1f5f9; stroke: #475569; stroke-width: 1.6; }
     .rung-mid    { fill: #fed7aa; stroke: #b45309; stroke-width: 1.4; }
     .rung-risky  { fill: #fecaca; stroke: #991b1b; stroke-width: 1.4; }
     .rung-lbl { font-size: 15px; font-weight: 700; fill: #172033; }
     .rung-sub { font-size: 11px; fill: #5b6475; }
-    .edge { stroke: #475569; stroke-width: 2; fill: none; marker-end: url(#arrow); }
-    .edge-accept { stroke: #166534; stroke-width: 2.2; fill: none; marker-end: url(#arrow-green); }
-    .edge-reject { stroke: #991b1b; stroke-width: 2.2; fill: none; marker-end: url(#arrow-red); stroke-dasharray: 6 3; }
-    .th { font-size: 12px; font-weight: 700; fill: #172033; }
-    .td { font-size: 12px; fill: #172033; }
+    .arrow-corr { stroke: #b45309; stroke-width: 2.2; fill: none; }
+    .arrow-speed { stroke: #64748b; stroke-width: 1.8; fill: none; stroke-dasharray: 5 4; }
     .verdict-accept { font-weight: 700; fill: #166534; }
     .verdict-reject { font-weight: 700; fill: #991b1b; }
+    .verdict-upbump { font-weight: 700; fill: #166534; }
+    .th { font-size: 12px; font-weight: 700; fill: #172033; }
+    .td { font-size: 12px; fill: #172033; }
   </style>
   <defs>
-    <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
-      <path d="M0,0 L10,5 L0,10 z" fill="#475569"/>
+    <marker id="arrow-corr-m" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" fill="#b45309"/>
     </marker>
-    <marker id="arrow-green" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
-      <path d="M0,0 L10,5 L0,10 z" fill="#166534"/>
-    </marker>
-    <marker id="arrow-red" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
-      <path d="M0,0 L10,5 L0,10 z" fill="#991b1b"/>
+    <marker id="arrow-speed-m" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" fill="#64748b"/>
     </marker>
   </defs>
 
   <!-- Title -->
   <text x="40" y="44" class="title">Strategy walk — correctness phase</text>
-  <text x="40" y="66" class="sub">Every region attempts one rung down from double (double → ff). Accept moves the region; reject leaves it at double.</text>
+  <text x="40" y="66" class="sub">For each region: attempt a demotion or, if unsafe at current precision, an up-bump. Accept moves the region; reject leaves it in place.</text>
 
   <!-- ============ LEFT: precision ladder ============ -->
   <text x="40" y="108" class="h">Precision ladder</text>
@@ -67,149 +64,158 @@
     <text x="100" y="296" text-anchor="middle" class="rung-lbl">float</text>
     <text x="100" y="316" text-anchor="middle" class="rung-sub">24-bit mantissa · fastest</text>
 
-    <!-- Correctness-phase arrow: double -> ff -->
-    <path d="M215 120 C 260 120, 260 210, 215 210" class="edge"/>
-    <text x="270" y="170" class="lbl" fill="#b45309">correctness</text>
-    <text x="270" y="188" class="sub">one rung down</text>
+    <!-- Correctness arrows: double → dd (solid) and double → ff (solid) -->
+    <!-- double → dd  (curves up on the right side) -->
+    <path d="M215 105 C 270 105, 270 30, 215 30" class="arrow-corr" marker-end="url(#arrow-corr-m)"/>
+    <!-- double → ff (curves down on the right side) -->
+    <path d="M215 135 C 270 135, 270 210, 215 210" class="arrow-corr" marker-end="url(#arrow-corr-m)"/>
+    <text x="278" y="122" class="lbl" fill="#b45309">correctness</text>
 
-    <!-- Speedup arrow (dimmed, on-next-slide) -->
-    <path d="M215 120 C 300 120, 300 300, 215 300" stroke="#94a3b8" stroke-width="1.5" fill="none" stroke-dasharray="4 3" marker-end="url(#arrow)"/>
-    <text x="320" y="220" class="sub" fill="#94a3b8">speedup (slide 05)</text>
-    <text x="320" y="236" class="sub" fill="#94a3b8">two rungs down</text>
+    <!-- Speedup arrows (dotted): double → ff and double → float -->
+    <path d="M215 135 C 330 135, 330 210, 215 210" class="arrow-speed" marker-end="url(#arrow-speed-m)"/>
+    <path d="M215 135 C 380 135, 380 300, 215 300" class="arrow-speed" marker-end="url(#arrow-speed-m)"/>
+    <text x="340" y="188" class="lbl" fill="#64748b">speedup</text>
+    <text x="340" y="204" class="sub" fill="#64748b">(slide 05)</text>
 
-    <!-- Safest-riskiest legend -->
-    <text x="0" y="380" class="sub">↑ safest / slowest</text>
-    <text x="0" y="398" class="sub">↓ riskiest / fastest</text>
-    <text x="0" y="418" class="sub">walk never re-promotes upward</text>
+    <!-- Note under the ladder -->
+    <text x="0" y="380" class="sub">↑ safer / slower</text>
+    <text x="0" y="398" class="sub">↓ faster / riskier</text>
+    <text x="0" y="418" class="sub">walk never re-promotes after accept</text>
   </g>
 
   <!-- ============ MIDDLE: correctness queue ============ -->
   <text x="500" y="108" class="h">Correctness queue  (dequeue-order)</text>
 
   <g transform="translate(500, 130)">
-    <rect x="0" y="0" width="280" height="480" rx="8" class="queue-box"/>
+    <rect x="0" y="0" width="320" height="490" rx="8" class="queue-box"/>
 
-    <text x="140" y="26" text-anchor="middle" class="panel-title">target: double → ff</text>
-    <text x="140" y="44" text-anchor="middle" class="sub">6 regions, ordered by predicted-safest first</text>
+    <text x="160" y="26" text-anchor="middle" class="panel-title">6 regions, predicted-safest first</text>
 
-    <!-- queue entries -->
-    <g transform="translate(20, 66)">
-      <rect x="0" y="0" width="240" height="40" rx="6" class="rnode-safe"/>
-      <text x="10" y="18" class="lbl">1.  R1  double → ff</text>
-      <text x="10" y="32" class="sub">op_counts: 2 add, 2 mul  ·  pred_err_ff: 3e-15</text>
+    <!-- queue entries (widened) -->
+    <g transform="translate(16, 46)">
+      <rect x="0" y="0" width="288" height="46" rx="6" class="rnode-safe"/>
+      <text x="10" y="18" class="lbl">1.  R1   double → ff  (demote)</text>
+      <text x="10" y="36" class="sub-sm">op_counts: 2 add, 2 mul  ·  pred_err_ff: 3e-15</text>
     </g>
-    <g transform="translate(20, 116)">
-      <rect x="0" y="0" width="240" height="40" rx="6" class="rnode-safe"/>
-      <text x="10" y="18" class="lbl">2.  R5  double → ff</text>
-      <text x="10" y="32" class="sub">1 sqrt, 1 mul, 1 add  ·  pred_err_ff: 5e-15</text>
+    <g transform="translate(16, 102)">
+      <rect x="0" y="0" width="288" height="46" rx="6" class="rnode-safe"/>
+      <text x="10" y="18" class="lbl">2.  R5   double → ff  (demote)</text>
+      <text x="10" y="36" class="sub-sm">1 sqrt, 1 mul, 1 add  ·  pred_err_ff: 5e-15</text>
     </g>
-    <g transform="translate(20, 166)">
-      <rect x="0" y="0" width="240" height="40" rx="6" class="rnode-safe"/>
-      <text x="10" y="18" class="lbl">3.  R6  double → ff</text>
-      <text x="10" y="32" class="sub">1 mul, 1 add, 1 sub  ·  pred_err_ff: 7e-15</text>
+    <g transform="translate(16, 158)">
+      <rect x="0" y="0" width="288" height="46" rx="6" class="rnode-safe"/>
+      <text x="10" y="18" class="lbl">3.  R6   double → ff  (demote)</text>
+      <text x="10" y="36" class="sub-sm">1 mul, 1 add, 1 sub  ·  pred_err_ff: 7e-15</text>
     </g>
-    <g transform="translate(20, 216)">
-      <rect x="0" y="0" width="240" height="40" rx="6" class="rnode-safe"/>
-      <text x="10" y="18" class="lbl">4.  R4  double → ff</text>
-      <text x="10" y="32" class="sub">1 div, 1 add, 1 sub  ·  pred_err_ff: 6e-15</text>
+    <g transform="translate(16, 214)">
+      <rect x="0" y="0" width="288" height="46" rx="6" class="rnode-safe"/>
+      <text x="10" y="18" class="lbl">4.  R4   double → dd  (up-bump)</text>
+      <text x="10" y="36" class="sub-sm">1 div, 1 add, 1 sub  ·  pred_err_double: hi</text>
     </g>
-    <g transform="translate(20, 266)">
-      <rect x="0" y="0" width="240" height="40" rx="6" class="rnode-sing"/>
-      <text x="10" y="18" class="lbl">5.  R3  double → ff</text>
-      <text x="10" y="32" class="sub">1 log, 1 add  ·  pred_err_ff: 4e-10  (log)</text>
+    <g transform="translate(16, 270)">
+      <rect x="0" y="0" width="288" height="46" rx="6" class="rnode-sing"/>
+      <text x="10" y="18" class="lbl">5.  R3   double → ff  (demote)</text>
+      <text x="10" y="36" class="sub-sm">1 log, 1 add  ·  pred_err_ff: 4e-10  (log)</text>
     </g>
-    <g transform="translate(20, 316)">
-      <rect x="0" y="0" width="240" height="40" rx="6" class="rnode-warn"/>
-      <text x="10" y="18" class="lbl">6.  R2  double → ff</text>
-      <text x="10" y="32" class="sub">2 mul, 1 sub  ·  pred_err_ff: 2e-9  (cancel)</text>
+    <g transform="translate(16, 326)">
+      <rect x="0" y="0" width="288" height="46" rx="6" class="rnode-warn"/>
+      <text x="10" y="18" class="lbl">6.  R2   double → ff  (demote)</text>
+      <text x="10" y="36" class="sub-sm">2 mul, 1 sub  ·  pred_err_ff: 2e-9  (cancel)</text>
     </g>
 
     <!-- Prune-check callout -->
-    <g transform="translate(20, 380)">
+    <g transform="translate(16, 400)">
       <text x="0" y="0" class="lbl">Prune check at dequeue</text>
-      <text x="0" y="18" class="sub">float_range_ok: applies only to float</text>
-      <text x="0" y="34" class="sub">target rung (nothing to prune at ff)</text>
-      <text x="0" y="52" class="sub">chain-dedup: no matches yet (first pass)</text>
+      <text x="0" y="18" class="sub-sm">float_range_ok: applies only when target is float</text>
+      <text x="0" y="34" class="sub-sm">(no effect this phase — correctness targets dd or ff)</text>
+      <text x="0" y="52" class="sub-sm">chain-dedup: no matches yet (first pass)</text>
     </g>
   </g>
 
   <!-- ============ RIGHT: walk trace + result ============ -->
-  <text x="820" y="108" class="h">Walk trace  (dequeue → validate → verdict)</text>
+  <text x="850" y="108" class="h">Walk trace</text>
 
-  <g transform="translate(820, 130)">
-    <rect x="0" y="0" width="420" height="330" rx="8" class="box"/>
+  <g transform="translate(850, 130)">
+    <rect x="0" y="0" width="410" height="340" rx="8" class="box"/>
 
-    <!-- header -->
-    <rect x="0" y="0" width="420" height="26" fill="#e2e8f0" stroke="#64748b" stroke-width="1"/>
+    <!-- header (widened columns) -->
+    <rect x="0" y="0" width="410" height="26" fill="#e2e8f0" stroke="#64748b" stroke-width="1"/>
     <text x="10" y="18" class="th">step</text>
-    <text x="60" y="18" class="th">region</text>
-    <text x="130" y="18" class="th">attempt</text>
+    <text x="50" y="18" class="th">region</text>
+    <text x="115" y="18" class="th">attempt</text>
     <text x="240" y="18" class="th">verdict</text>
-    <text x="330" y="18" class="th">new state</text>
+    <text x="320" y="18" class="th">new state</text>
 
     <!-- rows -->
     <g font-size="12" fill="#172033">
-      <rect x="0" y="26" width="420" height="30" fill="#f8fafc" stroke="#e2e8f0"/>
-      <text x="10" y="46">1</text>
-      <text x="60" y="46">R1</text>
-      <text x="130" y="46">double → ff</text>
-      <text x="240" y="46" class="verdict-accept">accept</text>
-      <text x="330" y="46">R1 = ff</text>
+      <rect x="0" y="26" width="410" height="28" fill="#f8fafc" stroke="#e2e8f0"/>
+      <text x="10" y="44">1</text>
+      <text x="50" y="44">R1</text>
+      <text x="115" y="44">double → ff</text>
+      <text x="240" y="44" class="verdict-accept">accept</text>
+      <text x="320" y="44">R1 = ff</text>
 
-      <rect x="0" y="56" width="420" height="30" fill="#fff" stroke="#e2e8f0"/>
-      <text x="10" y="76">2</text>
-      <text x="60" y="76">R5</text>
-      <text x="130" y="76">double → ff</text>
-      <text x="240" y="76" class="verdict-accept">accept</text>
-      <text x="330" y="76">R5 = ff</text>
+      <rect x="0" y="54" width="410" height="28" fill="#fff" stroke="#e2e8f0"/>
+      <text x="10" y="72">2</text>
+      <text x="50" y="72">R5</text>
+      <text x="115" y="72">double → ff</text>
+      <text x="240" y="72" class="verdict-accept">accept</text>
+      <text x="320" y="72">R5 = ff</text>
 
-      <rect x="0" y="86" width="420" height="30" fill="#f8fafc" stroke="#e2e8f0"/>
-      <text x="10" y="106">3</text>
-      <text x="60" y="106">R6</text>
-      <text x="130" y="106">double → ff</text>
-      <text x="240" y="106" class="verdict-accept">accept</text>
-      <text x="330" y="106">R6 = ff</text>
+      <rect x="0" y="82" width="410" height="28" fill="#f8fafc" stroke="#e2e8f0"/>
+      <text x="10" y="100">3</text>
+      <text x="50" y="100">R6</text>
+      <text x="115" y="100">double → ff</text>
+      <text x="240" y="100" class="verdict-accept">accept</text>
+      <text x="320" y="100">R6 = ff</text>
 
-      <rect x="0" y="116" width="420" height="46" fill="#fee2e2" stroke="#fca5a5"/>
-      <text x="10" y="136">4</text>
-      <text x="60" y="136">R4</text>
-      <text x="130" y="136">double → ff</text>
-      <text x="240" y="136" class="verdict-reject">reject</text>
-      <text x="330" y="136">R4 = double</text>
-      <text x="60" y="154" class="sub" font-style="italic">cascade: consumes R1+R2, ff mantissa can't hold div(a+b,a−b) residual</text>
+      <rect x="0" y="110" width="410" height="46" fill="#dcfce7" stroke="#86efac"/>
+      <text x="10" y="130">4</text>
+      <text x="50" y="130">R4</text>
+      <text x="115" y="130">double → dd</text>
+      <text x="240" y="130" class="verdict-upbump">accept ↑</text>
+      <text x="320" y="130">R4 = dd</text>
+      <text x="50" y="148" class="sub-sm" font-style="italic">up-bump: cascade from R1+R2 pushes rel-err past tol at double</text>
 
-      <rect x="0" y="162" width="420" height="30" fill="#fff" stroke="#e2e8f0"/>
-      <text x="10" y="182">5</text>
-      <text x="60" y="182">R3</text>
-      <text x="130" y="182">double → ff</text>
-      <text x="240" y="182" class="verdict-accept">accept</text>
-      <text x="330" y="182">R3 = ff</text>
+      <rect x="0" y="156" width="410" height="28" fill="#fff" stroke="#e2e8f0"/>
+      <text x="10" y="174">5</text>
+      <text x="50" y="174">R3</text>
+      <text x="115" y="174">double → ff</text>
+      <text x="240" y="174" class="verdict-accept">accept</text>
+      <text x="320" y="174">R3 = ff</text>
 
-      <rect x="0" y="192" width="420" height="30" fill="#f8fafc" stroke="#e2e8f0"/>
-      <text x="10" y="212">6</text>
-      <text x="60" y="212">R2</text>
-      <text x="130" y="212">double → ff</text>
-      <text x="240" y="212" class="verdict-accept">accept</text>
-      <text x="330" y="212">R2 = ff</text>
+      <rect x="0" y="184" width="410" height="28" fill="#f8fafc" stroke="#e2e8f0"/>
+      <text x="10" y="202">6</text>
+      <text x="50" y="202">R2</text>
+      <text x="115" y="202">double → ff</text>
+      <text x="240" y="202" class="verdict-accept">accept</text>
+      <text x="320" y="202">R2 = ff</text>
     </g>
 
-    <text x="10" y="256" class="sub">no re-attempts: each (region, target) pair tried at most once per run</text>
-    <text x="10" y="272" class="sub">R4 stays at double — speedup phase may still attempt double → float</text>
-    <text x="10" y="288" class="sub">R4's reject blocks its ff attempt; speedup phase attempts it fresh</text>
+    <g transform="translate(10, 244)">
+      <text x="0" y="0" class="sub-sm">Each (region, target) pair tried at most once per run — no</text>
+      <text x="0" y="16" class="sub-sm">re-attempts, no rollback.</text>
+      <text x="0" y="38" class="sub-sm">R4's dd acceptance seeds an already-safer starting point;</text>
+      <text x="0" y="54" class="sub-sm">speedup phase (slide 05) still attempts double → float on it.</text>
+      <text x="0" y="76" class="sub-sm">All other regions become speedup candidates from double baseline.</text>
+    </g>
   </g>
 
   <!-- Precision distribution after correctness phase -->
-  <g transform="translate(820, 490)">
+  <g transform="translate(850, 500)">
     <text x="0" y="0" class="h">State after correctness phase</text>
-    <rect x="0" y="14" width="420" height="80" rx="6" class="box"/>
+    <rect x="0" y="14" width="410" height="100" rx="6" class="box"/>
 
-    <text x="16" y="38" class="lbl">double: 1</text>
-    <text x="120" y="38" class="lbl" fill="#5b6475">R4</text>
+    <text x="16" y="38" class="lbl">dd: 1</text>
+    <text x="120" y="38" class="sub">R4  (up-bumped from double)</text>
 
-    <text x="16" y="60" class="lbl">ff: 5</text>
-    <text x="120" y="60" class="lbl" fill="#5b6475">R1, R2, R3, R5, R6</text>
+    <text x="16" y="60" class="lbl">double: 0</text>
+    <text x="120" y="60" class="sub">all regions moved off the baseline</text>
 
-    <text x="16" y="82" class="lbl">float: 0</text>
-    <text x="120" y="82" class="sub">(correctness phase never targets float directly)</text>
+    <text x="16" y="82" class="lbl">ff: 5</text>
+    <text x="120" y="82" class="sub">R1, R2, R3, R5, R6</text>
+
+    <text x="16" y="104" class="lbl">float: 0</text>
+    <text x="120" y="104" class="sub">correctness never targets float</text>
   </g>
 </svg>
