@@ -1,0 +1,125 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1280 720" font-family="ui-sans-serif, system-ui, -apple-system, sans-serif">
+  <style>
+    .title { font-size: 26px; font-weight: 700; fill: #172033; }
+    .subtitle { font-size: 14px; fill: #5b6475; }
+    .h { font-size: 16px; font-weight: 650; fill: #172033; }
+    .h2 { font-size: 14px; font-weight: 650; fill: #172033; }
+    .lbl { font-size: 14px; font-weight: 600; fill: #172033; }
+    .sub { font-size: 12px; fill: #5b6475; }
+    .code { font-family: ui-monospace, "SF Mono", Menlo, monospace; font-size: 11px; fill: #172033; }
+    .code-key { font-family: ui-monospace, "SF Mono", Menlo, monospace; font-size: 11px; fill: #0f766e; font-weight: 600; }
+    .math { font-family: "Cambria Math", Georgia, serif; font-style: italic; font-size: 13px; fill: #172033; }
+    .box { stroke: #64748b; stroke-width: 1; fill: #f1f5f9; }
+    .app-box { stroke: #1e40af; stroke-width: 1.6; fill: #dbeafe; }
+    .journal-box { stroke: #0f766e; stroke-width: 1.6; fill: #99f6e4; }
+    .report-box { stroke: #6d28d9; stroke-width: 1.6; fill: #ede9fe; }
+    .reduce-box { stroke: #b45309; stroke-width: 1.6; fill: #fef3c7; }
+    .edge { stroke: #475569; stroke-width: 2; fill: none; marker-end: url(#arrow); }
+    .edge-big { stroke: #475569; stroke-width: 3; fill: none; marker-end: url(#arrow); }
+    .th { font-size: 11px; font-weight: 700; fill: #172033; }
+    .td { font-size: 11px; fill: #172033; }
+    .caption { font-size: 12px; fill: #5b6475; font-style: italic; }
+    .panel-title { font-size: 15px; font-weight: 700; fill: #172033; }
+  </style>
+  <defs>
+    <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" fill="#475569"/>
+    </marker>
+  </defs>
+
+  <!-- Title -->
+  <text x="40" y="44" class="title">Characterizer  →  Report</text>
+  <text x="40" y="66" class="subtitle">Two sub-steps: (a) instrumented sweep produces the journal, (b) offline reduction rolls it into a region-keyed report.  ~80 GB → few MB compression.</text>
+
+  <!-- ================= LEFT PANEL: Sample sweep → journal ================= -->
+  <rect x="30" y="90" width="600" height="600" rx="8" fill="none" stroke="#94a3b8" stroke-width="1" stroke-dasharray="4 3"/>
+  <text x="50" y="112" class="panel-title">(a)  Instrumented sweep  →  Journal</text>
+
+  <!-- Instrumented app -->
+  <rect x="60" y="130" width="220" height="70" rx="6" class="app-box"/>
+  <text x="170" y="156" text-anchor="middle" class="lbl">Toy app (instrumented)</text>
+  <text x="170" y="176" text-anchor="middle" class="sub">Tracked&lt;double&gt; everywhere</text>
+  <text x="170" y="192" text-anchor="middle" class="sub">R1…R6 scopes annotated</text>
+
+  <!-- Sample driver -->
+  <rect x="320" y="130" width="240" height="70" rx="6" class="reduce-box"/>
+  <text x="440" y="156" text-anchor="middle" class="lbl">Sample driver</text>
+  <text x="440" y="176" text-anchor="middle" class="sub">10k seeded inputs</text>
+  <text x="440" y="192" text-anchor="middle" class="sub">(mt19937, srand=12345)</text>
+
+  <path d="M280 165 L320 165" class="edge"/>
+
+  <!-- Journal: big block -->
+  <path d="M440 200 L440 250" class="edge-big"/>
+  <rect x="60" y="250" width="500" height="240" rx="6" class="journal-box"/>
+  <text x="310" y="274" text-anchor="middle" class="panel-title">Journal (transient)</text>
+  <text x="310" y="292" text-anchor="middle" class="sub">one entry per op per sample  ·  ~80 GB at 10k×21 integrals in real qcdloop</text>
+
+  <text x="80" y="320" class="code">{scope:"R1_form_A", sample:0, op:"add",  in:[x,z], val:[3.1, 0.5], out_val:3.6, cond:1.28}</text>
+  <text x="80" y="336" class="code">{scope:"R1_form_A", sample:0, op:"mul",  in:[x,y], val:[3.1, 2.0], out_val:6.2, cond:2.0 }</text>
+  <text x="80" y="352" class="code">{scope:"R2_form_B", sample:0, op:"sub",  in:[u,v], val:[7.0, 6.998], out_val:2e-3, cond:7e3}  ← cancel!</text>
+  <text x="80" y="368" class="code">{scope:"R3_form_C", sample:0, op:"log",  in:[w+1],val:[1.001],   out_val:1e-3, cond:1e3 }  ← log near 1</text>
+  <text x="80" y="384" class="code">{scope:"R4_reduce_AB", sample:0, op:"div", in:[a+b,a-b], ...             }</text>
+  <text x="80" y="400" class="code">…</text>
+  <text x="80" y="416" class="code">{scope:"R6_assemble", sample:9999, op:"mul", ...}</text>
+
+  <text x="80" y="450" class="sub">• Per-op:   op kind, operand ids, operand values, result id/value, cond proxy</text>
+  <text x="80" y="466" class="sub">• Per-value:  stable TrackedId (name@scope) — carries full provenance</text>
+  <text x="80" y="482" class="sub">• Discarded after reduction — never shipped, never persisted long-term</text>
+
+  <!-- ================= REDUCTION arrow ================= -->
+  <path d="M560 370 L680 370" class="edge-big"/>
+  <rect x="580" y="330" width="80" height="80" rx="6" class="reduce-box"/>
+  <text x="620" y="358" text-anchor="middle" class="lbl">reduce</text>
+  <text x="620" y="376" text-anchor="middle" class="sub">offline</text>
+  <text x="620" y="392" text-anchor="middle" class="sub">once</text>
+
+  <!-- ================= RIGHT PANEL: Region-keyed report ================= -->
+  <rect x="680" y="90" width="570" height="600" rx="8" fill="none" stroke="#94a3b8" stroke-width="1" stroke-dasharray="4 3"/>
+  <text x="700" y="112" class="panel-title">(b)  Reduction  →  Region-keyed report</text>
+
+  <!-- Report structure -->
+  <rect x="700" y="130" width="530" height="440" rx="6" class="report-box"/>
+  <text x="965" y="154" text-anchor="middle" class="panel-title">report_10k.json  (few MB)</text>
+
+  <!-- regions block -->
+  <text x="720" y="180" class="code-key">"regions": {</text>
+  <text x="720" y="196" class="code-key">  "R2_form_B": {</text>
+  <text x="720" y="212" class="code">    "op_counts": {sub: 20000, mul: 20000},</text>
+  <text x="720" y="228" class="code">    "value_range_ok_for_float": false,      ← range prune signal</text>
+  <text x="720" y="244" class="code">    "predicted_rel_err_if_float": 4e-5,</text>
+  <text x="720" y="260" class="code">    "predicted_rel_err_if_ff":    3e-9,</text>
+  <text x="720" y="276" class="code">    "cancellation_hotspots": [{op:sub, cond:7e3, provenance:[x*x, y*y]}, …],</text>
+  <text x="720" y="292" class="code">    "consumers": ["R4_reduce_AB"]           ← DAG edge</text>
+  <text x="720" y="308" class="code-key">  },</text>
+  <text x="720" y="324" class="code-key">  "R3_form_C": {</text>
+  <text x="720" y="340" class="code">    "op_counts": {log: 10000, add: 10000, mul: 10000},</text>
+  <text x="720" y="356" class="code">    "value_range_ok_for_float": true,</text>
+  <text x="720" y="372" class="code">    "predicted_rel_err_if_float": 6e-5,     ← flagged (log near root)</text>
+  <text x="720" y="388" class="code">    "predicted_rel_err_if_ff":    2e-9,</text>
+  <text x="720" y="404" class="code">    "consumers": ["R5_reduce_C"]</text>
+  <text x="720" y="420" class="code-key">  },</text>
+  <text x="720" y="436" class="code">  …R1, R4, R5, R6</text>
+  <text x="720" y="452" class="code-key">},</text>
+
+  <!-- tail_samples block -->
+  <text x="720" y="478" class="code-key">"integrals": {</text>
+  <text x="720" y="494" class="code-key">  "toy_kernel": {</text>
+  <text x="720" y="510" class="code-key">    "tail_samples": {</text>
+  <text x="720" y="526" class="code">      "determinism_hash": "sha256:a1b2…",</text>
+  <text x="720" y="542" class="code">      "max_rel_err":  [{offset:3868, comp:"real", val:1.6e-15}, …K=10],</text>
+  <text x="720" y="558" class="code">      "max_cond":     […],   "max_abs_value": […],   "min_abs_value": […]</text>
+  <text x="965" y="574" text-anchor="middle" class="code-key">}}}</text>
+
+  <!-- reduction formula callout -->
+  <g transform="translate(700, 590)">
+    <rect x="0" y="0" width="530" height="90" rx="6" class="reduce-box"/>
+    <text x="10" y="20" class="h2">Predicted error: standard forward-error cascade</text>
+    <text x="10" y="42" class="math">rel_err(c)   ≲   κ · ( rel_err(a) + rel_err(b) )   +   u</text>
+    <text x="10" y="62" class="sub">Applied per op along the region's sub-DAG; u = format unit-roundoff  (float: 2⁻²⁴, dd: 2⁻¹⁰⁶).</text>
+    <text x="10" y="78" class="sub">Worst-case bound — often loose. Validator re-measures empirically against the dd oracle later.</text>
+  </g>
+
+  <text x="40" y="710" class="caption">Report is the pipeline's canonical interface between characterization and strategy. Journal is transient; report is the durable artifact.</text>
+</svg>

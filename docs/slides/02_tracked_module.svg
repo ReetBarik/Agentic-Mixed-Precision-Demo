@@ -1,0 +1,128 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1280 720" font-family="ui-sans-serif, system-ui, -apple-system, sans-serif">
+  <style>
+    .title { font-size: 26px; font-weight: 700; fill: #172033; }
+    .subtitle { font-size: 14px; fill: #5b6475; }
+    .h { font-size: 16px; font-weight: 650; fill: #172033; }
+    .lbl { font-size: 14px; font-weight: 600; fill: #172033; }
+    .sub { font-size: 12px; fill: #5b6475; }
+    .code { font-family: ui-monospace, "SF Mono", Menlo, monospace; font-size: 12px; fill: #172033; }
+    .code-hl { font-family: ui-monospace, "SF Mono", Menlo, monospace; font-size: 12px; fill: #7c2d12; font-weight: 600; }
+    .math { font-family: "Cambria Math", Georgia, serif; font-style: italic; font-size: 14px; fill: #172033; }
+    .box { stroke: #64748b; stroke-width: 1; fill: #f1f5f9; }
+    .app-box { stroke: #1e40af; stroke-width: 1.6; fill: #dbeafe; }
+    .tracked-box { stroke: #6d28d9; stroke-width: 1.6; fill: #ede9fe; }
+    .journal-box { stroke: #0f766e; stroke-width: 1.6; fill: #99f6e4; }
+    .callout-box { stroke: #b45309; stroke-width: 1.4; fill: #fef3c7; }
+    .edge { stroke: #475569; stroke-width: 2; fill: none; marker-end: url(#arrow); }
+    .th { font-size: 12px; font-weight: 700; fill: #172033; }
+    .td { font-size: 12px; fill: #172033; }
+    .caption { font-size: 12px; fill: #5b6475; font-style: italic; }
+    .op-symbol { font-size: 30px; font-weight: 700; fill: #6d28d9; text-anchor: middle; }
+  </style>
+  <defs>
+    <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" fill="#475569"/>
+    </marker>
+  </defs>
+
+  <!-- Title -->
+  <text x="40" y="44" class="title">Tracked datatype  —  foundation for characterization</text>
+  <text x="40" y="66" class="subtitle">A generic wrapper Tracked&lt;T&gt; that replaces plain T (usually double) in the app for the characterization sweep. Records every op's ingredients; not present in the shipped app.</text>
+
+  <!-- Row 1: instrumented op flow -->
+  <text x="40" y="108" class="h">What Tracked records for every op</text>
+
+  <g transform="translate(40, 130)">
+    <!-- inputs -->
+    <rect x="0" y="30" width="120" height="50" rx="6" class="tracked-box"/>
+    <text x="60" y="52" text-anchor="middle" class="lbl">Tracked&lt;T&gt; a</text>
+    <text x="60" y="70" text-anchor="middle" class="sub">value + stable id</text>
+
+    <rect x="0" y="110" width="120" height="50" rx="6" class="tracked-box"/>
+    <text x="60" y="132" text-anchor="middle" class="lbl">Tracked&lt;T&gt; b</text>
+    <text x="60" y="150" text-anchor="middle" class="sub">value + stable id</text>
+
+    <!-- op box -->
+    <path d="M120 55 L200 92" class="edge"/>
+    <path d="M120 135 L200 98" class="edge"/>
+
+    <rect x="200" y="70" width="120" height="60" rx="6" class="app-box"/>
+    <text x="260" y="94" text-anchor="middle" class="op-symbol" fill="#1e40af">⊕</text>
+    <text x="260" y="118" text-anchor="middle" class="sub">op (add/sub/mul/div/...)</text>
+
+    <!-- output -->
+    <path d="M320 100 L400 100" class="edge"/>
+    <rect x="400" y="72" width="120" height="56" rx="6" class="tracked-box"/>
+    <text x="460" y="96" text-anchor="middle" class="lbl">Tracked&lt;T&gt; c</text>
+    <text x="460" y="114" text-anchor="middle" class="sub">= a ⊕ b, new id</text>
+
+    <!-- journal entry -->
+    <path d="M460 128 L460 190" class="edge"/>
+    <rect x="360" y="190" width="360" height="100" rx="6" class="journal-box"/>
+    <text x="540" y="212" text-anchor="middle" class="lbl">journal entry</text>
+    <text x="380" y="234" class="code">{ op: "sub",  scope: "R2_form_B",</text>
+    <text x="380" y="250" class="code">  in:  [id(a), id(b)],   values: [a, b],</text>
+    <text x="380" y="266" class="code">  out: id(c),            value: c,</text>
+    <text x="380" y="282" class="code-hl">  cond: (|a| + |b|) / |a − b|   ← proxy </text>
+  </g>
+
+  <!-- Cond formula callout -->
+  <g transform="translate(770, 130)">
+    <rect x="0" y="0" width="470" height="290" rx="8" class="callout-box"/>
+    <text x="20" y="26" class="h">Local condition-number proxy</text>
+    <text x="20" y="48" class="sub">One derived quantity per op. Standard forward-error definition:</text>
+
+    <text x="20" y="82" class="math">κ(f, a, b)  ≈  |∂f/∂a · a/c|  +  |∂f/∂b · b/c|</text>
+
+    <text x="20" y="118" class="th">Instantiated per op:</text>
+    <text x="20" y="140" class="code">add/sub:   κ = (|a| + |b|) / |a ± b|      ← cancellation detector</text>
+    <text x="20" y="158" class="code">mul/div:   κ = 2                          ← well-conditioned</text>
+    <text x="20" y="176" class="code">sqrt:      κ = 1/2</text>
+    <text x="20" y="194" class="code">log:       κ = 1 / |log(a)|               ← blows up near a=1</text>
+    <text x="20" y="212" class="code">sub(x,x):  κ = 1  (exact-cancel shortcut)</text>
+
+    <text x="20" y="244" class="sub">κ is the amplification factor for input perturbations at this op.</text>
+    <text x="20" y="260" class="sub">NOT the error itself — that requires cascading upstream error</text>
+    <text x="20" y="276" class="sub">through the op DAG.  (Cascade happens in the reduction, next slide.)</text>
+  </g>
+
+  <!-- Bottom: what Tracked produces + consumer -->
+  <g transform="translate(40, 460)">
+    <text x="0" y="0" class="h">Tracked's role in the pipeline</text>
+
+    <!-- App (instrumented) -->
+    <rect x="0" y="20" width="200" height="80" rx="8" class="app-box"/>
+    <text x="100" y="48" text-anchor="middle" class="lbl">Instrumented app</text>
+    <text x="100" y="68" text-anchor="middle" class="sub">plain double replaced</text>
+    <text x="100" y="84" text-anchor="middle" class="sub">by Tracked&lt;double&gt;</text>
+
+    <path d="M200 60 L280 60" class="edge"/>
+
+    <!-- Tracked -->
+    <rect x="280" y="20" width="200" height="80" rx="8" class="tracked-box"/>
+    <text x="380" y="48" text-anchor="middle" class="lbl">Tracked&lt;T&gt;</text>
+    <text x="380" y="68" text-anchor="middle" class="sub">wraps every value</text>
+    <text x="380" y="84" text-anchor="middle" class="sub">records every op</text>
+
+    <path d="M480 60 L560 60" class="edge"/>
+
+    <!-- Journal -->
+    <rect x="560" y="20" width="200" height="80" rx="8" class="journal-box"/>
+    <text x="660" y="48" text-anchor="middle" class="lbl">Journal</text>
+    <text x="660" y="68" text-anchor="middle" class="sub">per-op-per-sample stream</text>
+    <text x="660" y="84" text-anchor="middle" class="sub">huge (~80 GB @ 10k samples)</text>
+
+    <path d="M760 60 L840 60" class="edge"/>
+
+    <!-- Characterizer (next slide teaser) -->
+    <rect x="840" y="20" width="200" height="80" rx="8" style="stroke:#5b6475; stroke-width:1.4; stroke-dasharray:6 4; fill:#e2e8f0;"/>
+    <text x="940" y="48" text-anchor="middle" class="lbl">Characterizer</text>
+    <text x="940" y="68" text-anchor="middle" class="sub">consumes the journal</text>
+    <text x="940" y="84" text-anchor="middle" class="sub">(next slide)</text>
+
+    <text x="1060" y="65" class="sub">→</text>
+  </g>
+
+  <text x="40" y="700" class="caption">Key point: Tracked is used ONLY by the characterizer. The shipped app has no Tracked overhead — regional shims use plain dd/ff/float containers (later slide).</text>
+</svg>
