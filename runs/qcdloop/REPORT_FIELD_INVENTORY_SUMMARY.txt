@@ -1,0 +1,58 @@
+REPORT FIELD INVENTORY — SUMMARY  (report_10k.json x Strategy @ langgraph-agents b1c4b2b)
+static analysis only; full doc: REPORT_FIELD_INVENTORY.md
+
+DRIFT FLAGS
+  - condition_numbers.mul : DOES NOT EXIST in report (brief assumption). Conditioning = scalar max_cond + free-text note.
+  - predicted_rel_err_if_float : loaded/merged/carried in characterization.py but NO decision reads it (dead).
+  - n (region/chain) : merged via max, never gates (dead).
+  - value_range_checked (per-var) : always false in this report (no signal in data).
+  - no code<->report field-name mismatches found.
+
+TOP-5 PRUNING OPPORTUNITIES  (signal x cost; ordering/skip only, no correctness exposure except #5)
+  1. value_range_ok_for_float -> float-rung guard. TRIVIAL. Stops walk float-step on range-unsafe regions
+     (error gate is blind to exponent range). BITES: 144/1545 regions (~9%) are false. Risk: speedup-left-on-table only.
+  2. ops.<op> mix -> flop-weighted speedup ordering (replace op_count sum). MODERATE. div=42x, log~2350-4100x vs add;
+     RATIO_REPORT: float throughput concentrated in few div/log regions. Risk: reorder-only. BITES (measured).
+  3. predicted_rel_err_if_float -> float-step gate (revive dead field). TRIVIAL. Symmetric with working if_ff gate.
+     Low bite NOW (tol7 had 0 tolerance rejects; residual gap is Patcher gen-robustness) -> future-proofs tol>=9.
+  4. variables.<var>.n_consumers -> downstream-leverage tiebreak. MODERATE (join variables{} map to regions).
+     ranking.py explicitly names this as the DEFERRED tiebreaker. Risk: reorder-only. Bite unquantified here.
+  5. p99_rel_err -> robust admission. MODERATE + CORRECTNESS RISK (p99 can hide rare catastrophic cancellation).
+     Use as telemetry/soft-tiebreak, NOT a replacement for the max_rel_err gate.
+
+FIELD TABLE  (U=used / I=ignored / P=partial ; I includes generator-only, telemetry-only, loaded-but-dead)
+  signal_class                         U   ranking tiers + walk rewrite select + chain tiering
+  max_rel_err                          U   correctness tier admission (>thr) + chain eligibility
+  predicted_rel_err_if_ff              U   speedup queue admission (<=thr)
+  max_cond                             U   intra-tier ordering (desc) + chain ordering
+  ops.<op>                             P   only sum -> op_count (speedup order); per-op mix ignored
+  non_localizable                      U   loader skip filter
+  region_local_vars[]                  U   -> RegionTarget.variables -> integrators
+  cascade_chains[]/chain[]/chain_id    U   correctness tier-2 population, dedup, spans
+  regions/integrals/samples_seen(keys) U   structural iteration
+  predicted_rel_err_if_float           I   loaded but dead (subsumed by if_ff)
+  n                                    I   loaded but dead (merged max only)
+  value_range_ok_for_float             I   generator-only (PRUNE #1)
+  p50_rel_err                          I   generator-only
+  p99_rel_err                          I   generator-only (PRUNE #5)
+  max_amp                              I   generator-only (subsumed by if_ff)
+  max_sensitivity                      I   generator+backfill (subsumed by if_ff)
+  gate_a_count                         I   generator-only (dup of signal_class)
+  abs_val_min / abs_val_max            I   generator-only (null in report; subsumed by range flag)
+  note                                 I   generator-only (patcher/c8 'note' hits unrelated)
+  top_regions_by_rel_err[] (+location) I   redundant view of regions; no consumer
+  variables.<var>.is_source_var        I   generator/merge only
+  variables.<var>.n_consumers          I   generator only (PRUNE #4)
+  variables.<var>.max_amp              I   generator only
+  variables.<var>.max_sensitivity      I   generator only
+  variables.<var>.predicted_rel_err_*  I   generator only (per-var demotion = heavy, deferred)
+  variables.<var>.value_range_checked  I   always false; no signal
+  class_counts.<sig>                   I   telemetry
+  samples / no_id_records              I   telemetry
+  schema_version / kind                I   loaded into meta dict, telemetry-only
+  prov_vars[]                          P   fallback for region_local_vars only; inert here
+
+DISTRIBUTIONS (whole report)
+  signal_class : cancellation_cascade 527682 | stable 1307 | log_near_root 67 | local_cancellation 47
+  value_range_ok_for_float : true 1401 | false 144 (~9%)
+  gate_a_count : ~84 nonzero / ~1461 zero (tracks non-stable classes)
