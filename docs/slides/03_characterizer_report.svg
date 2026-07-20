@@ -6,18 +6,20 @@
     .panel-title { font-size: 15px; font-weight: 700; fill: #172033; }
     .lbl { font-size: 14px; font-weight: 600; fill: #172033; }
     .sub { font-size: 12px; fill: #5b6475; }
-    .code { font-family: ui-monospace, "SF Mono", Menlo, monospace; font-size: 12px; fill: #172033; }
-    .code-warn { font-family: ui-monospace, "SF Mono", Menlo, monospace; font-size: 12px; fill: #b45309; font-weight: 600; }
-    .code-sing { font-family: ui-monospace, "SF Mono", Menlo, monospace; font-size: 12px; fill: #475569; font-weight: 600; }
+    .code { font-family: ui-monospace, "SF Mono", Menlo, monospace; font-size: 11px; fill: #172033; }
+    .code-warn { font-family: ui-monospace, "SF Mono", Menlo, monospace; font-size: 11px; fill: #b45309; font-weight: 600; }
+    .code-sing { font-family: ui-monospace, "SF Mono", Menlo, monospace; font-size: 11px; fill: #475569; font-weight: 600; }
     .box { stroke: #64748b; stroke-width: 1; fill: #f8fafc; }
     .app-box { stroke: #1e40af; stroke-width: 1.6; fill: #dbeafe; }
+    .tracked-box { stroke: #6d28d9; stroke-width: 1.6; fill: #ede9fe; }
     .journal-box { stroke: #0f766e; stroke-width: 1.6; fill: #99f6e4; }
     .report-box { stroke: #6d28d9; stroke-width: 1.6; fill: #ede9fe; }
     .reduce-box { stroke: #b45309; stroke-width: 1.6; fill: #fef3c7; }
+    .llm-box { stroke: #be185d; stroke-width: 1.8; fill: #fce7f3; }
     .edge { stroke: #475569; stroke-width: 2; fill: none; marker-end: url(#arrow); }
     .edge-big { stroke: #475569; stroke-width: 3; fill: none; marker-end: url(#arrow); }
-    .th { font-size: 12px; font-weight: 700; fill: #172033; }
-    .td { font-size: 12px; fill: #172033; }
+    .th { font-size: 11px; font-weight: 700; fill: #172033; }
+    .td { font-size: 11px; fill: #172033; }
     .row-safe { fill: #bbf7d0; }
     .row-warn { fill: #fde68a; }
     .row-sing { fill: #cbd5e1; }
@@ -31,138 +33,157 @@
   <!-- Title -->
   <text x="40" y="44" class="title">Characterizer:  sweep → journal → report</text>
 
-  <!-- ============ LEFT PANEL: Sweep → journal ============ -->
-  <rect x="30" y="80" width="500" height="620" rx="8" fill="none" stroke="#94a3b8" stroke-width="1" stroke-dasharray="4 3"/>
+  <!-- ============ LEFT PANEL ============ -->
+  <rect x="30" y="80" width="510" height="620" rx="8" fill="none" stroke="#94a3b8" stroke-width="1" stroke-dasharray="4 3"/>
   <text x="50" y="104" class="panel-title">(a)  Instrumented sweep → journal</text>
 
-  <!-- Instrumented app -->
-  <rect x="60" y="130" width="200" height="70" rx="6" class="app-box"/>
-  <text x="160" y="156" text-anchor="middle" class="lbl">Toy app (instrumented)</text>
-  <text x="160" y="176" text-anchor="middle" class="sub">Tracked&lt;double&gt; everywhere</text>
-  <text x="160" y="192" text-anchor="middle" class="sub">R1…R6 scopes annotated</text>
+  <!-- Row 1: App + Tracked as two modules -->
+  <rect x="70" y="130" width="180" height="70" rx="6" class="app-box"/>
+  <text x="160" y="156" text-anchor="middle" class="lbl">Toy app</text>
+  <text x="160" y="176" text-anchor="middle" class="sub">plain double</text>
+  <text x="160" y="192" text-anchor="middle" class="sub">R1…R6 scopes</text>
 
-  <!-- Sample driver -->
-  <rect x="300" y="130" width="200" height="70" rx="6" class="reduce-box"/>
-  <text x="400" y="156" text-anchor="middle" class="lbl">Sample driver</text>
-  <text x="400" y="176" text-anchor="middle" class="sub">N seeded inputs</text>
-  <text x="400" y="192" text-anchor="middle" class="sub">(mt19937, srand=12345)</text>
+  <rect x="320" y="130" width="180" height="70" rx="6" class="tracked-box"/>
+  <text x="410" y="156" text-anchor="middle" class="lbl">Tracked&lt;T&gt;</text>
+  <text x="410" y="176" text-anchor="middle" class="sub">wrapper +</text>
+  <text x="410" y="192" text-anchor="middle" class="sub">journal API</text>
 
-  <path d="M260 165 L300 165" class="edge"/>
+  <!-- Arrows from App and Tracked into Integrator -->
+  <path d="M160 200 L230 260" class="edge"/>
+  <path d="M410 200 L340 260" class="edge"/>
 
-  <!-- Journal (trimmed to 3 lines) -->
-  <path d="M400 200 L400 240" class="edge-big"/>
-  <rect x="60" y="240" width="440" height="220" rx="6" class="journal-box"/>
-  <text x="280" y="264" text-anchor="middle" class="panel-title">Journal (JSONL, transient)</text>
-  <text x="280" y="282" text-anchor="middle" class="sub">one entry per op per sample</text>
+  <!-- Row 2: Integrator LLM -->
+  <rect x="180" y="260" width="220" height="70" rx="6" class="llm-box"/>
+  <text x="290" y="286" text-anchor="middle" class="lbl">Tracked Integrator</text>
+  <text x="290" y="304" text-anchor="middle" class="sub">LLM agent — rewrites app,</text>
+  <text x="290" y="320" text-anchor="middle" class="sub">emits &lt;app&gt;_interop.hpp</text>
 
-  <text x="80" y="316" class="code">{op: "add", scope: "R1", sample: 0,</text>
-  <text x="80" y="332" class="code"> in: [x,z], out_val: 3.6, rel_err: 3e-16, cond: 1.28}</text>
+  <!-- Arrow from Integrator to Sample driver -->
+  <path d="M290 330 L290 380" class="edge-big"/>
 
-  <text x="80" y="362" class="code-warn">{op: "sub", scope: "R2", sample: 0,</text>
-  <text x="80" y="378" class="code-warn"> in: [x², y²], out_val: 2e-3, rel_err: 1e-12, cond: 7e3}</text>
+  <!-- Row 3: Sample driver -->
+  <rect x="150" y="380" width="280" height="70" rx="6" class="reduce-box"/>
+  <text x="290" y="406" text-anchor="middle" class="lbl">Sample driver (instrumented app)</text>
+  <text x="290" y="426" text-anchor="middle" class="sub">N seeded inputs</text>
+  <text x="290" y="442" text-anchor="middle" class="sub">(mt19937, srand=12345)</text>
 
-  <text x="80" y="408" class="code-sing">{op: "log", scope: "R3", sample: 0,</text>
-  <text x="80" y="424" class="code-sing"> in: [1+w], out_val: 1e-3, rel_err: 2e-13, cond: 1e3}</text>
+  <!-- Arrow to journal -->
+  <path d="M290 450 L290 490" class="edge-big"/>
 
-  <text x="80" y="450" class="code">…  (millions more)</text>
+  <!-- Journal -->
+  <rect x="60" y="490" width="460" height="200" rx="6" class="journal-box"/>
+  <text x="290" y="514" text-anchor="middle" class="panel-title">Journal (JSONL, transient)</text>
+  <text x="290" y="530" text-anchor="middle" class="sub">one entry per op per sample</text>
+
+  <text x="80" y="558" class="code">{op: "add", scope: "R1", sample: 0,</text>
+  <text x="80" y="574" class="code"> in: [x,z], out_val: 3.6, rel_err: 3e-16, cond: 1.28}</text>
+
+  <text x="80" y="600" class="code-warn">{op: "sub", scope: "R2", sample: 0,</text>
+  <text x="80" y="616" class="code-warn"> in: [x², y²], out_val: 2e-3, rel_err: 1e-12, cond: 7e3}</text>
+
+  <text x="80" y="642" class="code-sing">{op: "log", scope: "R3", sample: 0,</text>
+  <text x="80" y="658" class="code-sing"> in: [1+w], out_val: 1e-3, rel_err: 2e-13, cond: 1e3}</text>
+
+  <text x="80" y="680" class="code">…  (millions more)</text>
 
   <!-- ============ REDUCE arrow ============ -->
-  <path d="M530 400 L650 400" class="edge-big"/>
-  <rect x="550" y="360" width="80" height="80" rx="6" class="reduce-box"/>
-  <text x="590" y="388" text-anchor="middle" class="lbl">reduce</text>
-  <text x="590" y="406" text-anchor="middle" class="sub">(offline)</text>
+  <path d="M540 400 L660 400" class="edge-big"/>
+  <rect x="560" y="360" width="80" height="80" rx="6" class="reduce-box"/>
+  <text x="600" y="388" text-anchor="middle" class="lbl">reduce</text>
+  <text x="600" y="406" text-anchor="middle" class="sub">(offline)</text>
 
-  <!-- ============ RIGHT PANEL: Region-keyed report ============ -->
-  <rect x="650" y="80" width="610" height="620" rx="8" fill="none" stroke="#94a3b8" stroke-width="1" stroke-dasharray="4 3"/>
-  <text x="670" y="104" class="panel-title">(b)  Reduction → per-region report</text>
+  <!-- ============ RIGHT PANEL ============ -->
+  <rect x="660" y="80" width="600" height="620" rx="8" fill="none" stroke="#94a3b8" stroke-width="1" stroke-dasharray="4 3"/>
+  <text x="680" y="104" class="panel-title">(b)  Reduction → per-region report</text>
 
   <!-- Report box -->
-  <rect x="670" y="130" width="570" height="490" rx="6" class="report-box"/>
-  <text x="955" y="154" text-anchor="middle" class="panel-title">report.json  — one entry per region</text>
+  <rect x="680" y="130" width="560" height="490" rx="6" class="report-box"/>
+  <text x="960" y="154" text-anchor="middle" class="panel-title">report.json  — one entry per region</text>
 
-  <!-- Table header -->
-  <g transform="translate(690, 170)">
-    <rect x="0" y="0" width="530" height="26" fill="#e2e8f0" stroke="#64748b" stroke-width="1"/>
-    <text x="14" y="18" class="th">region</text>
-    <text x="80" y="18" class="th">op_counts (dominant)</text>
-    <text x="220" y="18" class="th">range_ok</text>
-    <text x="290" y="18" class="th">pred_err_ff</text>
-    <text x="380" y="18" class="th">pred_err_float</text>
-    <text x="490" y="18" class="th">consumers</text>
+  <!-- Table -->
+  <g transform="translate(700, 175)">
+    <!-- Header row: widened columns to prevent collisions -->
+    <rect x="0" y="0" width="520" height="30" fill="#e2e8f0" stroke="#64748b" stroke-width="1"/>
+    <text x="10" y="20" class="th">region</text>
+    <text x="80" y="20" class="th">op_counts</text>
+    <text x="200" y="20" class="th">range_ok</text>
+    <text x="270" y="20" class="th">pred_err_ff</text>
+    <text x="350" y="20" class="th">pred_err_float</text>
+    <text x="460" y="20" class="th">consumers</text>
 
-    <!-- Row R1 (safe) -->
-    <rect x="0" y="26" width="530" height="52" class="row-safe" stroke="#64748b" stroke-width="0.8"/>
-    <text x="14" y="46" class="td" font-weight="700">R1</text>
-    <text x="14" y="62" class="td" font-size="10" fill="#5b6475">well-cond</text>
-    <text x="80" y="46" class="td">2 add, 2 mul</text>
-    <text x="220" y="46" class="td">✓</text>
-    <text x="290" y="46" class="td">3e-15</text>
-    <text x="380" y="46" class="td">8e-7</text>
-    <text x="490" y="46" class="td">[R4]</text>
+    <!-- Row R1 -->
+    <rect x="0" y="30" width="520" height="52" class="row-safe" stroke="#64748b" stroke-width="0.8"/>
+    <text x="10" y="50" class="td" font-weight="700">R1</text>
+    <text x="10" y="66" class="td" font-size="10" fill="#5b6475">well-cond</text>
+    <text x="80" y="50" class="td">2 add, 2 mul</text>
+    <text x="200" y="50" class="td">✓</text>
+    <text x="270" y="50" class="td">3e-15</text>
+    <text x="350" y="50" class="td">8e-7</text>
+    <text x="460" y="50" class="td">[R4]</text>
 
-    <!-- Row R2 (cancellation) -->
-    <rect x="0" y="78" width="530" height="52" class="row-warn" stroke="#64748b" stroke-width="0.8"/>
-    <text x="14" y="98" class="td" font-weight="700">R2</text>
-    <text x="14" y="114" class="td" font-size="10" fill="#5b6475">cancel</text>
-    <text x="80" y="98" class="td">2 mul, 1 sub</text>
-    <text x="220" y="98" class="td" fill="#b45309" font-weight="700">✗</text>
-    <text x="290" y="98" class="td">2e-9</text>
-    <text x="380" y="98" class="td" fill="#b45309" font-weight="700">4e-5</text>
-    <text x="490" y="98" class="td">[R4]</text>
+    <!-- Row R2 -->
+    <rect x="0" y="82" width="520" height="52" class="row-warn" stroke="#64748b" stroke-width="0.8"/>
+    <text x="10" y="102" class="td" font-weight="700">R2</text>
+    <text x="10" y="118" class="td" font-size="10" fill="#5b6475">cancel</text>
+    <text x="80" y="102" class="td">2 mul, 1 sub</text>
+    <text x="200" y="102" class="td" fill="#b45309" font-weight="700">✗</text>
+    <text x="270" y="102" class="td">2e-9</text>
+    <text x="350" y="102" class="td" fill="#b45309" font-weight="700">4e-5</text>
+    <text x="460" y="102" class="td">[R4]</text>
 
-    <!-- Row R3 (singular) -->
-    <rect x="0" y="130" width="530" height="52" class="row-sing" stroke="#64748b" stroke-width="0.8"/>
-    <text x="14" y="150" class="td" font-weight="700">R3</text>
-    <text x="14" y="166" class="td" font-size="10" fill="#5b6475">singular</text>
-    <text x="80" y="150" class="td">1 log, 1 add</text>
-    <text x="220" y="150" class="td">✓</text>
-    <text x="290" y="150" class="td">4e-10</text>
-    <text x="380" y="150" class="td" fill="#475569" font-weight="700">6e-5</text>
-    <text x="490" y="150" class="td">[R5]</text>
+    <!-- Row R3 -->
+    <rect x="0" y="134" width="520" height="52" class="row-sing" stroke="#64748b" stroke-width="0.8"/>
+    <text x="10" y="154" class="td" font-weight="700">R3</text>
+    <text x="10" y="170" class="td" font-size="10" fill="#5b6475">singular</text>
+    <text x="80" y="154" class="td">1 log, 1 add</text>
+    <text x="200" y="154" class="td">✓</text>
+    <text x="270" y="154" class="td">4e-10</text>
+    <text x="350" y="154" class="td" fill="#475569" font-weight="700">6e-5</text>
+    <text x="460" y="154" class="td">[R5]</text>
 
     <!-- Row R4 -->
-    <rect x="0" y="182" width="530" height="52" class="row-safe" stroke="#64748b" stroke-width="0.8"/>
-    <text x="14" y="202" class="td" font-weight="700">R4</text>
-    <text x="14" y="218" class="td" font-size="10" fill="#5b6475">well-cond</text>
-    <text x="80" y="202" class="td">1 div, 1 add, 1 sub</text>
-    <text x="220" y="202" class="td">✓</text>
-    <text x="290" y="202" class="td">6e-15</text>
-    <text x="380" y="202" class="td">1e-6</text>
-    <text x="490" y="202" class="td">[R6]</text>
+    <rect x="0" y="186" width="520" height="52" class="row-safe" stroke="#64748b" stroke-width="0.8"/>
+    <text x="10" y="206" class="td" font-weight="700">R4</text>
+    <text x="10" y="222" class="td" font-size="10" fill="#5b6475">well-cond</text>
+    <text x="80" y="206" class="td">1 div, 1 add, 1 sub</text>
+    <text x="200" y="206" class="td">✓</text>
+    <text x="270" y="206" class="td">6e-15</text>
+    <text x="350" y="206" class="td">1e-6</text>
+    <text x="460" y="206" class="td">[R6]</text>
 
     <!-- Row R5 -->
-    <rect x="0" y="234" width="530" height="52" class="row-safe" stroke="#64748b" stroke-width="0.8"/>
-    <text x="14" y="254" class="td" font-weight="700">R5</text>
-    <text x="14" y="270" class="td" font-size="10" fill="#5b6475">well-cond</text>
-    <text x="80" y="254" class="td">1 sqrt, 1 mul, 1 add</text>
-    <text x="220" y="254" class="td">✓</text>
-    <text x="290" y="254" class="td">5e-15</text>
-    <text x="380" y="254" class="td">9e-7</text>
-    <text x="490" y="254" class="td">[R6]</text>
+    <rect x="0" y="238" width="520" height="52" class="row-safe" stroke="#64748b" stroke-width="0.8"/>
+    <text x="10" y="258" class="td" font-weight="700">R5</text>
+    <text x="10" y="274" class="td" font-size="10" fill="#5b6475">well-cond</text>
+    <text x="80" y="258" class="td">1 sqrt, 1 mul, 1 add</text>
+    <text x="200" y="258" class="td">✓</text>
+    <text x="270" y="258" class="td">5e-15</text>
+    <text x="350" y="258" class="td">9e-7</text>
+    <text x="460" y="258" class="td">[R6]</text>
 
     <!-- Row R6 -->
-    <rect x="0" y="286" width="530" height="52" class="row-safe" stroke="#64748b" stroke-width="0.8"/>
-    <text x="14" y="306" class="td" font-weight="700">R6</text>
-    <text x="14" y="322" class="td" font-size="10" fill="#5b6475">well-cond</text>
-    <text x="80" y="306" class="td">1 mul, 1 add, 1 sub</text>
-    <text x="220" y="306" class="td">✓</text>
-    <text x="290" y="306" class="td">7e-15</text>
-    <text x="380" y="306" class="td">1e-6</text>
-    <text x="490" y="306" class="td">[ ]</text>
+    <rect x="0" y="290" width="520" height="52" class="row-safe" stroke="#64748b" stroke-width="0.8"/>
+    <text x="10" y="310" class="td" font-weight="700">R6</text>
+    <text x="10" y="326" class="td" font-size="10" fill="#5b6475">well-cond</text>
+    <text x="80" y="310" class="td">1 mul, 1 add, 1 sub</text>
+    <text x="200" y="310" class="td">✓</text>
+    <text x="270" y="310" class="td">7e-15</text>
+    <text x="350" y="310" class="td">1e-6</text>
+    <text x="460" y="310" class="td">[ ]</text>
 
-    <!-- Also-emitted note -->
-    <text x="0" y="368" class="sub">Also emitted per region: cancellation_hotspots (op, cond, provenance trace).</text>
-    <text x="0" y="386" class="sub">Row color = numerical character discovered by the reduction — matches slide 01.</text>
+    <!-- Notes below the table -->
+    <text x="0" y="376" class="sub">Also emitted per region: cancellation_hotspots (op, cond, provenance trace).</text>
+    <text x="0" y="394" class="sub">Row color = numerical character discovered by the reduction — matches slide 01.</text>
   </g>
 
-  <!-- Legend below report -->
-  <g transform="translate(670, 640)">
+  <!-- Legend inside the right panel, tight spacing -->
+  <g transform="translate(680, 640)">
     <text x="0" y="0" class="h">Row colors</text>
-    <rect x="0" y="14" width="18" height="14" class="row-safe" stroke="#64748b"/>
-    <text x="26" y="26" class="sub">well-conditioned</text>
-    <rect x="170" y="14" width="18" height="14" class="row-warn" stroke="#64748b"/>
-    <text x="196" y="26" class="sub">cancellation risk (range_ok = ✗)</text>
-    <rect x="410" y="14" width="18" height="14" class="row-sing" stroke="#64748b"/>
-    <text x="436" y="26" class="sub">near a singular point (pred_err_float flagged)</text>
+    <rect x="0" y="14" width="16" height="14" class="row-safe" stroke="#64748b"/>
+    <text x="22" y="26" class="sub">well-cond</text>
+    <rect x="110" y="14" width="16" height="14" class="row-warn" stroke="#64748b"/>
+    <text x="132" y="26" class="sub">cancel (range_ok = ✗)</text>
+    <rect x="310" y="14" width="16" height="14" class="row-sing" stroke="#64748b"/>
+    <text x="332" y="26" class="sub">singular (pred_err_float flagged)</text>
   </g>
 </svg>
