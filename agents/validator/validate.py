@@ -192,27 +192,44 @@ def validate(base_state: dict, candidate_patch: str | None, tolerance: float = 8
     curr_stats = _score(current_coeffs, dd_ref_coeffs, "current",
                         out_dir if persist else None)
 
-    # ---- 5. tail battery: score candidate vs DD on the adversarial offsets, fold
-    #         its worst into the candidate's gating minimum (hard reject). ----
+    # ---- 5. tail battery (regression-relative): score candidate AND current at
+    #         the adversarial offsets; the tail feeds the REGRESSION guard (a
+    #         candidate-induced tail loss vs the baseline is a hard reject), while
+    #         the absolute floor stays on the random battery — adversarial offsets
+    #         include workload physics ceilings where even the baseline is < tol,
+    #         so an absolute tail floor would reject every candidate for a workload
+    #         property (see PIPELINE_v1.md §tail-testing design finding). ----
     tail_stats = _tail_battery(
         tail_spec, cand_tail, tail_offsets,
-        dd_repo, dd_ref, kokkos_root, dd_tree_hash)
-    cand_min = cand_stats["min_precise_digits"]
-    if tail_stats["tail_min_precise_digits"] is not None:
-        cand_min = min(cand_min, tail_stats["tail_min_precise_digits"])
+        dd_repo, dd_ref, kokkos_root, dd_tree_hash,
+        vanilla_headers, accepted, work_tree_hash)
 
-    verdict, reason = _decide(cand_min, curr_stats["min_precise_digits"],
-                              max_regression, floor=tolerance)
+    rand_cand_min = cand_stats["min_precise_digits"]
+    rand_curr_min = curr_stats["min_precise_digits"]
+    # combined (random + tail) minima drive the regression delta; None tail (fail-
+    # open) leaves them at the random values -> exactly the pre-tail behavior.
+    comb_cand_min = rand_cand_min
+    comb_curr_min = rand_curr_min
+    tcand = tail_stats["tail_cand_min_precise_digits"]
+    tcurr = tail_stats["tail_curr_min_precise_digits"]
+    if tcand is not None:
+        comb_cand_min = min(comb_cand_min, tcand)
+    if tcurr is not None:
+        comb_curr_min = min(comb_curr_min, tcurr)
+
+    verdict, reason = _decide_tail(rand_cand_min, comb_cand_min, comb_curr_min,
+                                   max_regression, floor=tolerance)
 
     return {
         "verdict": verdict,
-        "threshold": float(tolerance),          # absolute precise-digit accept bar
+        "threshold": float(tolerance),          # absolute precise-digit accept bar (random)
         "max_regression": float(max_regression),  # delta guard vs current baseline
         "candidate": cand_stats,
         "current": curr_stats,
-        "cand_min_precise_digits": round(cand_min, 4),  # combined random+tail min
+        "cand_min_precise_digits": round(comb_cand_min, 4),  # combined random+tail min
+        "curr_min_precise_digits": round(comb_curr_min, 4),
         "tail": tail_stats,
-        "delta": round(cand_min - curr_stats["min_precise_digits"], 6),
+        "delta": round(comb_cand_min - comb_curr_min, 6),
         "verdict_reason": reason,
         "snapshot": {"seed": seed, "sample_count": total},
         "run_id": run_id,
@@ -245,6 +262,35 @@ def _decide(cand_min: float, curr_min: float, max_regression: float,
     if delta < -max_regression:
         return "reject", "regression"
     if floor is not None and cand_min < floor:
+        return "reject", "insufficient_fix"
+    return "accept", "accept"
+
+
+def _decide_tail(rand_cand_min: float, comb_cand_min: float, comb_curr_min: float,
+                 max_regression: float, floor: float | None) -> tuple[str, str]:
+    """Tail-aware verdict: regression on the combined (random+tail) minima, floor
+    on the random-only candidate minimum.
+
+    Two gates, in order:
+
+    * **regression guard** — ``(comb_cand_min - comb_curr_min) < -max_regression``
+      → ``reject/regression``.  Because both minima fold in the tail battery, a
+      candidate that does materially worse than the baseline at an adversarial tail
+      offset (an overflow on a float demotion, a broken cancellation) is a HARD
+      reject here; a shared workload ceiling (candidate ≈ baseline at that offset)
+      cancels in the delta and does not.
+    * **absolute floor** — ``rand_cand_min < floor`` → ``reject/insufficient_fix``.
+      Deliberately on the RANDOM battery, not the combined min: adversarial offsets
+      (``min_abs`` / ``max_cond`` near-zero components) include inherent workload
+      physics ceilings below ``tol`` that no demotion decision owns, so gating the
+      absolute bar on them would reject every candidate for a workload property.
+
+    Reduces to the pre-tail :func:`_decide` when the tail is absent (fail-open):
+    then ``comb_cand_min == rand_cand_min`` and ``comb_curr_min == rand_curr_min``.
+    """
+    if (comb_cand_min - comb_curr_min) < -max_regression:
+        return "reject", "regression"
+    if floor is not None and rand_cand_min < floor:
         return "reject", "insufficient_fix"
     return "accept", "accept"
 
@@ -399,6 +445,10 @@ def _run_dd(dd_repo: Path, dd_ref: str, kokkos_root: Path, scratch: Path,
 # Tail battery: adversarial per-integral offsets, scored against the DD oracle
 # ---------------------------------------------------------------------------
 
+def _offset_key(offsets: list[int]) -> str:
+    return hashlib.sha256(",".join(str(o) for o in offsets).encode()).hexdigest()[:16]
+
+
 def _dd_tail_coeffs(dd_repo: Path, dd_ref: str, kokkos_root: Path,
                     offsets: list[int], dd_tree_hash: str) -> dict:
     """DD reference coeffs at the tail ``offsets`` (``{integral: {offset: [(hi,lo)×6]}}``).
@@ -410,15 +460,39 @@ def _dd_tail_coeffs(dd_repo: Path, dd_ref: str, kokkos_root: Path,
     offsets = sorted({int(o) for o in offsets if int(o) >= 0})
     if not offsets:
         return {}
-    off_key = hashlib.sha256(
-        ",".join(str(o) for o in offsets).encode()).hexdigest()[:16]
 
     def build_and_run(scratch: Path) -> dict:
         binary = _build_dd_binary(dd_repo, dd_ref, kokkos_root, scratch)
         return _tail.run_offsets(binary, offsets)
 
     return _cached_or_run(role="dd_tail",
-                          key=f"{dd_tree_hash}_{off_key}",
+                          key=f"{dd_tree_hash}_{_offset_key(offsets)}",
+                          build_and_run=build_and_run)
+
+
+def _current_tail_coeffs(vanilla_headers: Path, accepted: list, kokkos_root: Path,
+                         offsets: list[int], work_tree_hash: str) -> dict:
+    """Current-baseline coeffs at the tail ``offsets`` (pristine working tree).
+
+    The tail battery is *regression-relative*: many adversarial offsets (esp.
+    ``min_abs`` / ``max_cond`` near-zero components) are workload physics ceilings
+    where even the double baseline sits below ``tol`` — an absolute tail floor
+    would reject every candidate for a workload property.  So the current baseline
+    is scored at the SAME offsets and the tail contributes only to the regression
+    delta.  Cached on ``(work_tree_hash, offset-set)`` — the current tree is fixed
+    for a run (v1: accepted == []), so this builds+runs at most once per run.
+    """
+    offsets = sorted({int(o) for o in offsets if int(o) >= 0})
+    if not offsets:
+        return {}
+
+    def build_and_run(scratch: Path) -> dict:
+        _coeffs, binary = _run_vanilla(vanilla_headers, accepted, None, kokkos_root,
+                                       scratch, 1, 0, 1, return_binary=True)
+        return _tail.run_offsets(binary, offsets)
+
+    return _cached_or_run(role="current_tail",
+                          key=f"{work_tree_hash}_{_offset_key(offsets)}",
                           build_and_run=build_and_run)
 
 
@@ -484,21 +558,28 @@ _TAIL_WARNED: set[str] = set()
 
 
 def _tail_battery(tail_spec: dict, cand_tail: dict | None, offsets: list[int],
-                  dd_repo: Path, dd_ref: str, kokkos_root: Path,
-                  dd_tree_hash: str) -> dict:
-    """Run + score the tail battery; return telemetry folded into the verdict.
+                  dd_repo: Path, dd_ref: str, kokkos_root: Path, dd_tree_hash: str,
+                  vanilla_headers: Path, accepted: list, work_tree_hash: str) -> dict:
+    """Run + score the tail battery (candidate AND current) for the verdict.
+
+    Regression-relative by design: scores both the candidate and the current
+    baseline at the same adversarial offsets against the DD oracle, so a candidate
+    that merely inherits a workload physics ceiling at a tail point is not
+    penalized — only a candidate that does materially *worse* than the baseline
+    there (a candidate-induced tail failure) trips the regression guard.
 
     Fail-open: with no ``tail_spec`` (old report / caller opted out) or no offsets,
-    returns zeroed telemetry and ``tail_min_precise_digits=None`` so the verdict is
-    exactly the random-only behavior.  A one-time per-integral warning is emitted
-    for any integral whose tail spec is present but unusable.
+    returns ``tail_cand_min = tail_curr_min = None`` so the verdict is exactly the
+    random-only behavior.  A one-time per-integral warning is emitted for any
+    integral whose tail spec is present but unusable.
     """
     empty = {
         "tail_batteries_run": 0,
         "tail_hash_mismatches": 0,   # a mismatch raises DeterminismMismatch upstream
         "tail_samples_tested": 0,
         "tail_offsets": 0,
-        "tail_min_precise_digits": None,
+        "tail_cand_min_precise_digits": None,
+        "tail_curr_min_precise_digits": None,
         "tail_hotspot": None,
         "integrals_covered": [],
         "integrals_skipped": [],
@@ -507,21 +588,25 @@ def _tail_battery(tail_spec: dict, cand_tail: dict | None, offsets: list[int],
         return empty
 
     dd_tail = _dd_tail_coeffs(dd_repo, dd_ref, kokkos_root, offsets, dd_tree_hash)
-    scored = _score_tail(cand_tail, dd_tail, tail_spec)
-    for integral in scored["integrals_skipped"]:
+    curr_tail = _current_tail_coeffs(vanilla_headers, accepted, kokkos_root,
+                                     offsets, work_tree_hash)
+    cand_scored = _score_tail(cand_tail, dd_tail, tail_spec)
+    curr_scored = _score_tail(curr_tail, dd_tail, tail_spec)
+    for integral in cand_scored["integrals_skipped"]:
         if integral not in _TAIL_WARNED:
             _TAIL_WARNED.add(integral)
             print(f"[validator] tail battery: skipping {integral} "
                   f"(no usable tail spec / offsets)", flush=True)
     return {
-        "tail_batteries_run": len(scored["integrals_covered"]),
+        "tail_batteries_run": len(cand_scored["integrals_covered"]),
         "tail_hash_mismatches": 0,
-        "tail_samples_tested": scored["tail_samples_tested"],
+        "tail_samples_tested": cand_scored["tail_samples_tested"],
         "tail_offsets": len(offsets),
-        "tail_min_precise_digits": scored["tail_min_precise_digits"],
-        "tail_hotspot": scored["tail_hotspot"],
-        "integrals_covered": scored["integrals_covered"],
-        "integrals_skipped": scored["integrals_skipped"],
+        "tail_cand_min_precise_digits": cand_scored["tail_min_precise_digits"],
+        "tail_curr_min_precise_digits": curr_scored["tail_min_precise_digits"],
+        "tail_hotspot": cand_scored["tail_hotspot"],
+        "integrals_covered": cand_scored["integrals_covered"],
+        "integrals_skipped": cand_scored["integrals_skipped"],
     }
 
 

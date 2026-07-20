@@ -667,7 +667,8 @@ class StrategyRun:
                 "samples_tested": tail.get("tail_samples_tested", 0),
                 "offsets": tail.get("tail_offsets", 0),
                 "hash_mismatches": tail.get("tail_hash_mismatches", 0),
-                "min_precise_digits": tail.get("tail_min_precise_digits"),
+                "cand_min_precise_digits": tail.get("tail_cand_min_precise_digits"),
+                "curr_min_precise_digits": tail.get("tail_curr_min_precise_digits"),
             }
         return extra
 

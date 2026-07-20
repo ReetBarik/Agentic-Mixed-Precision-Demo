@@ -104,38 +104,80 @@ def test_score_tail_flags_failing_offset():
 
 
 def test_tail_failure_is_hard_reject(monkeypatch):
-    # A candidate that would pass the random battery (curr/cand min ~12) but fails
-    # a tail offset (3 digits) must be rejected once the tail min is folded in.
+    # A candidate that passes the random battery (~12 digits) but does materially
+    # WORSE than the baseline at a tail offset (3 digits vs baseline's cap) is a
+    # candidate-induced tail failure -> hard reject via the regression guard.
     tail_spec = {"B12": {"max_rel_err": [{"offset": 42}]}}
-    dd = {"B12": {42: [_pair(1.0)] + [_pair(0.0)] * 5}}
-    cand = {"B12": {42: [_pair(1.0 + 1e-3)] + [_pair(0.0)] * 5}}
-    monkeypatch.setattr(validate, "_dd_tail_coeffs",
-                        lambda *a, **k: dd)
+    good = [_pair(1.0)] + [_pair(0.0)] * 5              # DD ref & baseline: exact
+    cand = {"B12": {42: [_pair(1.0 + 1e-3)] + [_pair(0.0)] * 5}}  # candidate: 3 digits
+    monkeypatch.setattr(validate, "_dd_tail_coeffs", lambda *a, **k: {"B12": {42: good}})
+    monkeypatch.setattr(validate, "_current_tail_coeffs",
+                        lambda *a, **k: {"B12": {42: good}})  # baseline exact at tail
     stats = validate._tail_battery(tail_spec, cand, [42],
-                                   "repo", "ref", "kok", "ddhash")
+                                   "repo", "ref", "kok", "ddhash",
+                                   "headers", [], "wth")
     assert stats["tail_batteries_run"] == 1
-    assert stats["tail_samples_tested"] == 1
-    tail_min = stats["tail_min_precise_digits"]
-    assert 2.9 < tail_min < 3.1
-    # random battery said 12 digits; combined min drops to ~3 -> reject at tol 7.
-    combined = min(12.0, tail_min)
-    verdict, reason = validate._decide(combined, 12.0, 0.5, floor=7.0)
-    assert verdict == "reject"
+    tcand = stats["tail_cand_min_precise_digits"]
+    tcurr = stats["tail_curr_min_precise_digits"]
+    assert 2.9 < tcand < 3.1
+    assert tcurr == pytest.approx(round(MAX_DIGITS_F, 4))  # baseline fine at tail
+    # random both ~12; combined cand drops to ~3, combined curr stays 12 -> the
+    # candidate regressed ~9 digits at the tail offset -> reject.
+    comb_cand = min(12.0, tcand)
+    comb_curr = min(12.0, tcurr)
+    verdict, reason = validate._decide_tail(12.0, comb_cand, comb_curr, 0.5, floor=7.0)
+    assert verdict == "reject" and reason == "regression"
+
+
+def test_baseline_ceiling_at_tail_does_not_reject(monkeypatch):
+    # A workload physics ceiling: BOTH candidate and baseline get ~3 digits at the
+    # adversarial offset (near-zero component).  This is NOT candidate-induced ->
+    # the delta cancels and a precision-preserving candidate still accepts.
+    tail_spec = {"B12": {"min_abs_value": [{"offset": 42}]}}
+    dd = {"B12": {42: [_pair(1.0)] + [_pair(0.0)] * 5}}
+    ceiling = {"B12": {42: [_pair(1.0 + 1e-3)] + [_pair(0.0)] * 5}}  # ~3 digits
+    monkeypatch.setattr(validate, "_dd_tail_coeffs", lambda *a, **k: dd)
+    monkeypatch.setattr(validate, "_current_tail_coeffs", lambda *a, **k: ceiling)
+    stats = validate._tail_battery(tail_spec, ceiling, [42],
+                                   "repo", "ref", "kok", "ddhash",
+                                   "headers", [], "wth")
+    tcand = stats["tail_cand_min_precise_digits"]
+    tcurr = stats["tail_curr_min_precise_digits"]
+    assert 2.9 < tcand < 3.1 and 2.9 < tcurr < 3.1
+    # random both ~9 (>tol); combined cand ~3, combined curr ~3 -> delta ~0 -> accept.
+    comb_cand = min(9.0, tcand)
+    comb_curr = min(9.0, tcurr)
+    verdict, reason = validate._decide_tail(9.0, comb_cand, comb_curr, 0.5, floor=7.0)
+    assert verdict == "accept"
 
 
 def test_passing_tail_does_not_lower_min(monkeypatch):
-    # Precision-preserving candidate: exact on the tail offset -> tail min at the
-    # cap, combined min unchanged, verdict accepts.
+    # Precision-preserving candidate: exact on the tail offset -> tail cand min at
+    # the cap, delta ~0, verdict accepts.
     tail_spec = {"B12": {"max_rel_err": [{"offset": 42}]}}
     good = [_pair(1.0)] + [_pair(0.0)] * 5
-    monkeypatch.setattr(validate, "_dd_tail_coeffs",
-                        lambda *a, **k: {"B12": {42: good}})
+    monkeypatch.setattr(validate, "_dd_tail_coeffs", lambda *a, **k: {"B12": {42: good}})
+    monkeypatch.setattr(validate, "_current_tail_coeffs", lambda *a, **k: {"B12": {42: good}})
     stats = validate._tail_battery(tail_spec, {"B12": {42: good}}, [42],
-                                   "repo", "ref", "kok", "ddhash")
-    assert stats["tail_min_precise_digits"] == pytest.approx(round(MAX_DIGITS_F, 4))
-    combined = min(9.0, stats["tail_min_precise_digits"])
-    verdict, reason = validate._decide(combined, 9.0, 0.5, floor=7.0)
+                                   "repo", "ref", "kok", "ddhash",
+                                   "headers", [], "wth")
+    assert stats["tail_cand_min_precise_digits"] == pytest.approx(round(MAX_DIGITS_F, 4))
+    comb = min(9.0, stats["tail_cand_min_precise_digits"])
+    verdict, reason = validate._decide_tail(9.0, comb, comb, 0.5, floor=7.0)
     assert verdict == "accept"
+
+
+def test_decide_tail_floor_on_random_not_tail(monkeypatch):
+    # The absolute floor is on the RANDOM cand min, not the combined: a workload
+    # ceiling that drops the combined below tol must NOT trip insufficient_fix as
+    # long as the random battery clears tol and there is no regression.
+    verdict, reason = validate._decide_tail(rand_cand_min=8.5, comb_cand_min=3.7,
+                                            comb_curr_min=3.7, max_regression=0.5,
+                                            floor=7.0)
+    assert verdict == "accept" and reason == "accept"
+    # but if the random battery itself is below tol -> insufficient_fix
+    verdict, reason = validate._decide_tail(6.0, 3.7, 3.7, 0.5, floor=7.0)
+    assert verdict == "reject" and reason == "insufficient_fix"
 
 
 # ---------------------------------------------------------------------------
@@ -143,10 +185,19 @@ def test_passing_tail_does_not_lower_min(monkeypatch):
 # ---------------------------------------------------------------------------
 
 def test_fail_open_no_tail_spec():
-    stats = validate._tail_battery({}, None, [], "repo", "ref", "kok", "ddhash")
+    stats = validate._tail_battery({}, None, [], "repo", "ref", "kok", "ddhash",
+                                   "headers", [], "wth")
     assert stats["tail_batteries_run"] == 0
-    assert stats["tail_min_precise_digits"] is None
+    assert stats["tail_cand_min_precise_digits"] is None
+    assert stats["tail_curr_min_precise_digits"] is None
     assert stats["tail_samples_tested"] == 0
+
+
+def test_fail_open_reduces_to_random_decide():
+    # With no tail (fail-open) _decide_tail must equal the pre-tail _decide.
+    for cand, curr in [(9.0, 9.0), (7.0, 9.2), (15.0, 9.2), (6.0, 6.0)]:
+        assert (validate._decide_tail(cand, cand, curr, 0.5, floor=8.0)
+                == validate._decide(cand, curr, 0.5, floor=8.0))
 
 
 def test_fail_open_missing_integral_warns_once(monkeypatch, capsys):
@@ -160,16 +211,20 @@ def test_fail_open_missing_integral_warns_once(monkeypatch, capsys):
     good = [_pair(1.0)] + [_pair(0.0)] * 5
     monkeypatch.setattr(validate, "_dd_tail_coeffs",
                         lambda *a, **k: {"B12": {1: good}})
+    monkeypatch.setattr(validate, "_current_tail_coeffs",
+                        lambda *a, **k: {"B12": {1: good}})
     # reset the module-level warn set for a clean assertion
     validate._TAIL_WARNED.clear()
     stats = validate._tail_battery(tail_spec, {"B12": {1: good}}, [1],
-                                   "repo", "ref", "kok", "ddhash")
+                                   "repo", "ref", "kok", "ddhash",
+                                   "headers", [], "wth")
     assert stats["tail_batteries_run"] == 1
     assert "B99" in stats["integrals_skipped"]
     out = capsys.readouterr().out
     assert out.count("skipping B99") == 1
     # a second run does not re-warn for B99
     validate._tail_battery(tail_spec, {"B12": {1: good}}, [1],
-                           "repo", "ref", "kok", "ddhash")
+                           "repo", "ref", "kok", "ddhash",
+                           "headers", [], "wth")
     out2 = capsys.readouterr().out
     assert "skipping B99" not in out2
