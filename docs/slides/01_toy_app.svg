@@ -2,10 +2,9 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1280 720" font-family="ui-sans-serif, system-ui, -apple-system, sans-serif">
   <style>
     .title { font-size: 26px; font-weight: 700; fill: #172033; }
-    .subtitle { font-size: 14px; fill: #5b6475; }
     .h { font-size: 16px; font-weight: 650; fill: #172033; }
     .lbl { font-size: 15px; font-weight: 700; fill: #172033; }
-    .sub { font-size: 12px; fill: #5b6475; }
+    .sub { font-size: 11px; fill: #5b6475; }
     .code { font-family: ui-monospace, "SF Mono", Menlo, monospace; font-size: 13px; fill: #172033; }
     .code-cmt { font-family: ui-monospace, "SF Mono", Menlo, monospace; font-size: 12px; fill: #5b6475; }
     .code-warn { font-family: ui-monospace, "SF Mono", Menlo, monospace; font-size: 12px; fill: #b45309; font-weight: 600; }
@@ -15,7 +14,6 @@
     .rnode-sing { stroke: #475569; stroke-width: 1.6; fill: #cbd5e1; }
     .edge { stroke: #475569; stroke-width: 2; fill: none; marker-end: url(#arrow); }
     .box { stroke: #64748b; stroke-width: 1; fill: #f8fafc; }
-    .caption { font-size: 12px; fill: #5b6475; font-style: italic; }
   </style>
   <defs>
     <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
@@ -25,96 +23,96 @@
 
   <!-- Title -->
   <text x="40" y="44" class="title">Toy app: 6-region kernel</text>
-  <text x="40" y="66" class="subtitle">Reference example for the rest of the deck. Colors highlight numerical character that a human reader can see a priori — the pipeline's job is to discover the same signals mechanically.</text>
 
   <!-- ============ LEFT: DAG ============ -->
-  <text x="40" y="108" class="h">Region DAG  (data-flow dependencies)</text>
+  <text x="40" y="96" class="h">Region DAG  (data-flow dependencies)</text>
 
-  <g transform="translate(60, 140)">
+  <g transform="translate(40, 130)">
     <!-- Level 0: R1 R2 R3 -->
-    <rect x="20" y="0" width="120" height="70" rx="10" class="rnode-safe"/>
-    <text x="80" y="30" text-anchor="middle" class="lbl">R1</text>
-    <text x="80" y="52" text-anchor="middle" class="sub">adds, muls</text>
+    <rect x="10" y="0" width="160" height="72" rx="10" class="rnode-safe"/>
+    <text x="90" y="30" text-anchor="middle" class="lbl">R1</text>
+    <text x="90" y="52" text-anchor="middle" class="sub">adds, muls</text>
 
-    <rect x="180" y="0" width="120" height="70" rx="10" class="rnode-warn"/>
-    <text x="240" y="30" text-anchor="middle" class="lbl">R2</text>
-    <text x="240" y="52" text-anchor="middle" class="sub">near-cancel sub</text>
+    <rect x="200" y="0" width="160" height="72" rx="10" class="rnode-warn"/>
+    <text x="280" y="30" text-anchor="middle" class="lbl">R2</text>
+    <text x="280" y="52" text-anchor="middle" class="sub">near-cancel sub</text>
 
-    <rect x="340" y="0" width="120" height="70" rx="10" class="rnode-sing"/>
-    <text x="400" y="30" text-anchor="middle" class="lbl">R3</text>
-    <text x="400" y="52" text-anchor="middle" class="sub">log near 1</text>
+    <rect x="390" y="0" width="160" height="72" rx="10" class="rnode-sing"/>
+    <text x="470" y="30" text-anchor="middle" class="lbl">R3</text>
+    <text x="470" y="52" text-anchor="middle" class="sub">log near 1</text>
 
     <!-- Level 1: R4 R5 -->
-    <rect x="100" y="180" width="120" height="70" rx="10" class="rnode-safe"/>
-    <text x="160" y="210" text-anchor="middle" class="lbl">R4</text>
-    <text x="160" y="232" text-anchor="middle" class="sub">div (R1+R2 / R1−R2)</text>
+    <rect x="100" y="200" width="180" height="72" rx="10" class="rnode-safe"/>
+    <text x="190" y="230" text-anchor="middle" class="lbl">R4</text>
+    <text x="190" y="252" text-anchor="middle" class="sub">div(R1+R2, R1−R2)</text>
 
-    <rect x="300" y="180" width="120" height="70" rx="10" class="rnode-safe"/>
-    <text x="360" y="210" text-anchor="middle" class="lbl">R5</text>
-    <text x="360" y="232" text-anchor="middle" class="sub">sqrt(R3² + 1)</text>
+    <rect x="320" y="200" width="180" height="72" rx="10" class="rnode-safe"/>
+    <text x="410" y="230" text-anchor="middle" class="lbl">R5</text>
+    <text x="410" y="252" text-anchor="middle" class="sub">sqrt(R3² + 1)</text>
 
     <!-- Level 2: R6 -->
-    <rect x="200" y="360" width="120" height="70" rx="10" class="rnode-safe"/>
-    <text x="260" y="390" text-anchor="middle" class="lbl">R6</text>
-    <text x="260" y="412" text-anchor="middle" class="sub">mul(R4,R5) + sub(R4,R5)</text>
+    <rect x="200" y="400" width="220" height="86" rx="10" class="rnode-safe"/>
+    <text x="310" y="430" text-anchor="middle" class="lbl">R6</text>
+    <text x="310" y="454" text-anchor="middle" class="sub">mul(R4, R5)</text>
+    <text x="310" y="472" text-anchor="middle" class="sub">+ sub(R4, R5)</text>
 
     <!-- Edges -->
-    <path d="M80 70 L145 180" class="edge"/>
-    <path d="M240 70 L180 180" class="edge"/>
-    <path d="M400 70 L375 180" class="edge"/>
-    <path d="M175 250 L245 360" class="edge"/>
-    <path d="M345 250 L275 360" class="edge"/>
+    <path d="M90 72 L170 200" class="edge"/>
+    <path d="M280 72 L210 200" class="edge"/>
+    <path d="M470 72 L440 200" class="edge"/>
+    <path d="M205 272 L280 400" class="edge"/>
+    <path d="M405 272 L340 400" class="edge"/>
   </g>
 
   <!-- Legend -->
-  <g transform="translate(60, 600)">
+  <g transform="translate(40, 640)">
     <text x="0" y="0" class="h">Numerical character</text>
 
-    <rect x="0" y="14" width="20" height="16" class="rnode-safe"/>
-    <text x="28" y="27" class="sub">well-conditioned (safe)</text>
+    <rect x="0" y="14" width="18" height="14" class="rnode-safe"/>
+    <text x="26" y="26" class="sub">well-conditioned</text>
 
-    <rect x="180" y="14" width="20" height="16" class="rnode-warn"/>
-    <text x="208" y="27" class="sub">cancellation risk  (sub of nearly-equal quantities)</text>
+    <rect x="150" y="14" width="18" height="14" class="rnode-warn"/>
+    <text x="176" y="26" class="sub">cancellation risk</text>
 
-    <rect x="0" y="42" width="20" height="16" class="rnode-sing"/>
-    <text x="28" y="55" class="sub">near a singular point  (log near 1, atan near axis, ...)</text>
+    <rect x="310" y="14" width="18" height="14" class="rnode-sing"/>
+    <text x="336" y="26" class="sub">near a singular point</text>
   </g>
 
   <!-- ============ RIGHT: Annotated source ============ -->
-  <text x="640" y="108" class="h">Kernel source  (tracked scopes annotate region boundaries)</text>
+  <text x="620" y="96" class="h">Kernel source  (tracked scopes annotate region boundaries)</text>
 
-  <rect x="640" y="128" width="600" height="460" rx="6" class="box"/>
+  <rect x="620" y="115" width="640" height="560" rx="6" class="box"/>
 
-  <text x="660" y="156" class="code">double kernel(double x, y, z, w) {</text>
-  <text x="660" y="174" class="code">  tracked::scope s0("kernel");</text>
+  <text x="640" y="142" class="code">double kernel(double x, y, z, w) {</text>
+  <text x="640" y="160" class="code">    tracked::scope s0("kernel");</text>
 
-  <text x="660" y="204" class="code">  tracked::scope("R1"); {</text>
-  <text x="660" y="222" class="code">    a = mul(x, y) + add(x, z);</text>
-  <text x="660" y="240" class="code-cmt">    // well-conditioned: sums of positive terms</text>
-  <text x="660" y="258" class="code">  }</text>
+  <text x="640" y="190" class="code">    tracked::scope("R1"); {</text>
+  <text x="640" y="208" class="code">        a = mul(x, y) + add(x, z);</text>
+  <text x="640" y="226" class="code-cmt">        // well-conditioned: sums of positive terms</text>
+  <text x="640" y="244" class="code">    }</text>
 
-  <text x="660" y="288" class="code">  tracked::scope("R2"); {</text>
-  <text x="660" y="306" class="code">    b = sub(mul(x, x), mul(y, y));</text>
-  <text x="660" y="324" class="code-warn">    // cancellation risk: x² − y² when x ≈ y</text>
-  <text x="660" y="342" class="code">  }</text>
+  <text x="640" y="274" class="code">    tracked::scope("R2"); {</text>
+  <text x="640" y="292" class="code">        b = sub(mul(x, x), mul(y, y));</text>
+  <text x="640" y="310" class="code-warn">        // cancellation risk: x² − y² when x ≈ y</text>
+  <text x="640" y="328" class="code">    }</text>
 
-  <text x="660" y="372" class="code">  tracked::scope("R3"); {</text>
-  <text x="660" y="390" class="code">    c = log(add(1.0, w));</text>
-  <text x="660" y="408" class="code-sing">    // singularity: log(1+w) → 0 as w → 0</text>
-  <text x="660" y="426" class="code">  }</text>
+  <text x="640" y="358" class="code">    tracked::scope("R3"); {</text>
+  <text x="640" y="376" class="code">        c = log(add(1.0, w));</text>
+  <text x="640" y="394" class="code-sing">        // singularity: log(1+w) → 0 as w → 0</text>
+  <text x="640" y="412" class="code">    }</text>
 
-  <text x="660" y="456" class="code">  tracked::scope("R4"); {</text>
-  <text x="660" y="474" class="code">    ab = div(add(a, b), sub(a, b));    // consumes R1, R2</text>
-  <text x="660" y="492" class="code">  }</text>
+  <text x="640" y="442" class="code">    tracked::scope("R4"); {</text>
+  <text x="640" y="460" class="code">        ab = div(add(a, b), sub(a, b));</text>
+  <text x="640" y="478" class="code-cmt">        // consumes R1, R2</text>
+  <text x="640" y="496" class="code">    }</text>
 
-  <text x="660" y="510" class="code">  tracked::scope("R5"); {</text>
-  <text x="660" y="528" class="code">    cc = sqrt(add(mul(c, c), 1.0));    // consumes R3</text>
-  <text x="660" y="546" class="code">  }</text>
+  <text x="640" y="526" class="code">    tracked::scope("R5"); {</text>
+  <text x="640" y="544" class="code">        cc = sqrt(add(mul(c, c), 1.0));</text>
+  <text x="640" y="562" class="code-cmt">        // consumes R3</text>
+  <text x="640" y="580" class="code">    }</text>
 
-  <text x="660" y="570" class="code">  tracked::scope("R6"); {</text>
-  <text x="660" y="588" class="code">    return add(mul(ab, cc), sub(ab, cc));   // consumes R4, R5</text>
-  <text x="660" y="606" class="code">  }</text>
-  <text x="660" y="624" class="code">}</text>
-
-  <text x="40" y="710" class="caption">R2's cancellation and R3's log-near-root are visible by inspection here. The pipeline discovers them from the journal (slide 3), never told about them directly.</text>
+  <text x="640" y="610" class="code">    tracked::scope("R6"); {</text>
+  <text x="640" y="628" class="code">        return add(mul(ab, cc), sub(ab, cc));</text>
+  <text x="640" y="646" class="code-cmt">        // consumes R4, R5</text>
+  <text x="640" y="664" class="code">    }</text>
 </svg>
