@@ -69,12 +69,12 @@
     <text x="65" y="66" text-anchor="middle" class="sub-sm">N seeded inputs</text>
   </g>
 
-  <!-- Reduce -->
-  <g transform="translate(880, 130)">
-    <rect x="0" y="0" width="110" height="70" rx="8" class="char-box"/>
-    <text x="55" y="30" text-anchor="middle" class="lbl">Reduce</text>
-    <text x="55" y="50" text-anchor="middle" class="sub-sm">journal → report</text>
-    <text x="55" y="66" text-anchor="middle" class="sub-sm">(offline)</text>
+  <!-- Reduce (moved slightly left to lengthen its outgoing arrow) -->
+  <g transform="translate(870, 130)">
+    <rect x="0" y="0" width="100" height="70" rx="8" class="char-box"/>
+    <text x="50" y="30" text-anchor="middle" class="lbl">Reduce</text>
+    <text x="50" y="50" text-anchor="middle" class="sub-sm">journal → report</text>
+    <text x="50" y="66" text-anchor="middle" class="sub-sm">(offline)</text>
   </g>
 
   <!-- Report -->
@@ -90,10 +90,11 @@
   <path d="M360 165 L 400 165" class="edge"/>
   <path d="M550 165 L 660 165" class="edge"/>
   <text x="605" y="158" text-anchor="middle" class="edge-lbl">app_tracked.cpp</text>
-  <path d="M790 165 L 880 165" class="edge"/>
-  <text x="835" y="158" text-anchor="middle" class="edge-lbl">journal (transient)</text>
-  <path d="M990 165 L 1070 165" class="edge"/>
-  <text x="1030" y="158" text-anchor="middle" class="edge-lbl">report.json</text>
+  <path d="M790 165 L 870 165" class="edge"/>
+  <text x="830" y="152" text-anchor="middle" class="edge-lbl">journal</text>
+  <text x="830" y="166" text-anchor="middle" class="edge-lbl">(transient)</text>
+  <path d="M970 165 L 1070 165" class="edge"/>
+  <text x="1020" y="158" text-anchor="middle" class="edge-lbl">report.json</text>
 
   <!-- Vertical bridge from Report DOWN to Strategy phase -->
   <path d="M1140 200 L 1140 340" class="edge"/>
@@ -161,20 +162,20 @@
   <!-- =================== BOTTOM: Terminal state and output =================== -->
   <text x="40" y="565" class="h">Output</text>
 
-  <!-- Terminal state indicator (widened; sits under Strategy) -->
-  <g transform="translate(830, 585)">
-    <rect x="0" y="0" width="340" height="90" rx="8" class="box"/>
-    <text x="170" y="24" text-anchor="middle" class="lbl">Loop drains when both phase budgets exhausted</text>
-    <text x="170" y="46" text-anchor="middle" class="sub-sm">correctness_max_iters + speedup_max_iters</text>
-    <text x="170" y="66" text-anchor="middle" class="sub-sm">→ terminal status: success</text>
-    <text x="170" y="82" text-anchor="middle" class="sub-sm">strategy commits final precision distribution</text>
+  <!-- Terminal state indicator (widened to 430 to fit longest line without overflow) -->
+  <g transform="translate(770, 585)">
+    <rect x="0" y="0" width="430" height="90" rx="8" class="box"/>
+    <text x="215" y="24" text-anchor="middle" class="lbl">Loop drains when both phase budgets exhausted</text>
+    <text x="215" y="46" text-anchor="middle" class="sub-sm">correctness_max_iters + speedup_max_iters</text>
+    <text x="215" y="66" text-anchor="middle" class="sub-sm">→ terminal status: success</text>
+    <text x="215" y="82" text-anchor="middle" class="sub-sm">strategy commits final precision distribution</text>
   </g>
 
-  <!-- Arrow from Strategy bottom edge DOWN to terminal-state box top edge -->
-  <path d="M990 460 L 990 585" class="edge"/>
+  <!-- Arrow from Strategy bottom edge DOWN (right-shifted to x=1050 so it doesn't overlap outgoing candidate arrow at x=990) -->
+  <path d="M1050 460 L 1050 585" class="edge"/>
 
   <!-- Arrow from terminal state LEFT to Optimized app -->
-  <path d="M830 630 L 700 630" class="edge"/>
+  <path d="M770 630 L 700 630" class="edge"/>
 
   <!-- Optimized app output (moved left of terminal) -->
   <g transform="translate(440, 585)">
