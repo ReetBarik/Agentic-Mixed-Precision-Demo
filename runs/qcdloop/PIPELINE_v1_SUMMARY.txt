@@ -1,0 +1,70 @@
+PIPELINE_v1 — VALIDATION SUMMARY (grep-able)
+============================================
+Generated: 2026-07-20
+Branch:    langgraph-agents
+Run:       runs/qcdloop/strategy/20260720_054121_dd44d33c
+Config:    correctness=200 speedup=250 dr_k=60 tol=7.0 n=1000
+Report:    report_10k.json (tail-augmented; original preserved as report_10k.pre_tail.json)
+Reproduce: python runs/qcdloop/analyze_tail_run.py --run-dir runs/qcdloop/strategy/20260720_054121_dd44d33c
+
+VERDICT: PASS
+------------
+All reframed pass criteria met. PIPELINE_v1 is production-ready.
+
+HEADLINE
+--------
+status                        = success
+wall_minutes                  = 107
+tokens                        = 1.28M
+iterations                    = 231
+validated_candidates          = 152
+accepts                       = 152   (100% of validations; 0 rejects run-wide)
+
+DEMOTIONS (precision_distribution)
+----------------------------------
+float                         = 73
+ff                            = 12
+demotions_float_plus_ff       = 85    (pre-Wave-3 baseline 88; delta = WI1 range-safety bite)
+dd                            = 133
+double                        = 271
+total_regions                 = 489
+
+CORRECTNESS (must all be zero)
+------------------------------
+tolerance_rejects             = 0
+correctness_regressions_nondd = 0
+tail_driven_regression_rejects= 0
+regions_at_dd_ceiling         = 0
+regions_unresolved            = 0
+strategy_bugs                 = 0
+commit_failed                 = 0
+(dd_untested = 47 — orthogonal Patcher-generation noise, NOT a correctness regression)
+
+WAVE-3 PRUNE TELEMETRY
+----------------------
+report_prunes_enabled         = true
+WI1 regions_skipped_range_unsafe = 14   (13 float->ff retreats; float 86->73, ff 2->12)
+WI2 regions_flagged_pred_float   = 55   (telemetry-only, no hard gate)
+WI3 speedup_queue_flop_weighted  = true
+
+TAIL-BATTERY TELEMETRY
+----------------------
+validations_with_tail_battery = 152
+tail_hash_mismatches          = 0
+tail_offsets_dispatched       = 389   (21 integrals; 341 (88%) >= 1000, outside random window)
+max_tail_samples_tested       = 599   (per validation, union across integrals)
+tail_sample_failures          = 0
+
+PER-PRUNE BITE (one line each)
+------------------------------
+WI1: 14 range-unsafe regions kept on ff instead of float (demotion preserved, safe rung).
+WI2: 55 regions flagged high-pred-float-err for telemetry; no candidates blocked (local!=global).
+WI3: speedup queue ordered by flop-weighted op mix (ratio_multipliers.json) not raw op count.
+TAIL: 152 candidates each re-tested at their per-integral adversarial offsets; regression-relative
+      verdict (score cand AND current at offsets, regression guard on combined, floor on random);
+      0 candidate-induced tail failures, 0 determinism-hash mismatches.
+
+KILL SWITCHES
+-------------
+STRATEGY_DISABLE_REPORT_PRUNES=1  disables WI1+WI2+WI3 together.
+Tail-testing: no kill switch; on when report carries tail_samples, fails open (random-only) if absent.
