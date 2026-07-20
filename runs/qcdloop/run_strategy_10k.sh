@@ -1,5 +1,11 @@
 #!/usr/bin/env bash
-# Launch the 10k two-phase Strategy calibration walk.
+# The production 10k two-phase Strategy run (one runner — the Wave-1/2-era
+# speedup probe was retired in Wave 3).
+#
+# Wave-3 report-field prunes (WI1 float range guard, WI2 pred-float gate, WI3
+# flop-weighted speedup ordering) are ON by default (agents/config.py); no flag is
+# needed here.  Emergency rollback: export STRATEGY_DISABLE_REPORT_PRUNES=1 before
+# launching to disable all three at once.
 #
 # Run inside a detached tmux session so it survives the controlling
 # terminal / Claude session dying:

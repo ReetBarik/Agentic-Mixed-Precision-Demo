@@ -148,6 +148,10 @@ def main(argv=None) -> int:
             "inferred_terminal": term("speedup", spd["budget_iters"], cap_s),
         },
         "correctness_summary": report["correctness_summary"],
+        # Wave-3 report-prune telemetry (WI1/WI2/WI3) — echoed verbatim so the
+        # validation re-run reports the per-prune bite without extra wiring.
+        "speedup_summary": report.get("speedup_summary", {
+            "note": "pre-Wave-3 run: no speedup_summary in report.json"}),
         "shakedown_baseline": {
             "accepts": 8, "iterations": 19, "accept_rate": 8 / 19,
             "dd_untested": 11, "dd_untested_rate": 11 / 19,
