@@ -67,18 +67,23 @@
     <!-- Correctness arrows (solid): double → dd and double → ff -->
     <path d="M215 105 C 270 105, 270 30, 215 30" class="arrow-corr" marker-end="url(#arrow-corr-m)"/>
     <path d="M215 135 C 270 135, 270 210, 215 210" class="arrow-corr" marker-end="url(#arrow-corr-m)"/>
-    <text x="278" y="122" class="lbl" style="fill:#b45309">correctness</text>
+
 
     <!-- Speedup arrows (dotted): same arc radius across all three -->
     <path d="M215 30 C 385 30, 385 120, 215 120" class="arrow-speed" marker-end="url(#arrow-speed-m)"/>
     <path d="M215 120 C 385 120, 385 210, 215 210" class="arrow-speed" marker-end="url(#arrow-speed-m)"/>
     <path d="M215 210 C 385 210, 385 300, 215 300" class="arrow-speed" marker-end="url(#arrow-speed-m)"/>
-    <text x="395" y="170" class="lbl" style="fill:#166534">speedup</text>
 
-    <!-- Note under the ladder -->
-    <text x="0" y="380" class="sub">↑ safer / slower</text>
-    <text x="0" y="398" class="sub">↓ faster / riskier</text>
-    <text x="0" y="418" class="sub">walk never re-promotes after accept</text>
+
+    <!-- Legend under the ladder -->
+    <text x="0" y="370" class="sub">↑ safer / slower</text>
+    <text x="0" y="388" class="sub">↓ faster / riskier</text>
+
+    <!-- Phase legend -->
+    <line x1="0" y1="418" x2="36" y2="418" class="arrow-corr" marker-end="url(#arrow-corr-m)"/>
+    <text x="46" y="422" class="lbl" style="fill:#b45309">correctness</text>
+    <line x1="0" y1="444" x2="36" y2="444" class="arrow-speed" marker-end="url(#arrow-speed-m)"/>
+    <text x="46" y="448" class="lbl" style="fill:#166534">speedup</text>
   </g>
 
   <!-- ============ MIDDLE: speedup queue ============ -->
