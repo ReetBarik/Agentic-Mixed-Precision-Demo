@@ -91,8 +91,8 @@
   <path d="M550 165 L 660 165" class="edge"/>
   <text x="605" y="158" text-anchor="middle" class="edge-lbl">app_tracked.cpp</text>
   <path d="M790 165 L 870 165" class="edge"/>
-  <text x="830" y="152" text-anchor="middle" class="edge-lbl">journal</text>
-  <text x="830" y="166" text-anchor="middle" class="edge-lbl">(transient)</text>
+  <text x="830" y="142" text-anchor="middle" class="edge-lbl">journal</text>
+  <text x="830" y="156" text-anchor="middle" class="edge-lbl">(transient)</text>
   <path d="M970 165 L 1070 165" class="edge"/>
   <text x="1020" y="158" text-anchor="middle" class="edge-lbl">report.json</text>
 
@@ -101,7 +101,8 @@
   <text x="1153" y="272" class="edge-lbl">report.json</text>
 
   <!-- =================== MIDDLE: Optimization loop =================== -->
-  <text x="40" y="340" class="h">Optimization loop  (Phase 1: <tspan style="fill:#b45309">Correctness</tspan>,  Phase 2: <tspan style="fill:#166534">Speedup</tspan>)</text>
+  <text x="40" y="326" class="h">Optimization loop</text>
+  <text x="40" y="346" class="h">(Phase 1: <tspan style="fill:#b45309">Correctness</tspan>,  Phase 2: <tspan style="fill:#166534">Speedup</tspan>)</text>
 
   <!-- Strategy walk -->
   <g transform="translate(880, 360)">
