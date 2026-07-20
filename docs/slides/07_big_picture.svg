@@ -96,16 +96,16 @@
   <path d="M970 165 L 1070 165" class="edge"/>
   <text x="1020" y="158" text-anchor="middle" class="edge-lbl">report.json</text>
 
-  <!-- Vertical bridge from Report DOWN to Strategy phase -->
-  <path d="M1140 200 L 1140 340" class="edge"/>
-  <text x="1153" y="272" class="edge-lbl">report.json</text>
+  <!-- Vertical bridge from Report DOWN to Strategy phase (top-center of Strategy at x=1090) -->
+  <path d="M1090 200 L 1090 360" class="edge"/>
+  <text x="1103" y="282" class="edge-lbl">report.json</text>
 
   <!-- =================== MIDDLE: Optimization loop =================== -->
   <text x="40" y="326" class="h">Optimization loop</text>
   <text x="40" y="346" class="h">(Phase 1: <tspan style="fill:#b45309">Correctness</tspan>,  Phase 2: <tspan style="fill:#166534">Speedup</tspan>)</text>
 
   <!-- Strategy walk -->
-  <g transform="translate(880, 360)">
+  <g transform="translate(980, 360)">
     <rect x="0" y="0" width="220" height="100" rx="8" class="strat-box"/>
     <text x="110" y="26" text-anchor="middle" class="lbl">Strategy walk</text>
     <text x="110" y="46" text-anchor="middle" class="sub-sm">correctness (safety-ordered)</text>
@@ -115,7 +115,7 @@
   </g>
 
   <!-- Patcher (LLM + retry loop) -->
-  <g transform="translate(460, 360)">
+  <g transform="translate(560, 360)">
     <rect x="0" y="0" width="220" height="100" rx="8" class="patcher-box"/>
     <text x="110" y="26" text-anchor="middle" class="lbl">Patcher</text>
     <text x="110" y="46" text-anchor="middle" class="sub-sm">LLM agent  ·  bounded retry</text>
@@ -125,21 +125,21 @@
   </g>
 
   <!-- Precision containers (dependency, small, above Patcher, with vertical gap) -->
-  <g transform="translate(485, 280)">
+  <g transform="translate(585, 280)">
     <rect x="0" y="0" width="80" height="50" rx="6" class="container-box"/>
     <text x="40" y="20" text-anchor="middle" class="sub-sm" font-weight="700">dd_math</text>
     <text x="40" y="36" text-anchor="middle" class="sub-sm">.hpp</text>
   </g>
-  <g transform="translate(575, 280)">
+  <g transform="translate(675, 280)">
     <rect x="0" y="0" width="80" height="50" rx="6" class="container-box"/>
     <text x="40" y="20" text-anchor="middle" class="sub-sm" font-weight="700">ff_math</text>
     <text x="40" y="36" text-anchor="middle" class="sub-sm">.hpp</text>
   </g>
-  <path d="M525 330 L 540 360" stroke="#475569" stroke-width="1.2" stroke-dasharray="3 3" fill="none" marker-end="url(#arrow)"/>
-  <path d="M615 330 L 600 360" stroke="#475569" stroke-width="1.2" stroke-dasharray="3 3" fill="none" marker-end="url(#arrow)"/>
+  <path d="M625 330 L 640 360" stroke="#475569" stroke-width="1.2" stroke-dasharray="3 3" fill="none" marker-end="url(#arrow)"/>
+  <path d="M715 330 L 700 360" stroke="#475569" stroke-width="1.2" stroke-dasharray="3 3" fill="none" marker-end="url(#arrow)"/>
 
   <!-- Validator -->
-  <g transform="translate(40, 360)">
+  <g transform="translate(140, 360)">
     <rect x="0" y="0" width="220" height="100" rx="8" class="val-box"/>
     <text x="110" y="26" text-anchor="middle" class="lbl">Validator</text>
     <text x="110" y="46" text-anchor="middle" class="sub-sm">candidate + dd oracle</text>
@@ -149,37 +149,37 @@
   </g>
 
   <!-- Strategy → Patcher (candidate) -->
-  <path d="M880 410 L 680 410" class="edge"/>
-  <text x="780" y="402" text-anchor="middle" class="edge-lbl">candidate = (region, target)</text>
+  <path d="M980 410 L 780 410" class="edge"/>
+  <text x="880" y="402" text-anchor="middle" class="edge-lbl">candidate = (region, target)</text>
 
   <!-- Patcher → Validator (built binary) -->
-  <path d="M460 410 L 260 410" class="edge"/>
-  <text x="360" y="402" text-anchor="middle" class="edge-lbl">built binary + shim</text>
+  <path d="M560 410 L 360 410" class="edge"/>
+  <text x="460" y="402" text-anchor="middle" class="edge-lbl">built binary + shim</text>
 
-  <!-- Validator → Strategy (verdict) - use bottom channel, 2 segments -->
-  <path d="M150 460 L 150 510 L 990 510 L 990 460" class="edge-back"/>
-  <text x="570" y="502" text-anchor="middle" class="edge-lbl" style="fill:#166534">verdict (accept / reject / patcher-failure)</text>
+  <!-- Validator → Strategy (verdict) - bottom channel, 2 segments -->
+  <path d="M250 460 L 250 510 L 1090 510 L 1090 460" class="edge-back"/>
+  <text x="670" y="502" text-anchor="middle" class="edge-lbl" style="fill:#166534">verdict (accept / reject / patcher-failure)</text>
 
   <!-- =================== BOTTOM: Terminal state and output =================== -->
   <text x="40" y="565" class="h">Output</text>
 
-  <!-- Terminal state indicator (widened to 430 to fit longest line without overflow) -->
-  <g transform="translate(770, 585)">
-    <rect x="0" y="0" width="430" height="90" rx="8" class="box"/>
-    <text x="215" y="24" text-anchor="middle" class="lbl">Loop drains when both phase budgets exhausted</text>
-    <text x="215" y="46" text-anchor="middle" class="sub-sm">correctness_max_iters + speedup_max_iters</text>
-    <text x="215" y="66" text-anchor="middle" class="sub-sm">→ terminal status: success</text>
-    <text x="215" y="82" text-anchor="middle" class="sub-sm">strategy commits final precision distribution</text>
+  <!-- Terminal state indicator (kept at 430 wide; ends at x=1300 within viewBox 1280 margin) -->
+  <g transform="translate(870, 585)">
+    <rect x="0" y="0" width="400" height="90" rx="8" class="box"/>
+    <text x="200" y="24" text-anchor="middle" class="lbl">Loop drains when both phase budgets exhausted</text>
+    <text x="200" y="46" text-anchor="middle" class="sub-sm">correctness_max_iters + speedup_max_iters</text>
+    <text x="200" y="66" text-anchor="middle" class="sub-sm">→ terminal status: success</text>
+    <text x="200" y="82" text-anchor="middle" class="sub-sm">strategy commits final precision distribution</text>
   </g>
 
-  <!-- Arrow from Strategy bottom edge DOWN (right-shifted to x=1050 so it doesn't overlap outgoing candidate arrow at x=990) -->
-  <path d="M1050 460 L 1050 585" class="edge"/>
+  <!-- Arrow from Strategy bottom edge DOWN (right-shifted to x=1150 so it doesn't overlap outgoing candidate arrow at x=1090) -->
+  <path d="M1150 460 L 1150 585" class="edge"/>
 
   <!-- Arrow from terminal state LEFT to Optimized app -->
-  <path d="M770 630 L 700 630" class="edge"/>
+  <path d="M870 630 L 800 630" class="edge"/>
 
   <!-- Optimized app output (moved left of terminal) -->
-  <g transform="translate(440, 585)">
+  <g transform="translate(540, 585)">
     <rect x="0" y="0" width="260" height="90" rx="8" class="output-box"/>
     <text x="130" y="26" text-anchor="middle" class="lbl">Optimized app</text>
     <text x="130" y="48" text-anchor="middle" class="sub-sm">source with regional shims installed</text>
@@ -188,7 +188,7 @@
   </g>
 
   <!-- Telemetry (secondary output; further left) -->
-  <g transform="translate(160, 585)">
+  <g transform="translate(260, 585)">
     <rect x="0" y="0" width="260" height="90" rx="8" class="box"/>
     <text x="130" y="26" text-anchor="middle" class="lbl">Telemetry log</text>
     <text x="130" y="48" text-anchor="middle" class="sub-sm">accept/reject per candidate</text>
@@ -197,7 +197,7 @@
   </g>
 
   <!-- Arrow from Optimized app LEFT to Telemetry -->
-  <path d="M440 630 L 420 630" class="edge"/>
+  <path d="M540 630 L 520 630" class="edge"/>
 
   <!-- LLM legend -->
   <g transform="translate(40, 690)">
