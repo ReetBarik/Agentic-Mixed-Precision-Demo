@@ -37,7 +37,7 @@
   </defs>
 
   <!-- Title -->
-  <text x="40" y="44" class="title">Strategy walk — correctness phase</text>
+  <text x="40" y="44" class="title">Strategy walk — <tspan fill="#b45309">correctness</tspan> phase</text>
   <text x="40" y="66" class="sub">For each region: attempt a demotion or, if unsafe at current precision, an up-bump.</text>
 
   <!-- ============ LEFT: precision ladder ============ -->
@@ -70,6 +70,7 @@
     <!-- double → ff (curves down on the right side) -->
     <path d="M215 135 C 270 135, 270 210, 215 210" class="arrow-corr" marker-end="url(#arrow-corr-m)"/>
     <text x="278" y="122" class="lbl" fill="#b45309">correctness</text>
+    <!-- correctness label color matches arrow-corr stroke #b45309 -->
 
     <!-- Speedup arrows (dotted): double → ff and double → float -->
     <path d="M215 135 C 330 135, 330 210, 215 210" class="arrow-speed" marker-end="url(#arrow-speed-m)"/>
@@ -202,7 +203,7 @@
 
   <!-- Precision distribution after correctness phase -->
   <g transform="translate(850, 500)">
-    <text x="0" y="0" class="h">State after correctness phase</text>
+    <text x="0" y="0" class="h">State after <tspan fill="#b45309">correctness</tspan> phase</text>
     <rect x="0" y="14" width="410" height="100" rx="6" class="box"/>
 
     <text x="16" y="38" class="lbl">dd: 1</text>
