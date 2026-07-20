@@ -232,6 +232,46 @@ def test_speedup_non_template_region_still_reaches_float_via_plain():
     assert walk.result().final_precision == "float"
 
 
+# ---- Wave-3 WI1/WI2: float-rung guard (float_ok=False) ----
+
+def test_speedup_plain_float_ok_false_settles_at_ff():
+    # plain ladder with the guard on: double->ff accepts, then float is NOT
+    # attempted (guard) → settle at ff after a single accepted step.
+    rec = make_region("B1", "f.h", 10, "stable", pred_float=1e-30)
+    walk = RetryWalk(rec, "speedup", tolerance=10.0, baseline="double", float_ok=False)
+    first = walk.propose("i0")
+    assert first.kind == "double-to-ff"
+    walk.resolve(accepted=True)
+    assert walk.propose("i1") is None            # ff->float guarded off
+    res = walk.result()
+    assert res.status == "settled" and res.final_precision == "ff"
+
+
+def test_speedup_regional_float_ok_false_skips_float_target():
+    # regional plan drops the float rung entirely: only double->ff is proposed.
+    from agents.strategy.models import VIA_REGIONAL
+    rec = make_region("B1", "f.h", 10, "stable", pred_float=1e-30)
+    walk = RetryWalk(rec, "speedup", tolerance=10.0, baseline="double",
+                     float_via=VIA_REGIONAL, float_ok=False)
+    first = walk.propose("i0")
+    assert first.kind == "double-to-ff"
+    walk.resolve(accepted=False)
+    assert walk.propose("i1") is None            # no float fallback attempted
+    assert walk.result().final_precision == "double"
+
+
+def test_speedup_float_ok_true_still_reaches_float():
+    # control: guard off (default True) preserves the Wave-2 reach-to-float path.
+    rec = make_region("B1", "f.h", 10, "stable", pred_float=1e-30)
+    walk = RetryWalk(rec, "speedup", tolerance=10.0, baseline="double", float_ok=True)
+    kinds = []
+    while (intent := walk.propose("i")) is not None:
+        kinds.append(intent.kind)
+        walk.resolve(accepted=True)
+    assert kinds == ["double-to-ff", "ff-to-float"]
+    assert walk.result().final_precision == "float"
+
+
 # ---- float-baseline edge (float-to-dd unsupported) ----
 
 def test_float_baseline_exhausts_without_dd():

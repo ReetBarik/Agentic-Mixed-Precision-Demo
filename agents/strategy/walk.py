@@ -75,7 +75,7 @@ def _rewrites_for(signal_class: str) -> list[tuple[str, str | None]]:
 class RetryWalk:
     def __init__(self, record: RegionRecord, mode: str, tolerance: float,
                  baseline: str = "double", floor: str | None = None,
-                 float_via: str = VIA_PLAIN):
+                 float_via: str = VIA_PLAIN, float_ok: bool = True):
         if mode not in (INTENT_CORRECTNESS, INTENT_SPEEDUP):
             raise ValueError(f"unknown walk mode {mode!r}")
         if float_via not in (VIA_PLAIN, VIA_REGIONAL):
@@ -85,6 +85,13 @@ class RetryWalk:
         self.tolerance = tolerance
         self.baseline = baseline
         self.installed = baseline
+        # Wave-3 WI1/WI2: float-rung guard.  When False the speedup walk stops at
+        # ff and never attempts ``->float`` — the region is range-unsafe
+        # (`value_range_ok_for_float`) or its `predicted_rel_err_if_float` exceeds
+        # tolerance.  Orthogonal to the ff error gate that admits the region into
+        # the speedup queue; correctness walks never target float, so this is inert
+        # there.  Defaults True (historical behavior / fail-open).
+        self.float_ok = float_ok
         # Speedup floor (design "Speedup floor rule"): the lowest precision this
         # region may be demoted to, because a promoted cascade chain still claims
         # one of its lines at that precision.  None → no floor (down to float).
@@ -103,8 +110,10 @@ class RetryWalk:
         # Correctness walks never target float, so this is inert there.
         self.float_via = float_via
         # Regional speedup plan: demotion targets below ``double`` in cost order
-        # (cheapest first); the first that the Validator accepts wins.
-        self._regional_plan: list[str] = ["float", "ff"]
+        # (cheapest first); the first that the Validator accepts wins.  The float
+        # rung is dropped when the WI1/WI2 guard fires (``float_ok=False``) — the
+        # walk then settles at ff without spending a doomed float attempt.
+        self._regional_plan: list[str] = ["float", "ff"] if float_ok else ["ff"]
         self._regional_i = 0
 
         # correctness: higher rungs reachable from baseline via a supported kind
@@ -174,6 +183,11 @@ class RetryWalk:
         path — kept unchanged for regions that carry a bare ``double`` token)."""
         target_level = next_down(self.installed)
         if target_level is None or f"{self.installed}-to-{target_level}" not in TRANSITION_KINDS:
+            self._result = WalkResult(status="settled", final_precision=self.installed)
+            return None
+        # WI1/WI2 float-rung guard: a range-unsafe / pred-float-unsafe region may
+        # demote to ff but never to float — settle at the current (ff) rung.
+        if target_level == "float" and not self.float_ok:
             self._result = WalkResult(status="settled", final_precision=self.installed)
             return None
         # required_by floor: never demote a line below the precision a promoted

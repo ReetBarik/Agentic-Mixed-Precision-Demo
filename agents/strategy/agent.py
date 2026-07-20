@@ -35,7 +35,7 @@ from agents.strategy.iteration_log import IterationLogger
 from agents.strategy.models import (
     INTENT_CORRECTNESS, INTENT_SPEEDUP, LADDER, VIA_PLAIN, VIA_REGIONAL,
 )
-from agents.strategy.ranking import build_queues, error_threshold
+from agents.strategy.ranking import build_queues, error_threshold, load_flop_weights
 from agents.strategy.report import write_reports
 from agents.strategy.source_probe import region_has_bare_double
 from agents.strategy.walk import RetryWalk
@@ -110,6 +110,14 @@ class StrategyRun:
         self.region_final: dict[tuple, str] = {}
         self.region_status: dict[tuple, str] = {}
 
+        # -- Wave-3 report-prune telemetry (never silent: if a prune fires it is
+        #    counted here and surfaced in the report's speedup_summary) --
+        self.report_prunes = bool(getattr(cfg, "report_prunes", True))
+        self.n_skipped_range_unsafe = 0     # WI1: float rung skipped, range-unsafe
+        self.n_skipped_pred_float = 0       # WI2: float rung skipped, pred_float > thr
+        self.speedup_queue_flop_weighted = False  # WI3: flop-weight table available
+        self._flop_weights: dict | None = None    # loaded lazily in execute()
+
         # -- required_by ledger (cascade-chain per-line precision floor) --
         # keyed by line target key (file, line_start, line_end):
         #   chain_ids   -> the chain_id(s) requiring this line
@@ -126,7 +134,14 @@ class StrategyRun:
         regions, meta = load_regions(self.report_path)
         chains, chain_meta = load_chains(self.report_path)
         meta.update(chain_meta)
-        correctness_q, speedup_q = build_queues(regions, self.tolerance)
+        # WI3: load the flop-weight table (unless the prunes are killed) and rank
+        # the speedup queue by flop-weighted throughput.  Missing table → op_count
+        # fallback with a warning (handled in load_flop_weights).
+        if self.report_prunes:
+            self._flop_weights = load_flop_weights(self._ratio_multipliers_path())
+            self.speedup_queue_flop_weighted = self._flop_weights is not None
+        correctness_q, speedup_q = build_queues(
+            regions, self.tolerance, flop_weights=self._flop_weights)
         chain_q = self._rank_chains(chains)
 
         # every localizable region starts at the double baseline
@@ -206,6 +221,7 @@ class StrategyRun:
         """Drive one region target's retry walk to termination."""
         floor = self._floor_for(record.key) if mode == INTENT_SPEEDUP else None
         float_via = VIA_PLAIN
+        float_ok = True
         if mode == INTENT_SPEEDUP:
             # A region with a bare `double` token reaches float via the Patcher's
             # plain-edit rung (VIA_PLAIN); a template-typed region has no such token
@@ -216,14 +232,43 @@ class StrategyRun:
                 record.target.line_start, record.target.line_end,
                 cache=self._source_cache)
             float_via = VIA_PLAIN if has_bare else VIA_REGIONAL
+            float_ok = self._float_rung_ok(record)
         walk = RetryWalk(record, mode, self.tolerance, baseline="double",
-                         floor=floor, float_via=float_via)
+                         floor=floor, float_via=float_via, float_ok=float_ok)
         stopped, walk_digits = self._drive_walk(walk, record, chain=None)
         if stopped:
             self.region_final[record.key] = walk.installed
             self.region_status[record.key] = "unresolved"
             return
         self._finish_walk(record, walk.result(), walk_digits)
+
+    def _ratio_multipliers_path(self) -> Path:
+        """WI3 weight-table location: the config override, else the qcdloop
+        default (``runs/qcdloop/ratio_multipliers.json`` under the repo root)."""
+        override = getattr(self.cfg, "ratio_multipliers_path", None)
+        if override:
+            return Path(override)
+        return _REPO / "runs" / "qcdloop" / "ratio_multipliers.json"
+
+    def _float_rung_ok(self, record) -> bool:
+        """Wave-3 float-rung admission: both the range guard (WI1) and the
+        pred-float error gate (WI2) must pass for the walk to attempt ``->float``.
+
+        Order (per the inventory design): (1) range guard — a range-unsafe region
+        settles at ff; (2) error gate — pred_float > 10^-tol settles at ff; (3)
+        both pass — float is attempted.  Each skip is counted (never silent).
+        The kill-switch (``report_prunes=False``) disables both gates: float stays
+        admissible (Wave-2 behavior).
+        """
+        if not self.report_prunes:
+            return True
+        if not getattr(record, "value_range_ok_for_float", True):
+            self.n_skipped_range_unsafe += 1
+            return False
+        if record.predicted_rel_err_if_float > error_threshold(self.tolerance):
+            self.n_skipped_pred_float += 1
+            return False
+        return True
 
     def _process_chains(self, chain_q) -> None:
         """Drive the cascade-chain correctness phase with representative dedup.
@@ -655,6 +700,15 @@ class StrategyRun:
                 "regions_unresolved": n_unresolved,
                 "regions_chain_dedup_skipped": n_dedup,
                 "ceiling_regions": self.ceiling_regions,
+            },
+            # Wave-3 report-prune telemetry (never silent): WI1 range guard, WI2
+            # pred-float gate, WI3 flop-weight availability.  Surfaced by
+            # runs/qcdloop/analyze_calibration.py without extra wiring.
+            "speedup_summary": {
+                "report_prunes_enabled": self.report_prunes,
+                "regions_skipped_range_unsafe": self.n_skipped_range_unsafe,
+                "regions_skipped_pred_float": self.n_skipped_pred_float,
+                "speedup_queue_flop_weighted": self.speedup_queue_flop_weighted,
             },
             "precision_distribution": dist,
             "region_meta": meta,

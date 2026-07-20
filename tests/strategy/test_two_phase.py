@@ -30,8 +30,10 @@ def write_report(tmp_path, *, correctness=(), speedup=(), chains=()):
 
     * ``correctness`` — ``(integral, file, line)`` stable regions with high
       rel-err (correctness tier 4) that are ff-*unsafe* (never in the speedup q).
-    * ``speedup``     — ``(integral, file, line, op_count)`` stable, ff-safe,
-      low-rel-err regions (speedup queue only).
+    * ``speedup``     — ``(integral, file, line, op_count)`` stable, ff-safe AND
+      float-safe (``pred_float`` under the tol=10 bar so the Wave-3 WI2 float gate
+      does not pre-empt the ``ff->float`` step), low-rel-err regions (speedup queue
+      only).  Their float rung is exercised via the Validator, not the walk gate.
     * ``chains``      — ``(integral, chain_id, [(file, line), ...])`` cascade
       chains (correctness tier 2).
     """
@@ -44,7 +46,7 @@ def write_report(tmp_path, *, correctness=(), speedup=(), chains=()):
     for integ, file, line in correctness:
         _slot(integ)["regions"][f"{file}:{line}"] = _stable(1e-2, 1e-2, 1e-3, {"sub": 2})
     for integ, file, line, opc in speedup:
-        _slot(integ)["regions"][f"{file}:{line}"] = _stable(1e-7, 1e-12, 1e-16, {"mul": opc})
+        _slot(integ)["regions"][f"{file}:{line}"] = _stable(1e-12, 1e-12, 1e-16, {"mul": opc})
     for integ, cid, spans in chains:
         _slot(integ)["cascade_chains"].append({
             "kind": "cascade_chain", "chain_id": cid,
