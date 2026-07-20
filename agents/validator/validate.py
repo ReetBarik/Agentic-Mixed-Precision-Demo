@@ -35,9 +35,25 @@ stateless — Strategy owns the accumulated accepted-patch state (passed in via
       "dd_ref":          <git ref>,    # ddfun_enabled branch or SHA (archived)
       "accepted_patches": [<diff>, …], # unified diffs vs vanilla_headers (v1: [])
       "kokkos_root":     <path>,       # optional; defaults to ~/kokkos-install
+      "tail_samples":    {<B>: {...}}, # optional; per-integral adversarial-offset
+                                       # battery from the characterizer (see
+                                       # agents.validator.tail).  Absent → no tail
+                                       # battery (fail-open, random-only verdict).
     }
 
 ``snapshot`` schema::  {"seed": 12345, "sample_count": 100000}
+
+Tail battery
+------------
+When ``base_state["tail_samples"]`` is present, in addition to the n random samples
+the Validator re-tests the specific per-integral input offsets the characterizer
+flagged as adversarial (worst rel-err / cancellation-conditioning / magnitude
+extremes on the output components).  It first verifies each integral's
+``determinism_hash`` against the candidate binary (a mismatch raises
+:class:`agents.validator.tail.DeterminismMismatch` loudly — the offsets are only
+meaningful if the input generator is unchanged), then dispatches the offsets via
+``--sample-list`` and folds the worst tail precise-digits into the candidate's
+gating minimum.  A tail failure is therefore a hard reject, never a warning.
 """
 
 from __future__ import annotations
@@ -55,6 +71,7 @@ from pathlib import Path
 from agents.integrator_base import cache as _hashcache
 from agents.dd_integrator import agent as dd_integrator
 from agents.validator import runner
+from agents.validator import tail as _tail
 from agents.validator.coeffs import COMPONENT_LABELS, N_COMPONENTS
 from agents.validator.precise_digits import (
     MAX_DIGITS_F, effectively_zero, precise_digits_fast,
@@ -123,6 +140,13 @@ def validate(base_state: dict, candidate_patch: str | None, tolerance: float = 8
     work_tree_hash = _working_tree_hash(vanilla_headers, accepted)
     dd_tree_hash = _dd_tree_hash(dd_repo, dd_ref)
 
+    # Tail battery spec (characterization-derived): {integral: {determinism_hash,
+    # max_rel_err:[...], ...}}.  Fail-open — an old report predating the schema (or
+    # a caller that does not pass it) simply skips the tail battery and the verdict
+    # reverts to the random-only behavior (see _tail_battery).
+    tail_spec = base_state.get("tail_samples") or {}
+    tail_offsets = _tail.all_offsets(tail_spec) if tail_spec else []
+
     t0 = time.monotonic()
 
     # ---- 1. DD ground truth (cached per dd-tree-hash + snapshot) ----
@@ -139,12 +163,25 @@ def validate(base_state: dict, candidate_patch: str | None, tolerance: float = 8
             vanilla_headers, accepted, None, kokkos_root, scratch, total, chunk, workers),
     )
 
-    # ---- 3. candidate (never cached — the patch is the variable) ----
+    # ---- 3. candidate (never cached — the patch is the variable) + tail battery ----
+    # The tail battery reuses the candidate's own binary: determinism check
+    # (--dump-inputs) and adversarial-offset dispatch (--sample-list) run before
+    # the scratch tree is torn down.
+    cand_tail = None
     with tempfile.TemporaryDirectory(prefix="qcdloop_cand_") as scratch:
-        candidate_coeffs = _run_vanilla(
+        candidate_coeffs, cand_binary = _run_vanilla(
             vanilla_headers, accepted, candidate_patch, kokkos_root,
             Path(scratch), total, chunk, workers,
-            reuse_binary=reuse_binary, reuse_tree_hash=reuse_tree_hash)
+            reuse_binary=reuse_binary, reuse_tree_hash=reuse_tree_hash,
+            return_binary=True)
+        if tail_spec:
+            # Determinism check first (raises DeterminismMismatch loudly on drift).
+            tested = [b for b in tail_spec if tail_spec[b].get("determinism_hash")]
+            _tail.verify_determinism(
+                cand_binary,
+                {b: tail_spec[b]["determinism_hash"] for b in tested},
+                tested)
+            cand_tail = _tail.run_offsets(cand_binary, tail_offsets)
 
     # ---- 4. precise-digits vs DD, min + hotspot, persist ----
     if run_id is None:
@@ -155,8 +192,16 @@ def validate(base_state: dict, candidate_patch: str | None, tolerance: float = 8
     curr_stats = _score(current_coeffs, dd_ref_coeffs, "current",
                         out_dir if persist else None)
 
-    verdict, reason = _decide(cand_stats["min_precise_digits"],
-                              curr_stats["min_precise_digits"],
+    # ---- 5. tail battery: score candidate vs DD on the adversarial offsets, fold
+    #         its worst into the candidate's gating minimum (hard reject). ----
+    tail_stats = _tail_battery(
+        tail_spec, cand_tail, tail_offsets,
+        dd_repo, dd_ref, kokkos_root, dd_tree_hash)
+    cand_min = cand_stats["min_precise_digits"]
+    if tail_stats["tail_min_precise_digits"] is not None:
+        cand_min = min(cand_min, tail_stats["tail_min_precise_digits"])
+
+    verdict, reason = _decide(cand_min, curr_stats["min_precise_digits"],
                               max_regression, floor=tolerance)
 
     return {
@@ -165,7 +210,9 @@ def validate(base_state: dict, candidate_patch: str | None, tolerance: float = 8
         "max_regression": float(max_regression),  # delta guard vs current baseline
         "candidate": cand_stats,
         "current": curr_stats,
-        "delta": round(cand_stats["min_precise_digits"] - curr_stats["min_precise_digits"], 6),
+        "cand_min_precise_digits": round(cand_min, 4),  # combined random+tail min
+        "tail": tail_stats,
+        "delta": round(cand_min - curr_stats["min_precise_digits"], 6),
         "verdict_reason": reason,
         "snapshot": {"seed": seed, "sample_count": total},
         "run_id": run_id,
@@ -299,7 +346,8 @@ def _score(cand: runner.CoeffArrays, ref: runner.CoeffArrays, label: str,
 def _run_vanilla(vanilla_headers: Path, accepted: list, candidate_patch: str | None,
                  kokkos_root: Path, scratch: Path, total: int, chunk: int,
                  workers: int, *, reuse_binary: str | None = None,
-                 reuse_tree_hash: str | None = None) -> runner.CoeffArrays:
+                 reuse_tree_hash: str | None = None,
+                 return_binary: bool = False):
     """Copy the working tree, apply patches, build+run the vanilla driver.
 
     Build-fuse (CALIBRATION.md §Bug 5): when ``reuse_binary`` is given and
@@ -322,20 +370,159 @@ def _run_vanilla(vanilla_headers: Path, accepted: list, candidate_patch: str | N
         binary = Path(reuse_binary)
     else:
         binary = runner.build_driver(tree, "vanilla", scratch / "build", kokkos_root)
-    return runner.run_and_aggregate(binary, total, chunk=chunk, workers=workers)
+    coeffs = runner.run_and_aggregate(binary, total, chunk=chunk, workers=workers)
+    if return_binary:
+        return coeffs, binary
+    return coeffs
 
 
-def _run_dd(dd_repo: Path, dd_ref: str, kokkos_root: Path, scratch: Path,
-            total: int, chunk: int, workers: int) -> runner.CoeffArrays:
-    """Archive the ddfun_enabled DD tree, verify via the stub, build+run DD."""
+def _build_dd_binary(dd_repo: Path, dd_ref: str, kokkos_root: Path,
+                     scratch: Path) -> Path:
+    """Archive the ddfun_enabled DD tree, verify via the stub, build the DD driver."""
     tree = scratch / "ddtree"
     tree.mkdir(parents=True, exist_ok=True)
     _git_archive(dd_repo, dd_ref, "src/qcdloop", tree)
     dd_headers = tree / "src" / "qcdloop"
     # dd_integrator stub: verify the DD triple is present (raises loudly if not).
     dd_integrator.integrate(dd_headers, dd_headers / "boxGPU.h")
-    binary = runner.build_driver(dd_headers, "dd", scratch / "build", kokkos_root)
+    return runner.build_driver(dd_headers, "dd", scratch / "build", kokkos_root)
+
+
+def _run_dd(dd_repo: Path, dd_ref: str, kokkos_root: Path, scratch: Path,
+            total: int, chunk: int, workers: int) -> runner.CoeffArrays:
+    """Archive the ddfun_enabled DD tree, verify via the stub, build+run DD."""
+    binary = _build_dd_binary(dd_repo, dd_ref, kokkos_root, scratch)
     return runner.run_and_aggregate(binary, total, chunk=chunk, workers=workers)
+
+
+# ---------------------------------------------------------------------------
+# Tail battery: adversarial per-integral offsets, scored against the DD oracle
+# ---------------------------------------------------------------------------
+
+def _dd_tail_coeffs(dd_repo: Path, dd_ref: str, kokkos_root: Path,
+                    offsets: list[int], dd_tree_hash: str) -> dict:
+    """DD reference coeffs at the tail ``offsets`` (``{integral: {offset: [(hi,lo)×6]}}``).
+
+    Cached on ``(dd_tree_hash, offset-set)`` — the DD tree is pinned and the tail
+    offsets are fixed for a run, so this builds+runs the DD driver at most once per
+    Strategy run regardless of how many candidates are validated.
+    """
+    offsets = sorted({int(o) for o in offsets if int(o) >= 0})
+    if not offsets:
+        return {}
+    off_key = hashlib.sha256(
+        ",".join(str(o) for o in offsets).encode()).hexdigest()[:16]
+
+    def build_and_run(scratch: Path) -> dict:
+        binary = _build_dd_binary(dd_repo, dd_ref, kokkos_root, scratch)
+        return _tail.run_offsets(binary, offsets)
+
+    return _cached_or_run(role="dd_tail",
+                          key=f"{dd_tree_hash}_{off_key}",
+                          build_and_run=build_and_run)
+
+
+def _score_tail(cand_tail: dict, dd_tail: dict, tail_spec: dict) -> dict:
+    """Min precise-digits of candidate vs DD over each integral's tail offsets.
+
+    Mirrors :func:`_score`'s per-component metric (per-sample ``ref_scale`` = the
+    max |DD coeff| across the six components; analytic zeros report at the cap) but
+    over the sparse ``{integral: {offset: [(hi,lo)×6]}}`` tail structure.  Returns
+    the global tail minimum, its hotspot, the number of (integral, offset) samples
+    tested, and the integrals whose tail spec had to be skipped (fail-open).
+    """
+    best_min = MAX_DIGITS_F
+    hot = None
+    tested_samples = 0
+    covered: list[str] = []
+    skipped: list[str] = []
+
+    for integral in sorted(tail_spec):
+        offs = _tail.integral_offsets(tail_spec[integral])
+        c_by_off = cand_tail.get(integral, {})
+        d_by_off = dd_tail.get(integral, {})
+        if not offs or not c_by_off or not d_by_off:
+            skipped.append(integral)
+            continue
+        covered.append(integral)
+        for off in offs:
+            c_comps = c_by_off.get(off)
+            d_comps = d_by_off.get(off)
+            if c_comps is None or d_comps is None:
+                continue
+            ref_scale = 0.0
+            for (dh, dl) in d_comps:
+                m = abs(dh + dl)
+                if m > ref_scale:
+                    ref_scale = m
+            for c in range(N_COMPONENTS):
+                ch, cl = c_comps[c]
+                dh, dl = d_comps[c]
+                d = precise_digits_fast(ch, cl, dh, dl, ref_scale=ref_scale)
+                if d < best_min:
+                    best_min = d
+                    hot = {
+                        "integral": integral,
+                        "offset": off,
+                        "component": COMPONENT_LABELS[c],
+                        "reference_dd": dh + dl,
+                        "candidate": ch + cl,
+                        "precise_digits": round(d, 4),
+                    }
+            tested_samples += 1
+
+    return {
+        "tail_min_precise_digits": (round(best_min, 4) if tested_samples else None),
+        "tail_hotspot": hot,
+        "tail_samples_tested": tested_samples,
+        "integrals_covered": covered,
+        "integrals_skipped": skipped,
+    }
+
+
+_TAIL_WARNED: set[str] = set()
+
+
+def _tail_battery(tail_spec: dict, cand_tail: dict | None, offsets: list[int],
+                  dd_repo: Path, dd_ref: str, kokkos_root: Path,
+                  dd_tree_hash: str) -> dict:
+    """Run + score the tail battery; return telemetry folded into the verdict.
+
+    Fail-open: with no ``tail_spec`` (old report / caller opted out) or no offsets,
+    returns zeroed telemetry and ``tail_min_precise_digits=None`` so the verdict is
+    exactly the random-only behavior.  A one-time per-integral warning is emitted
+    for any integral whose tail spec is present but unusable.
+    """
+    empty = {
+        "tail_batteries_run": 0,
+        "tail_hash_mismatches": 0,   # a mismatch raises DeterminismMismatch upstream
+        "tail_samples_tested": 0,
+        "tail_offsets": 0,
+        "tail_min_precise_digits": None,
+        "tail_hotspot": None,
+        "integrals_covered": [],
+        "integrals_skipped": [],
+    }
+    if not tail_spec or not offsets or cand_tail is None:
+        return empty
+
+    dd_tail = _dd_tail_coeffs(dd_repo, dd_ref, kokkos_root, offsets, dd_tree_hash)
+    scored = _score_tail(cand_tail, dd_tail, tail_spec)
+    for integral in scored["integrals_skipped"]:
+        if integral not in _TAIL_WARNED:
+            _TAIL_WARNED.add(integral)
+            print(f"[validator] tail battery: skipping {integral} "
+                  f"(no usable tail spec / offsets)", flush=True)
+    return {
+        "tail_batteries_run": len(scored["integrals_covered"]),
+        "tail_hash_mismatches": 0,
+        "tail_samples_tested": scored["tail_samples_tested"],
+        "tail_offsets": len(offsets),
+        "tail_min_precise_digits": scored["tail_min_precise_digits"],
+        "tail_hotspot": scored["tail_hotspot"],
+        "integrals_covered": scored["integrals_covered"],
+        "integrals_skipped": scored["integrals_skipped"],
+    }
 
 
 def _cached_or_run(role: str, key: str, build_and_run) -> runner.CoeffArrays:

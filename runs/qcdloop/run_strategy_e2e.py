@@ -41,6 +41,7 @@ from agents.config import PipelineConfig, StrategyBudget, StrategyConfig  # noqa
 from agents.patcher.agent import make_patcher_fn  # noqa: E402
 from agents.strategy import agent as strategy_agent  # noqa: E402
 from agents.validator.agent import make_validator_fn  # noqa: E402
+from agents.validator import tail as _tail  # noqa: E402
 
 
 def _git(repo: Path, *args: str, check: bool = True) -> str:
@@ -140,12 +141,19 @@ def main(argv: list[str] | None = None) -> int:
     }
     patcher_fn = make_patcher_fn(build_config=build_config, config=PipelineConfig())
 
+    # Tail battery: if the report carries per-integral tail_samples (from
+    # emit_tail_offsets.py), thread them into base_state so the Validator re-tests
+    # the adversarial offsets on every candidate.  Absent → fail-open (random-only).
+    tail_samples = _tail.load_tail_samples(report)
+    tail_offsets = _tail.all_offsets(tail_samples) if tail_samples else []
+
     base_state = {
         "vanilla_headers": str(vanilla_headers),
         "dd_source_repo": args.dd_repo,
         "dd_ref": args.dd_ref,
         "accepted_patches": [],
         "kokkos_root": args.kokkos_root,
+        "tail_samples": tail_samples,
     }
     validator_fn = make_validator_fn(
         base_state, starting_sha, str(repo), tolerance=args.tolerance)
@@ -168,6 +176,11 @@ def main(argv: list[str] | None = None) -> int:
     print(f"  kokkos_root     : {args.kokkos_root}", flush=True)
     print(f"  tolerance       : {args.tolerance}", flush=True)
     print(f"  snapshot        : {snapshot}", flush=True)
+    if tail_samples:
+        print(f"  tail battery    : {len(tail_samples)} integrals, "
+              f"{len(tail_offsets)} distinct offsets (always-on)", flush=True)
+    else:
+        print("  tail battery    : none in report (fail-open, random-only)", flush=True)
     cap_c, cap_s = budget.phase_caps()
     print(f"  budget          : max_iters={budget.max_iters} "
           f"wall={args.max_wall_hours}h tokens={budget.max_llm_tokens}", flush=True)
