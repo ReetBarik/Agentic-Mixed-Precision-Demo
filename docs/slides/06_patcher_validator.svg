@@ -43,118 +43,124 @@
     <text x="115" y="62" text-anchor="middle" class="sub">headers, existing shims)</text>
   </g>
 
-  <!-- Sample handoff detail -->
-  <g transform="translate(300, 118)">
-    <rect x="0" y="0" width="240" height="54" rx="6" class="box"/>
-    <text x="10" y="20" class="code">candidate = {</text>
-    <text x="10" y="34" class="code">  region: R4, target: dd,</text>
-    <text x="10" y="48" class="code">  headers: [kernel.hpp], shims: [] }</text>
+  <!-- Candidate handoff detail (widened) -->
+  <g transform="translate(290, 108)">
+    <rect x="0" y="0" width="290" height="74" rx="6" class="box"/>
+    <text x="12" y="20" class="code">candidate = {</text>
+    <text x="12" y="36" class="code">  region:  R4,</text>
+    <text x="12" y="52" class="code">  target:  dd,</text>
+    <text x="12" y="68" class="code">  headers: [kernel.hpp], shims: [] }</text>
   </g>
 
   <!-- Arrow to Patcher loop -->
-  <path d="M270 145 L 300 145" class="edge"/>
-  <path d="M540 145 L 640 145" class="edge"/>
+  <path d="M270 145 L 290 145" class="edge"/>
+  <path d="M580 145 L 680 250" class="edge"/>
 
-  <!-- =================== MIDDLE: Patcher (LLM agent + retry loop) =================== -->
-  <g transform="translate(640, 90)">
+  <!-- =================== Precision containers ABOVE Patcher =================== -->
+  <g transform="translate(700, 100)">
+    <rect x="0" y="0" width="150" height="60" rx="8" class="integrator-box"/>
+    <text x="75" y="24" text-anchor="middle" class="lbl">dd_math.hpp</text>
+    <text x="75" y="44" text-anchor="middle" class="sub-sm">pair-of-doubles</text>
+  </g>
+  <g transform="translate(870, 100)">
+    <rect x="0" y="0" width="150" height="60" rx="8" class="integrator-box"/>
+    <text x="75" y="24" text-anchor="middle" class="lbl">ff_math.hpp</text>
+    <text x="75" y="44" text-anchor="middle" class="sub-sm">pair-of-floats</text>
+  </g>
+  <text x="860" y="180" text-anchor="middle" class="sub-sm" fill="#5b6475">precision containers (app-side headers)</text>
+
+  <!-- Arrows from containers into Patcher block (top edge of dashed pink) -->
+  <path d="M775 160 L 800 240" stroke="#475569" stroke-width="1.4" stroke-dasharray="3 3" fill="none" marker-end="url(#arrow)"/>
+  <path d="M945 160 L 920 240" stroke="#475569" stroke-width="1.4" stroke-dasharray="3 3" fill="none" marker-end="url(#arrow)"/>
+
+  <!-- =================== MIDDLE: Patcher (retry loop) =================== -->
+  <g transform="translate(660, 240)">
     <!-- Loop container -->
-    <rect x="0" y="0" width="360" height="220" rx="10" fill="none" stroke="#be185d" stroke-width="1.4" stroke-dasharray="4 3"/>
-    <text x="180" y="22" text-anchor="middle" class="lbl" fill="#be185d">Patcher retry loop  (k ≤ dr_k, default 60)</text>
+    <rect x="0" y="0" width="380" height="170" rx="10" fill="none" stroke="#be185d" stroke-width="1.4" stroke-dasharray="4 3"/>
+    <text x="190" y="22" text-anchor="middle" class="lbl" fill="#be185d">Patcher retry loop  (k ≤ dr_k, default 60)</text>
 
     <!-- LLM call -->
-    <rect x="20" y="40" width="130" height="70" rx="8" class="llm-box"/>
-    <text x="85" y="66" text-anchor="middle" class="lbl">LLM call</text>
-    <text x="85" y="84" text-anchor="middle" class="sub-sm">generate shim</text>
-    <text x="85" y="100" text-anchor="middle" class="sub-sm">R4_dd.hpp</text>
+    <rect x="30" y="42" width="140" height="72" rx="8" class="llm-box"/>
+    <text x="100" y="68" text-anchor="middle" class="lbl">LLM call</text>
+    <text x="100" y="86" text-anchor="middle" class="sub-sm">generate shim</text>
+    <text x="100" y="102" text-anchor="middle" class="sub-sm">R4_dd.hpp</text>
 
     <!-- Arrow to build -->
-    <path d="M150 75 L 200 75" class="edge"/>
+    <path d="M170 78 L 210 78" class="edge"/>
 
     <!-- Build attempt -->
-    <rect x="200" y="40" width="140" height="70" rx="8" class="build-box"/>
-    <text x="270" y="66" text-anchor="middle" class="lbl">Build</text>
-    <text x="270" y="84" text-anchor="middle" class="sub-sm">cmake + compile</text>
-    <text x="270" y="100" text-anchor="middle" class="sub-sm">with shim installed</text>
+    <rect x="210" y="42" width="140" height="72" rx="8" class="build-box"/>
+    <text x="280" y="68" text-anchor="middle" class="lbl">Build</text>
+    <text x="280" y="86" text-anchor="middle" class="sub-sm">cmake + compile</text>
+    <text x="280" y="102" text-anchor="middle" class="sub-sm">with shim installed</text>
 
-    <!-- Retry back arrow: if gen/build fails, loop back to LLM -->
-    <path d="M270 110 C 270 155, 85 155, 85 115" class="edge-loop"/>
-    <text x="180" y="150" text-anchor="middle" class="sub-sm" fill="#be185d">on gen/build failure → retry</text>
-
-    <!-- Success path exit label -->
-    <text x="180" y="188" text-anchor="middle" class="sub">On success: hand built binary to Validator.</text>
-    <text x="180" y="204" text-anchor="middle" class="sub-sm">On k = dr_k exhausted: report failure to strategy, region parks at safest known rung.</text>
+    <!-- Retry back arrow: loop back to LLM, path goes BELOW the boxes -->
+    <path d="M280 114 C 280 148, 100 148, 100 114" class="edge-loop"/>
   </g>
 
-  <!-- Integrators (dependency of the shim, on the side) -->
-  <g transform="translate(1020, 110)">
-    <rect x="0" y="0" width="220" height="90" rx="8" class="integrator-box"/>
-    <text x="110" y="22" text-anchor="middle" class="lbl">Precision containers</text>
-    <text x="110" y="42" text-anchor="middle" class="sub-sm">dd_math.hpp  (pair-of-doubles)</text>
-    <text x="110" y="58" text-anchor="middle" class="sub-sm">ff_math.hpp  (pair-of-floats)</text>
-    <text x="110" y="78" text-anchor="middle" class="sub-sm">app-side headers; shim #includes as needed</text>
-  </g>
-  <!-- Dependency arrow from containers to LLM box -->
-  <path d="M1020 155 L 800 155" stroke="#475569" stroke-width="1.4" stroke-dasharray="3 3" fill="none" marker-end="url(#arrow)"/>
-  <text x="920" y="148" text-anchor="middle" class="sub-sm" fill="#5b6475">provides overloadable ops</text>
+  <!-- Retry label OUTSIDE the loop container, to the right of the arc -->
+  <text x="1060" y="380" class="sub-sm" fill="#be185d">on gen/build</text>
+  <text x="1060" y="395" class="sub-sm" fill="#be185d">failure → retry</text>
 
-  <!-- =================== ARROW DOWN to Validator =================== -->
-  <path d="M820 310 L 820 355" class="edge"/>
-  <text x="830" y="335" class="sub">successful build</text>
+  <!-- On-success text OUTSIDE the Patcher container -->
+  <text x="850" y="440" text-anchor="middle" class="sub">On success: built binary → Validator.</text>
+  <text x="850" y="458" text-anchor="middle" class="sub-sm">On k = dr_k exhausted: report failure to strategy; region parks at safest known rung.</text>
 
-  <!-- =================== BOTTOM: Validator =================== -->
-  <g transform="translate(360, 355)">
+  <!-- =================== VERTICAL arrow down to Validator (candidate side, right end) =================== -->
+  <path d="M960 470 L 960 490" class="edge"/>
+
+  <!-- =================== BOTTOM: Validator (RIGHT-to-LEFT flow) =================== -->
+  <g transform="translate(300, 490)">
     <!-- Validator container -->
-    <rect x="0" y="0" width="600" height="230" rx="10" fill="none" stroke="#0f766e" stroke-width="1.4" stroke-dasharray="4 3"/>
-    <text x="300" y="22" text-anchor="middle" class="lbl" fill="#0f766e">Validator</text>
+    <rect x="0" y="0" width="760" height="200" rx="10" fill="none" stroke="#0f766e" stroke-width="1.4" stroke-dasharray="4 3"/>
+    <text x="380" y="22" text-anchor="middle" class="lbl" fill="#0f766e">Validator</text>
 
-    <!-- Candidate binary -->
-    <rect x="20" y="45" width="150" height="60" rx="8" class="build-box"/>
-    <text x="95" y="70" text-anchor="middle" class="lbl">Candidate binary</text>
-    <text x="95" y="88" text-anchor="middle" class="sub-sm">R4 = dd</text>
+    <!-- Verdict box (LEFTMOST) -->
+    <rect x="20" y="60" width="160" height="80" rx="8" class="verdict-accept-box"/>
+    <text x="100" y="86" text-anchor="middle" class="lbl">Verdict: accept</text>
+    <text x="100" y="106" text-anchor="middle" class="sub-sm">R4 rel-err ≤ tol</text>
+    <text x="100" y="122" text-anchor="middle" class="sub-sm">no regression</text>
 
-    <!-- DD oracle -->
-    <rect x="20" y="130" width="150" height="60" rx="8" class="oracle-box"/>
-    <text x="95" y="155" text-anchor="middle" class="lbl">dd oracle</text>
-    <text x="95" y="173" text-anchor="middle" class="sub-sm">all regions at dd</text>
+    <!-- Random battery (MIDDLE) -->
+    <rect x="240" y="45" width="220" height="120" rx="8" class="val-box"/>
+    <text x="350" y="72" text-anchor="middle" class="lbl">Random battery</text>
+    <text x="350" y="92" text-anchor="middle" class="sub-sm">n=1000 seeded inputs</text>
+    <text x="350" y="110" text-anchor="middle" class="sub-sm">per-output-component rel-err vs oracle</text>
+    <text x="350" y="132" text-anchor="middle" class="sub-sm">absolute floor: tol = 7</text>
+    <text x="350" y="150" text-anchor="middle" class="sub-sm">regression guard vs baseline</text>
 
-    <!-- Random battery -->
-    <rect x="210" y="45" width="180" height="145" rx="8" class="val-box"/>
-    <text x="300" y="72" text-anchor="middle" class="lbl">Random battery</text>
-    <text x="300" y="92" text-anchor="middle" class="sub-sm">n=1000 seeded inputs</text>
-    <text x="300" y="112" text-anchor="middle" class="sub-sm">per-output-component</text>
-    <text x="300" y="128" text-anchor="middle" class="sub-sm">rel-err vs oracle</text>
-    <text x="300" y="152" text-anchor="middle" class="sub-sm">absolute floor: tol = 7</text>
-    <text x="300" y="170" text-anchor="middle" class="sub-sm">regression guard vs</text>
-    <text x="300" y="186" text-anchor="middle" class="sub-sm">current baseline</text>
+    <!-- Candidate binary (TOP RIGHT) -->
+    <rect x="530" y="45" width="200" height="55" rx="8" class="build-box"/>
+    <text x="630" y="70" text-anchor="middle" class="lbl">Candidate binary</text>
+    <text x="630" y="88" text-anchor="middle" class="sub-sm">R4 = dd</text>
 
-    <!-- Arrows into battery -->
-    <path d="M170 75 L 210 100" class="edge"/>
-    <path d="M170 160 L 210 135" class="edge"/>
+    <!-- DD oracle (BOTTOM RIGHT) -->
+    <rect x="530" y="115" width="200" height="55" rx="8" class="oracle-box"/>
+    <text x="630" y="140" text-anchor="middle" class="lbl">dd oracle</text>
+    <text x="630" y="158" text-anchor="middle" class="sub-sm">all regions at dd</text>
 
-    <!-- Verdict box -->
-    <rect x="430" y="80" width="150" height="80" rx="8" class="verdict-accept-box"/>
-    <text x="505" y="106" text-anchor="middle" class="lbl">Verdict: accept</text>
-    <text x="505" y="126" text-anchor="middle" class="sub-sm">R4 rel-err ≤ tol</text>
-    <text x="505" y="142" text-anchor="middle" class="sub-sm">no regression</text>
-
-    <path d="M390 120 L 430 120" class="edge"/>
+    <!-- Right-to-left arrows: candidate & oracle → battery → verdict -->
+    <path d="M530 72 L 460 90" class="edge"/>
+    <path d="M530 142 L 460 130" class="edge"/>
+    <path d="M240 100 L 180 100" class="edge"/>
   </g>
 
-  <!-- =================== FEEDBACK: verdict back to strategy =================== -->
-  <path d="M600 495 C 400 495, 250 495, 155 190" class="edge-back"/>
-  <text x="180" y="470" class="lbl" style="fill:#166534">accept → R4 = dd</text>
-  <text x="180" y="488" class="sub-sm">strategy commits state, dequeues next</text>
+  <!-- =================== FEEDBACK arrow: verdict box UP to Strategy =================== -->
+  <path d="M380 550 C 300 550, 250 400, 155 180" class="edge-back"/>
+  <text x="230" y="380" class="lbl" style="fill:#166534">accept → R4 = dd</text>
+  <text x="230" y="398" class="sub-sm">strategy commits state,</text>
+  <text x="230" y="414" class="sub-sm">dequeues next region</text>
 
-  <!-- Error / non-accept summary -->
-  <g transform="translate(1000, 400)">
-    <rect x="0" y="0" width="240" height="180" rx="8" class="box"/>
+  <!-- =================== Possible outcomes summary (bottom left) =================== -->
+  <g transform="translate(40, 490)">
+    <rect x="0" y="0" width="240" height="200" rx="8" class="box"/>
     <text x="120" y="22" text-anchor="middle" class="lbl">Possible outcomes</text>
-    <text x="16" y="48" class="sub-sm">• accept — new precision committed</text>
-    <text x="16" y="66" class="sub-sm">  (shown above for R4 dd)</text>
-    <text x="16" y="90" class="sub-sm">• reject — region reverts to prior state</text>
-    <text x="16" y="108" class="sub-sm">  (tolerance floor or regression fired)</text>
-    <text x="16" y="132" class="sub-sm">• patcher failure — retry loop exhausted;</text>
-    <text x="16" y="150" class="sub-sm">  strategy records &amp; moves on, region</text>
-    <text x="16" y="168" class="sub-sm">  parks at safest known rung</text>
+    <text x="16" y="52" class="sub-sm">• accept — precision committed</text>
+    <text x="16" y="70" class="sub-sm">  (shown above for R4 = dd)</text>
+    <text x="16" y="98" class="sub-sm">• reject — region stays at prior state</text>
+    <text x="16" y="116" class="sub-sm">  (tolerance or regression fired)</text>
+    <text x="16" y="144" class="sub-sm">• patcher failure — retry loop</text>
+    <text x="16" y="162" class="sub-sm">  exhausted; region parks at</text>
+    <text x="16" y="180" class="sub-sm">  safest known rung</text>
   </g>
 </svg>
