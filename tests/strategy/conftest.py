@@ -6,12 +6,14 @@ from agents.strategy.models import RegionTarget
 
 def make_region(integral, file, line, signal_class, *, max_cond=1.0,
                 max_rel_err=1e-16, pred_float=1e-16, pred_ff=None, op_count=1,
-                variables=None):
+                variables=None, value_range_ok_for_float=True, ops=None):
     """Build a RegionRecord without going through report JSON.
 
     ``pred_ff`` defaults to ``pred_float`` (the conservative float-fallback the
     report loader applies to reports predating the ff signal), so existing tests
-    that set only ``pred_float`` keep their admission behavior.
+    that set only ``pred_float`` keep their admission behavior.  ``ops`` defaults
+    to ``{"mul": op_count}`` so the flop-weight score is well-defined without
+    every caller spelling out an op mix.
     """
     return RegionRecord(
         integral=integral,
@@ -24,4 +26,6 @@ def make_region(integral, file, line, signal_class, *, max_cond=1.0,
         predicted_rel_err_if_ff=pred_float if pred_ff is None else pred_ff,
         op_count=op_count,
         n=100,
+        value_range_ok_for_float=value_range_ok_for_float,
+        ops=dict(ops) if ops is not None else {"mul": op_count},
     )

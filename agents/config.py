@@ -12,6 +12,15 @@ AUTH_TOKEN = (
 # Argo model name — check available models via `run-argo.sh` if this needs updating
 DEFAULT_MODEL = os.environ.get("ARGO_MODEL", "claudeopus47")
 
+# Wave-3 report-field prunes (WI1 float range guard, WI2 pred-float gate, WI3
+# flop-weighted speedup ordering) ride together and are ON in production.  The
+# single emergency kill-switch disables all three at once; there are deliberately
+# NO per-prune toggles.  Set STRATEGY_DISABLE_REPORT_PRUNES=1 to roll back.
+STRATEGY_REPORT_PRUNES = (
+    os.environ.get("STRATEGY_DISABLE_REPORT_PRUNES", "").strip().lower()
+    not in ("1", "true", "yes", "on")
+)
+
 
 @dataclass
 class StrategyBudget:
@@ -67,6 +76,14 @@ class StrategyConfig:
 
     tolerance: float = 10.0
     budget: StrategyBudget = field(default_factory=StrategyBudget)
+    # Wave-3 report-field prunes (WI1/WI2/WI3), ON by default in production; the
+    # STRATEGY_DISABLE_REPORT_PRUNES env var flips the whole set off (no per-prune
+    # flags — they are designed to ride together).
+    report_prunes: bool = field(default_factory=lambda: STRATEGY_REPORT_PRUNES)
+    # Flop-weight table for WI3 speedup ordering (ratio_multipliers.json).  None →
+    # defaults to ``runs/qcdloop/ratio_multipliers.json`` under the repo root; a
+    # missing file falls back to op_count ordering with a warning.
+    ratio_multipliers_path: Path | None = None
     # 60 (was 20): the cascade-chain phase produces long non-accept streaks of
     # llm_gen_failed which don't consume budget but DO bump the DR counter, so 20
     # tripped `partial` before the correctness budget could bind even after the

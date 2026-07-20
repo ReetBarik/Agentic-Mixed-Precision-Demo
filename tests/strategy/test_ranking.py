@@ -1,9 +1,17 @@
 """Ranking function — the two class-driven queues (design: "Ranking function")."""
 
+import json
+
 from agents.strategy.ranking import (
     build_correctness_queue, build_queues, build_speedup_queue, error_threshold,
+    flop_weighted_score, load_flop_weights,
 )
 from tests.strategy.conftest import make_region
+
+# Minimal flop-weight table (shape of ratio_multipliers.json): log ≫ add in ff.
+_WEIGHTS = {"native_double": {"add": 1, "mul": 1, "div": 1, "log": 20},
+            "native_float": {"add": 1, "mul": 1, "div": 1, "log": 20},
+            "ff": {"add": 11, "mul": 32, "div": 42, "log": 2350}}
 
 TOL = 10.0
 ABOVE = 1e-8   # > 1e-10 threshold → needs correctness
@@ -101,3 +109,52 @@ def test_speedup_excludes_correctness_regions():
 def test_speedup_nonstable_excluded():
     lc = make_region("B1", "f.h", 1, "local_cancellation", pred_float=BELOW, op_count=50)
     assert build_speedup_queue([lc], TOL) == []
+
+
+# ---------------------------------------------------------------------------
+# Wave-3 WI3: flop-weighted speedup ordering
+# ---------------------------------------------------------------------------
+
+def test_flop_weight_reorders_over_raw_op_count():
+    # equal op_count (10) but different mix: log-heavy vs add-heavy.  Raw op_count
+    # ties → location; flop-weight (ff col: log=2350 ≫ add=11) puts log-heavy first.
+    add_heavy = make_region("B1", "a.h", 1, "stable", pred_ff=BELOW,
+                            op_count=10, ops={"add": 10})
+    log_heavy = make_region("B1", "z.h", 9, "stable", pred_ff=BELOW,
+                            op_count=10, ops={"log": 9, "add": 1})
+    # raw op_count order: tie broken by location → a.h:1 before z.h:9
+    raw = build_speedup_queue([log_heavy, add_heavy], TOL)
+    assert [r.target.location for r in raw] == ["a.h:1", "z.h:9"]
+    # flop-weighted: log-heavy dominates despite the later location
+    weighted = build_speedup_queue([add_heavy, log_heavy], TOL, flop_weights=_WEIGHTS)
+    assert [r.target.location for r in weighted] == ["z.h:9", "a.h:1"]
+
+
+def test_flop_weighted_score_uses_target_column():
+    r = make_region("B1", "f.h", 1, "stable", ops={"log": 2, "add": 3})
+    # ff column: 2*2350 + 3*11 = 4733
+    assert flop_weighted_score(r, _WEIGHTS, "ff") == 4733
+    # float column (native_float): 2*20 + 3*1 = 43
+    assert flop_weighted_score(r, _WEIGHTS, "float") == 43
+    # unknown op defaults to weight 1
+    r2 = make_region("B1", "f.h", 2, "stable", ops={"weirdop": 4})
+    assert flop_weighted_score(r2, _WEIGHTS, "ff") == 4
+
+
+def test_build_speedup_falls_back_to_op_count_without_weights():
+    small = make_region("B1", "f.h", 1, "stable", pred_ff=BELOW, op_count=3)
+    big = make_region("B1", "f.h", 2, "stable", pred_ff=BELOW, op_count=99)
+    q = build_speedup_queue([small, big], TOL, flop_weights=None)
+    assert [r.op_count for r in q] == [99, 3]
+
+
+def test_load_flop_weights_missing_returns_none(tmp_path):
+    assert load_flop_weights(tmp_path / "nope.json") is None
+    assert load_flop_weights(None) is None
+
+
+def test_load_flop_weights_reads_table(tmp_path):
+    p = tmp_path / "ratio.json"
+    p.write_text(json.dumps(_WEIGHTS))
+    w = load_flop_weights(p)
+    assert w["ff"]["log"] == 2350

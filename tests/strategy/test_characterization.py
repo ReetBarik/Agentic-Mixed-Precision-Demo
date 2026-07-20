@@ -98,6 +98,63 @@ def test_op_count_from_ops_sum(tmp_path):
 
 
 # ---------------------------------------------------------------------------
+# Wave-3 WI1: value_range_ok_for_float  +  WI3: per-op mix
+# ---------------------------------------------------------------------------
+
+def test_value_range_ok_loaded(tmp_path):
+    integrals = {"A": {"regions": {
+        "ok.h:1": {**_region("stable"), "value_range_ok_for_float": True},
+        "no.h:2": {**_region("stable"), "value_range_ok_for_float": False},
+    }}}
+    regs, _ = load_regions(_report(tmp_path, integrals))
+    by = {r.target.location: r.value_range_ok_for_float for r in regs}
+    assert by == {"ok.h:1": True, "no.h:2": False}
+
+
+def test_value_range_fails_open_true_when_absent(tmp_path):
+    # legacy report with no flag → default True (do not gate), warns once.
+    integrals = {"A": {"regions": {"f.h:10": _region("stable")}}}
+    regs, _ = load_regions(_report(tmp_path, integrals))
+    assert regs[0].value_range_ok_for_float is True
+
+
+def test_value_range_merge_unsafe_if_unsafe_anywhere(tmp_path):
+    # same line: safe in A, unsafe in B → merged worst-case = unsafe (False).
+    integrals = {
+        "A": {"regions": {"f.h:10": {**_region("stable"),
+                                     "value_range_ok_for_float": True}}},
+        "B": {"regions": {"f.h:10": {**_region("stable"),
+                                     "value_range_ok_for_float": False}}},
+    }
+    regs, meta = load_regions(_report(tmp_path, integrals))
+    assert meta["n_regions"] == 1
+    assert regs[0].value_range_ok_for_float is False
+
+
+def test_ops_mix_loaded_and_merged_worst_case(tmp_path):
+    # per-op mix carried; merge takes element-wise max across integrals.
+    integrals = {
+        "A": {"regions": {"f.h:10": _region("stable", ops={"mul": 2, "log": 1})}},
+        "B": {"regions": {"f.h:10": _region("stable", ops={"mul": 5, "div": 3})}},
+    }
+    regs, _ = load_regions(_report(tmp_path, integrals))
+    assert regs[0].ops == {"mul": 5, "log": 1, "div": 3}
+
+
+def test_chain_carries_range_flag_and_ops(tmp_path):
+    ch = _chain("cascade_IX_a_1", [("B2m.h", 355)], ops={"log": 2, "sub": 4})
+    ch["value_range_ok_for_float"] = False
+    integrals = {"IX": {"regions": {}, "cascade_chains": [ch]}}
+    chains, _ = load_chains(_report(tmp_path, integrals))
+    c = chains[0]
+    assert c.value_range_ok_for_float is False
+    assert c.ops == {"log": 2, "sub": 4}
+    # walk_record propagates both
+    wr = c.walk_record()
+    assert wr.value_range_ok_for_float is False and wr.ops == {"log": 2, "sub": 4}
+
+
+# ---------------------------------------------------------------------------
 # cascade chains
 # ---------------------------------------------------------------------------
 

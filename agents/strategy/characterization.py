@@ -15,6 +15,7 @@ counted (``non_localizable_skipped``).
 from __future__ import annotations
 
 import json
+import sys
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -28,6 +29,30 @@ _SEVERITY = {
     "stable": 0, "log_near_root": 1, "cancellation_cascade": 2,
     "local_cancellation": 3,
 }
+
+# One-time fail-open warning when a report predates the
+# ``value_range_ok_for_float`` field (Wave-3 WI1).  A missing field defaults to
+# ``True`` (do not gate) so an older report never *silently* disables the
+# float-rung range guard — it warns once so the report gets regenerated.
+_warned_missing_range_flag = False
+
+
+def _range_ok_for_float(region: dict) -> bool:
+    """Read ``value_range_ok_for_float`` with fail-open default ``True``.
+
+    Reports predating the field (Wave-3 WI1) carry no range signal; defaulting to
+    ``True`` means the float-rung guard does not fire — the historical behavior.
+    Warns once so the omission is visible and future reports get regenerated.
+    """
+    global _warned_missing_range_flag
+    if "value_range_ok_for_float" not in region:
+        if not _warned_missing_range_flag:
+            _warned_missing_range_flag = True
+            print("[strategy] report lacks `value_range_ok_for_float`; float-rung "
+                  "range guard fails open (default true) — regenerate the report "
+                  "to enable the WI1 prune", file=sys.stderr)
+        return True
+    return bool(region.get("value_range_ok_for_float"))
 
 
 @dataclass
@@ -53,6 +78,8 @@ class ChainRecord:
     op_count: int
     n: int
     variables: list[str] = field(default_factory=list)
+    value_range_ok_for_float: bool = True
+    ops: dict[str, int] = field(default_factory=dict)
 
     def walk_record(self) -> "RegionRecord":
         """A single-target ``RegionRecord`` the retry walk drives on.
@@ -69,7 +96,9 @@ class ChainRecord:
             max_cond=self.max_cond, max_rel_err=self.max_rel_err,
             predicted_rel_err_if_float=self.predicted_rel_err_if_float,
             predicted_rel_err_if_ff=self.predicted_rel_err_if_ff,
-            op_count=self.op_count, n=self.n, integrals=[self.integral])
+            op_count=self.op_count, n=self.n, integrals=[self.integral],
+            value_range_ok_for_float=self.value_range_ok_for_float,
+            ops=dict(self.ops))
 
 
 @dataclass
@@ -93,6 +122,13 @@ class RegionRecord:
     op_count: int
     n: int
     integrals: list[str] = field(default_factory=list)
+    # Wave-3 WI1: float exponent-range safety flag (fail-open true).  A region
+    # flagged false may still be demoted to ff but MUST NOT be walked to float —
+    # the error model (`predicted_rel_err_if_*`) is blind to over/underflow.
+    value_range_ok_for_float: bool = True
+    # Wave-3 WI3: per-op dynamic mix (op_kind -> count).  ``op_count`` is its
+    # sum; the mix drives the flop-weighted speedup ordering (div/log ≫ add).
+    ops: dict[str, int] = field(default_factory=dict)
 
     @property
     def key(self) -> tuple[str, int, int]:
@@ -170,7 +206,7 @@ def load_chains(report_path: str | Path) -> tuple[list[ChainRecord], dict]:
                     variables=list(chain.get("region_local_vars", []) or [])))
             if not lines:
                 continue
-            ops = chain.get("ops", {}) or {}
+            ops = _op_mix(chain)
             pred_float = float(chain.get("predicted_rel_err_if_float", 0.0) or 0.0)
             chains.append(ChainRecord(
                 integral=integral,
@@ -183,7 +219,9 @@ def load_chains(report_path: str | Path) -> tuple[list[ChainRecord], dict]:
                 predicted_rel_err_if_ff=_pred_ff(chain, pred_float),
                 op_count=int(sum(ops.values())),
                 n=int(chain.get("n", 0) or 0),
-                variables=list(chain.get("region_local_vars", []) or [])))
+                variables=list(chain.get("region_local_vars", []) or []),
+                value_range_ok_for_float=_range_ok_for_float(chain),
+                ops=ops))
     return chains, {"n_chains": len(chains)}
 
 
@@ -215,8 +253,14 @@ def _region_vars(region: dict) -> list[str]:
     return list(region.get("prov_vars", []) or [])
 
 
-def _one_record(integral: str, region: dict, file: str, line: int) -> RegionRecord:
+def _op_mix(region: dict) -> dict[str, int]:
+    """Per-op dynamic counts (op_kind -> int), sanitized (Wave-3 WI3)."""
     ops = region.get("ops", {}) or {}
+    return {str(k): int(v) for k, v in ops.items()}
+
+
+def _one_record(integral: str, region: dict, file: str, line: int) -> RegionRecord:
+    ops = _op_mix(region)
     pred_float = float(region.get("predicted_rel_err_if_float", 0.0) or 0.0)
     return RegionRecord(
         integral=integral,
@@ -230,6 +274,8 @@ def _one_record(integral: str, region: dict, file: str, line: int) -> RegionReco
         op_count=int(sum(ops.values())),
         n=int(region.get("n", 0) or 0),
         integrals=[integral],
+        value_range_ok_for_float=_range_ok_for_float(region),
+        ops=ops,
     )
 
 
@@ -258,6 +304,12 @@ def _merge_by_line(raw: list[tuple[str, dict, str, int]]) -> list[RegionRecord]:
             cur.predicted_rel_err_if_ff, rec.predicted_rel_err_if_ff)
         cur.op_count = max(cur.op_count, rec.op_count)
         cur.n = max(cur.n, rec.n)
+        # WI1: float range-unsafe if unsafe in ANY integral (worst-case safety).
+        cur.value_range_ok_for_float = (
+            cur.value_range_ok_for_float and rec.value_range_ok_for_float)
+        # WI3: worst-case per-op mix (element-wise max across integrals).
+        for op, cnt in rec.ops.items():
+            cur.ops[op] = max(cur.ops.get(op, 0), cnt)
         if _SEVERITY.get(rec.signal_class, 0) > _SEVERITY.get(cur.signal_class, 0):
             cur.signal_class = rec.signal_class
         # union variables preserving order
