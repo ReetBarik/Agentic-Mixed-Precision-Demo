@@ -38,7 +38,7 @@
 
   <!-- Title -->
   <text x="40" y="44" class="title">Strategy walk — correctness phase</text>
-  <text x="40" y="66" class="sub">For each region: attempt a demotion or, if unsafe at current precision, an up-bump. Accept moves the region; reject leaves it in place.</text>
+  <text x="40" y="66" class="sub">For each region: attempt a demotion or, if unsafe at current precision, an up-bump.</text>
 
   <!-- ============ LEFT: precision ladder ============ -->
   <text x="40" y="108" class="h">Precision ladder</text>
@@ -75,7 +75,6 @@
     <path d="M215 135 C 330 135, 330 210, 215 210" class="arrow-speed" marker-end="url(#arrow-speed-m)"/>
     <path d="M215 135 C 380 135, 380 300, 215 300" class="arrow-speed" marker-end="url(#arrow-speed-m)"/>
     <text x="340" y="188" class="lbl" fill="#64748b">speedup</text>
-    <text x="340" y="204" class="sub" fill="#64748b">(slide 05)</text>
 
     <!-- Note under the ladder -->
     <text x="0" y="380" class="sub">↑ safer / slower</text>
@@ -196,7 +195,7 @@
       <text x="0" y="0" class="sub-sm">Each (region, target) pair tried at most once per run — no</text>
       <text x="0" y="16" class="sub-sm">re-attempts, no rollback.</text>
       <text x="0" y="38" class="sub-sm">R4's dd acceptance seeds an already-safer starting point;</text>
-      <text x="0" y="54" class="sub-sm">speedup phase (slide 05) still attempts double → float on it.</text>
+      <text x="0" y="54" class="sub-sm">the speedup phase still attempts double → float on it.</text>
       <text x="0" y="76" class="sub-sm">All other regions become speedup candidates from double baseline.</text>
     </g>
   </g>
