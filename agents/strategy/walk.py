@@ -85,12 +85,14 @@ class RetryWalk:
         self.tolerance = tolerance
         self.baseline = baseline
         self.installed = baseline
-        # Wave-3 WI1/WI2: float-rung guard.  When False the speedup walk stops at
-        # ff and never attempts ``->float`` — the region is range-unsafe
-        # (`value_range_ok_for_float`) or its `predicted_rel_err_if_float` exceeds
-        # tolerance.  Orthogonal to the ff error gate that admits the region into
-        # the speedup queue; correctness walks never target float, so this is inert
-        # there.  Defaults True (historical behavior / fail-open).
+        # Wave-3 WI1: float-rung guard.  When False the speedup walk stops at ff
+        # and never attempts ``->float`` — the region is range-unsafe
+        # (`value_range_ok_for_float`), a float over/underflow risk the Validator's
+        # finite sample can miss.  (WI2/`predicted_rel_err_if_float` is telemetry-
+        # only and does NOT feed this flag — see agent._float_rung_ok.)  Orthogonal
+        # to the ff error gate that admits the region into the speedup queue;
+        # correctness walks never target float, so this is inert there.  Defaults
+        # True (historical behavior / fail-open).
         self.float_ok = float_ok
         # Speedup floor (design "Speedup floor rule"): the lowest precision this
         # region may be demoted to, because a promoted cascade chain still claims

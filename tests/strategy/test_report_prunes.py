@@ -1,11 +1,12 @@
-"""Wave-3 report-field prunes end-to-end (WI1 range guard, WI2 pred-float gate,
-WI3 flop-weighted ordering) driven through the real Strategy agent with a scripted
-Patcher/Validator (no git), asserting both the walk behavior AND the never-silent
-``speedup_summary`` telemetry.
+"""Wave-3 report-field prunes end-to-end (WI1 range guard [HARD gate], WI2
+pred-float [TELEMETRY-ONLY], WI3 flop-weighted ordering) driven through the real
+Strategy agent with a scripted Patcher/Validator (no git), asserting both the walk
+behavior AND the never-silent ``speedup_summary`` telemetry.
 
 The Validator accepts every demotion (double->ff, ff->float, double->float) so the
-ONLY thing that stops the walk short of float is a Wave-3 gate — making the gate's
-effect observable purely from which kinds the Patcher was asked to build.
+ONLY thing that stops the walk short of float is the WI1 hard gate — making its
+effect observable purely from which kinds the Patcher was asked to build. WI2 does
+NOT stop the walk (telemetry-only); it only increments a counter.
 """
 
 import json
@@ -91,7 +92,7 @@ def test_wi1_range_unsafe_stops_at_ff(tmp_path):
     assert not any(k.endswith("-to-float") for k in kinds)
     ss = rep["speedup_summary"]
     assert ss["regions_skipped_range_unsafe"] == 1
-    assert ss["regions_skipped_pred_float"] == 0
+    assert ss["regions_flagged_pred_float"] == 0
     assert rep["precision_distribution"]["ff"] == 1
 
 
@@ -113,37 +114,44 @@ def test_wi1_fail_open_when_field_missing(tmp_path):
 
 
 # ---------------------------------------------------------------------------
-# WI2 — predicted_rel_err_if_float float-step gate
+# WI2 — predicted_rel_err_if_float: TELEMETRY-ONLY (flags, does not gate float)
+#
+# pred_float is a local per-region bound; the Validator accepts on global
+# min-precise-digits, so a hard pred_float gate over-blocks float with no
+# correctness benefit (13/86 CALIBRATION_v2 float regions had pred_float 6–14%
+# yet lost 0 global digits). WI2 therefore only *counts* the flag; float is still
+# attempted and the Validator decides.
 # ---------------------------------------------------------------------------
 
-def test_wi2_pred_float_above_thr_skips_float(tmp_path):
-    # pred_ff safe (admitted to speedup q) but pred_float > 1e-10 → float skipped.
+def test_wi2_pred_float_above_thr_flagged_not_skipped(tmp_path):
+    # pred_float > 1e-7: float is STILL attempted (WI2 telemetry-only), just flagged.
     report = _write(tmp_path, {"f.h:1": _stable(pf=1e-7, pff=1e-30, ops={"mul": 5},
                                                 range_ok=True)})
     rep, kinds = _run(tmp_path, report)
-    assert "double-to-ff" in kinds
-    assert not any(k.endswith("-to-float") for k in kinds)
+    assert any(k.endswith("-to-float") for k in kinds)     # NOT skipped
     ss = rep["speedup_summary"]
-    assert ss["regions_skipped_pred_float"] == 1
+    assert ss["regions_flagged_pred_float"] == 1
     assert ss["regions_skipped_range_unsafe"] == 0
 
 
-def test_wi2_pred_float_below_thr_attempts_float(tmp_path):
+def test_wi2_pred_float_below_thr_not_flagged(tmp_path):
     report = _write(tmp_path, {"f.h:1": _stable(pf=1e-12, pff=1e-30, ops={"mul": 5},
                                                 range_ok=True)})
     rep, kinds = _run(tmp_path, report)
     assert any(k.endswith("-to-float") for k in kinds)
-    assert rep["speedup_summary"]["regions_skipped_pred_float"] == 0
+    assert rep["speedup_summary"]["regions_flagged_pred_float"] == 0
 
 
-def test_wi1_precedence_over_wi2(tmp_path):
-    # range-unsafe AND pred_float-unsafe → counted as range (WI1 checked first).
+def test_wi1_short_circuits_wi2_flag(tmp_path):
+    # range-unsafe AND pred_float-high → WI1 skips float first; because float is
+    # never attempted, WI2's pred_float flag is NOT counted (skip subsumes flag).
     report = _write(tmp_path, {"f.h:1": _stable(pf=1e-7, pff=1e-30, ops={"mul": 5},
                                                 range_ok=False)})
-    rep, _ = _run(tmp_path, report)
+    rep, kinds = _run(tmp_path, report)
+    assert not any(k.endswith("-to-float") for k in kinds)
     ss = rep["speedup_summary"]
     assert ss["regions_skipped_range_unsafe"] == 1
-    assert ss["regions_skipped_pred_float"] == 0
+    assert ss["regions_flagged_pred_float"] == 0
 
 
 # ---------------------------------------------------------------------------

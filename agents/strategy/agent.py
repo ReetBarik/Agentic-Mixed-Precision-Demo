@@ -113,8 +113,15 @@ class StrategyRun:
         # -- Wave-3 report-prune telemetry (never silent: if a prune fires it is
         #    counted here and surfaced in the report's speedup_summary) --
         self.report_prunes = bool(getattr(cfg, "report_prunes", True))
-        self.n_skipped_range_unsafe = 0     # WI1: float rung skipped, range-unsafe
-        self.n_skipped_pred_float = 0       # WI2: float rung skipped, pred_float > thr
+        # WI1 is a HARD gate: value_range_ok_for_float guards float over/underflow,
+        # a failure mode the Validator's finite sample can miss → skip float.
+        self.n_skipped_range_unsafe = 0
+        # WI2 is TELEMETRY-ONLY: predicted_rel_err_if_float is a *local* per-region
+        # error bound, but the Validator accepts on the *global* min-precise-digits
+        # (which a local region often does not bind — see PIPELINE_v1.md §WI2), so a
+        # hard pred_float gate over-blocks float with no correctness benefit. We
+        # revive the field and count it; the Validator stays the authority.
+        self.n_flagged_pred_float = 0
         self.speedup_queue_flop_weighted = False  # WI3: flop-weight table available
         self._flop_weights: dict | None = None    # loaded lazily in execute()
 
@@ -251,23 +258,30 @@ class StrategyRun:
         return _REPO / "runs" / "qcdloop" / "ratio_multipliers.json"
 
     def _float_rung_ok(self, record) -> bool:
-        """Wave-3 float-rung admission: both the range guard (WI1) and the
-        pred-float error gate (WI2) must pass for the walk to attempt ``->float``.
+        """Wave-3 float-rung admission for a speedup region.
 
-        Order (per the inventory design): (1) range guard — a range-unsafe region
-        settles at ff; (2) error gate — pred_float > 10^-tol settles at ff; (3)
-        both pass — float is attempted.  Each skip is counted (never silent).
-        The kill-switch (``report_prunes=False``) disables both gates: float stays
-        admissible (Wave-2 behavior).
+        WI1 (value_range_ok_for_float) is a HARD gate: a range-unsafe region never
+        attempts float (it settles at ff) — this guards float over/underflow, which
+        the Validator's finite (n=1000) sample can miss at untested inputs.
+
+        WI2 (predicted_rel_err_if_float) is TELEMETRY-ONLY: pred_float is a *local*
+        per-region error bound that systematically over-predicts vs the Validator's
+        *global* min-precise-digits accept criterion (a region can carry 6–14%
+        predicted local error yet lose 0 global digits when it does not touch the
+        binding ill-conditioned hotspot — see PIPELINE_v1.md §WI2). Hard-gating on
+        it would regress float acceptance with no correctness benefit, so we only
+        *flag* it. The Validator remains the sole authority on precision.
+
+        The kill-switch (``report_prunes=False``) disables the WI1 gate too.
         """
         if not self.report_prunes:
             return True
         if not getattr(record, "value_range_ok_for_float", True):
             self.n_skipped_range_unsafe += 1
-            return False
+            return False          # WI1 hard gate — do not attempt float
+        # WI2 telemetry: float IS still attempted; we only count the flag.
         if record.predicted_rel_err_if_float > error_threshold(self.tolerance):
-            self.n_skipped_pred_float += 1
-            return False
+            self.n_flagged_pred_float += 1
         return True
 
     def _process_chains(self, chain_q) -> None:
@@ -701,13 +715,13 @@ class StrategyRun:
                 "regions_chain_dedup_skipped": n_dedup,
                 "ceiling_regions": self.ceiling_regions,
             },
-            # Wave-3 report-prune telemetry (never silent): WI1 range guard, WI2
-            # pred-float gate, WI3 flop-weight availability.  Surfaced by
-            # runs/qcdloop/analyze_calibration.py without extra wiring.
+            # Wave-3 report-prune telemetry (never silent): WI1 range guard (hard),
+            # WI2 pred-float flag (telemetry-only), WI3 flop-weight availability.
+            # Surfaced by runs/qcdloop/analyze_calibration.py without extra wiring.
             "speedup_summary": {
                 "report_prunes_enabled": self.report_prunes,
                 "regions_skipped_range_unsafe": self.n_skipped_range_unsafe,
-                "regions_skipped_pred_float": self.n_skipped_pred_float,
+                "regions_flagged_pred_float": self.n_flagged_pred_float,
                 "speedup_queue_flop_weighted": self.speedup_queue_flop_weighted,
             },
             "precision_distribution": dist,

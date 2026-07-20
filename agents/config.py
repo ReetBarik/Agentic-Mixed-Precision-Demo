@@ -12,10 +12,11 @@ AUTH_TOKEN = (
 # Argo model name — check available models via `run-argo.sh` if this needs updating
 DEFAULT_MODEL = os.environ.get("ARGO_MODEL", "claudeopus47")
 
-# Wave-3 report-field prunes (WI1 float range guard, WI2 pred-float gate, WI3
-# flop-weighted speedup ordering) ride together and are ON in production.  The
-# single emergency kill-switch disables all three at once; there are deliberately
-# NO per-prune toggles.  Set STRATEGY_DISABLE_REPORT_PRUNES=1 to roll back.
+# Wave-3 report-field prunes (WI1 float range guard [hard gate], WI2 pred-float
+# [telemetry-only], WI3 flop-weighted speedup ordering) ride together and are ON in
+# production.  The single emergency kill-switch disables all three at once; there
+# are deliberately NO per-prune toggles.  Set STRATEGY_DISABLE_REPORT_PRUNES=1 to
+# roll back.
 STRATEGY_REPORT_PRUNES = (
     os.environ.get("STRATEGY_DISABLE_REPORT_PRUNES", "").strip().lower()
     not in ("1", "true", "yes", "on")
