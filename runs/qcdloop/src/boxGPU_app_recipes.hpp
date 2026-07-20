@@ -39,7 +39,9 @@
 #include <functional>
 #include <iostream>
 #include <random>
+#include <sstream>
 #include <string>
+#include <type_traits>
 #include <vector>
 
 namespace ql_app {
@@ -102,6 +104,18 @@ int run_app(int argc, char* argv[]) {
     {
         int sample_count = 256;
         int sample_offset = 0;
+        // Tail-testing additions (byte-identical to the --sample-offset contract for
+        // the samples they touch; the existing range path is untouched):
+        //   --dump-inputs N   input-fingerprint mode: fill [0,N) per integral and
+        //                      print the raw double inputs (INP lines), no BO/RES.
+        //                      Used by the tail-offset emitter + Validator to compute
+        //                      / verify a per-integral determinism hash.
+        //   --sample-list a,b,c  dispatch ONLY the listed per-integral offsets (fill
+        //                      [0,max+1) so each offset's draw stream is identical to
+        //                      a full run).  One invocation regenerates a sparse tail
+        //                      set for every integral; RES output is unchanged.
+        int dump_inputs = 0;
+        std::vector<int> sample_list;
         for (int a = 1; a < argc; ++a) {
             std::string arg = argv[a];
             if (arg == "--sample-count" && a + 1 < argc) {
@@ -110,12 +124,44 @@ int run_app(int argc, char* argv[]) {
             } else if (arg == "--sample-offset" && a + 1 < argc) {
                 try { int n = std::stoi(argv[++a]); if (n >= 0) sample_offset = n; }
                 catch (...) {}
+            } else if (arg == "--dump-inputs" && a + 1 < argc) {
+                try { int n = std::stoi(argv[++a]); if (n > 0) dump_inputs = n; }
+                catch (...) {}
+            } else if (arg == "--sample-list" && a + 1 < argc) {
+                std::stringstream ss(argv[++a]);
+                std::string tok;
+                while (std::getline(ss, tok, ',')) {
+                    if (tok.empty()) continue;
+                    try { int n = std::stoi(tok); if (n >= 0) sample_list.push_back(n); }
+                    catch (...) {}
+                }
             }
         }
-        const int total_samples = sample_offset + sample_count;
-        std::cerr << "boxGPU_app: sample_count=" << sample_count
-                  << " offset=" << sample_offset
-                  << " (global [" << sample_offset << ", " << total_samples << "))\n";
+
+        // Mode resolution.  DUMP and LIST are mutually exclusive with the range
+        // path; DUMP takes precedence if both are somehow given.
+        const bool dump_mode = dump_inputs > 0;
+        const bool list_mode = !dump_mode && !sample_list.empty();
+        int total_samples;
+        if (dump_mode) {
+            total_samples = dump_inputs;
+        } else if (list_mode) {
+            int mx = 0;
+            for (int o : sample_list) if (o + 1 > mx) mx = o + 1;
+            total_samples = mx;
+        } else {
+            total_samples = sample_offset + sample_count;
+        }
+        if (dump_mode) {
+            std::cerr << "boxGPU_app: dump-inputs N=" << dump_inputs << "\n";
+        } else if (list_mode) {
+            std::cerr << "boxGPU_app: sample-list size=" << sample_list.size()
+                      << " (fill [0," << total_samples << "))\n";
+        } else {
+            std::cerr << "boxGPU_app: sample_count=" << sample_count
+                      << " offset=" << sample_offset
+                      << " (global [" << sample_offset << ", " << total_samples << "))\n";
+        }
 
         using HostSpace = Kokkos::HostSpace;
         Kokkos::View<TScale*,      HostSpace> mu2("mu2", total_samples);
@@ -139,6 +185,16 @@ int run_app(int argc, char* argv[]) {
         // Reproducible per-integral: fresh mt19937(12345), fill [0,total) so the
         // skipped prefix advances the draw sequence identically, then dispatch
         // [offset,total) through ql::BO and print each coeff triple.
+        // Recover the raw double behind an input slot regardless of TMass/TScale:
+        // inputs originate as double `v` cast up to TMass/TScale (ddouble sets
+        // hi=v, lo=0), so the exact double is `v` for double and `.hi` for ddouble.
+        // `if constexpr` keeps each instantiation compiling (the untaken branch is
+        // discarded — no `.hi` on a plain double in the vanilla build).
+        auto to_d = [](auto v) -> double {
+            if constexpr (std::is_same_v<decltype(v), double>) return v;
+            else return v.hi;
+        };
+
         auto run_integral = [&](const std::string& name,
                                 const std::function<void(int, std::mt19937&)>& fill) {
             std::mt19937 rng(kSeedBase);
@@ -146,8 +202,29 @@ int run_app(int argc, char* argv[]) {
             for (int i = 0; i < total_samples; ++i) fill(i, rng);
 
             std::string out;
-            out.reserve(sample_count * 96);
-            for (int i = sample_offset; i < total_samples; ++i) {
+
+            if (dump_mode) {
+                // Input-fingerprint mode: print the raw double inputs for [0,N).
+                //   INP,<integral>,<i>,mu2,m0,m1,m2,m3,p0,p1,p2,p3,p4,p5  (all dhex)
+                out.reserve(total_samples * 160);
+                for (int i = 0; i < total_samples; ++i) {
+                    out += "INP,";
+                    out += name;
+                    out += ',';
+                    out += std::to_string(i);
+                    out += ','; out += dhex(to_d(mu2(i)));
+                    for (int s = 0; s < 4; ++s) { out += ','; out += dhex(to_d(m(i, s))); }
+                    for (int s = 0; s < 6; ++s) { out += ','; out += dhex(to_d(p(i, s))); }
+                    out += '\n';
+                }
+                std::cout << out;
+                return;
+            }
+
+            // Which per-integral offsets to dispatch: the explicit list, or the
+            // contiguous [offset, total) range.  Both fill the identical prefix
+            // above, so a listed offset is bit-identical to its range counterpart.
+            auto dispatch_one = [&](int i) {
                 ql::BO<TOutput, TMass, TScale>(res, mu2, m, p, i);
                 out += "RES,";
                 out += name;
@@ -160,6 +237,16 @@ int run_app(int argc, char* argv[]) {
                     Printer::emit(out, res(i, k).imag());
                 }
                 out += '\n';
+            };
+
+            if (list_mode) {
+                out.reserve(sample_list.size() * 96);
+                for (int i : sample_list) {
+                    if (i >= 0 && i < total_samples) dispatch_one(i);
+                }
+            } else {
+                out.reserve(sample_count * 96);
+                for (int i = sample_offset; i < total_samples; ++i) dispatch_one(i);
             }
             std::cout << out;
         };
