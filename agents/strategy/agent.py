@@ -404,11 +404,13 @@ class StrategyRun:
             validator_verdict = None
             verdict_digits = None
             verdict_tail = None
+            verdict_reason = None
             if patcher_ok:
                 verdict = self._invoke_validator(resp, iter_id)
                 validator_verdict = verdict.get("verdict")
                 verdict_digits = (verdict.get("candidate") or {}).get("min_precise_digits")
                 verdict_tail = verdict.get("tail")
+                verdict_reason = verdict.get("verdict_reason")
                 # Prefer the combined random+tail min for the walk's running digit
                 # trace when present (that is the value the gate actually used).
                 combined = verdict.get("cand_min_precise_digits")
@@ -440,7 +442,8 @@ class StrategyRun:
                 accepted=accepted, log_tag=entry.log_tag, phase=self.phase,
                 rationale=self._rationale(intent, entry.log_tag, accepted),
                 strategy_bug=(entry.log_tag == "strategy_bug"),
-                extra=self._log_extra(intent, resp, verdict_digits, verdict_tail))
+                extra=self._log_extra(intent, resp, verdict_digits, verdict_tail,
+                                      verdict_reason))
 
             # ---- per-phase accounting (for the report's phase grouping) ----
             self.phase_stats[self.phase]["iterations"] += 1
@@ -651,13 +654,15 @@ class StrategyRun:
             return f"{intent.kind} at {intent.target.location}: {log_tag}"
         return f"{intent.kind} at {intent.target.location}: reject"
 
-    def _log_extra(self, intent, resp, digits, tail=None) -> dict:
+    def _log_extra(self, intent, resp, digits, tail=None, verdict_reason=None) -> dict:
         extra = {"candidate_sha": resp.get("candidate_sha"),
                  "parent_sha": resp.get("parent_sha")}
         if intent.identity is not None:
             extra["identity"] = intent.identity
         if digits is not None:
             extra["candidate_min_precise_digits"] = digits
+        if verdict_reason is not None:
+            extra["verdict_reason"] = verdict_reason
         if tail:
             # Tail-battery telemetry (grep-able for the PIPELINE_v1 pass criteria):
             # batteries run, samples tested, hash mismatches (always 0 — a mismatch
