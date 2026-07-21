@@ -166,10 +166,10 @@
   <!-- Arrow from Strategy DOWN to terminal state -->
   <path d="M1150 460 L 1150 585" class="edge"/>
 
-  <!-- NEW: 'next iteration' loop-back from terminal TOP edge; 4-segment up-left-up-left path landing on selector RIGHT edge -->
-  <!-- 1: up  2: left past Validator's left edge  3: up past Validator's top edge  4: left back to selector's right edge (x=510, y=325) -->
-  <path d="M1070 585 L 1070 537 L 100 537 L 100 325 L 510 325" class="edge-iter"/>
-  <text x="600" y="318" text-anchor="middle" class="sub-sm" style="fill:#dc2626" font-weight="700">next iteration (not converged)</text>
+  <!-- NEW: 'next iteration' loop-back from terminal TOP edge; 4-segment path landing on selector LEFT edge (x=250, y=325) -->
+  <!-- 1: up  2: left past Validator's left edge  3: up past Validator's top edge  4: right into selector's left edge -->
+  <path d="M1070 585 L 1070 537 L 100 537 L 100 325 L 250 325" class="edge-iter"/>
+  <text x="585" y="530" text-anchor="middle" class="sub-sm" style="fill:#dc2626" font-weight="700">next iteration (not converged)</text>
 
   <!-- Arrow from terminal LEFT to Optimized app (converged path) -->
   <path d="M870 660 L 800 660" class="edge"/>
