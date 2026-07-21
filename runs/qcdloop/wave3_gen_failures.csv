@@ -1,0 +1,80 @@
+iter,kind,phase,file,line,sig,raw
+1,double-to-dd,correctness,B2m.h,64,redefinition_Constants_specialization,redefinition of ‘struct ql::Constants<quad::ddfun::ddouble>’
+2,double-to-dd,correctness,B0m.h,69,redefinition_Constants_specialization,redefinition of ‘struct ql::Constants<quad::ddfun::ddouble>’
+3,double-to-dd,correctness,B1m.h,62,duplicate_qualifier,duplicate ‘inline’
+4,double-to-dd,correctness,B1m.h,63,redefinition_Constants_specialization,redefinition of ‘struct ql::Constants<quad::ddfun::ddouble>’
+7,double-to-dd,correctness,B4m.h,163,redefinition_Constants_specialization,redefinition of ‘struct ql::Constants<quad::ddfun::ddouble>’
+9,double-to-dd,correctness,B2m.h,84,redefinition_Constants_specialization,redefinition of ‘struct ql::Constants<quad::ddfun::ddouble>’
+10,double-to-dd,correctness,B4m.h,233,redefinition_Constants_specialization,redefinition of ‘struct ql::Constants<quad::ddfun::ddouble>’
+11,double-to-dd,correctness,B0m.h,68,redefinition_Constants_specialization,redefinition of ‘struct ql::Constants<quad::ddfun::ddouble>’
+13,double-to-dd,correctness,B3m.h,177,redefinition_Constants_specialization,redefinition of ‘struct ql::Constants<quad::ddfun::ddouble>’
+15,double-to-dd,correctness,B2m.h,400,redefinition_Constants_specialization,redefinition of ‘struct ql::Constants<quad::ddfun::ddouble>’
+16,double-to-dd,correctness,B2m.h,493,redefinition_Constants_specialization,redefinition of ‘struct ql::Constants<quad::ddfun::ddouble>’
+20,double-to-dd,correctness,kokkosUtils.h,672,redefinition_Constants_specialization,redefinition of ‘struct ql::Constants<quad::ddfun::ddouble>’
+23,double-to-dd,correctness,B3m.h,183,redefinition_Constants_specialization,redefinition of ‘struct ql::Constants<quad::ddfun::ddouble>’
+31,double-to-dd,correctness,kokkosUtils.h,212,redefinition_Constants_specialization,redefinition of ‘struct ql::Constants<quad::ddfun::ddouble>’
+33,double-to-dd,correctness,B4m.h,195,redefinition_Constants_specialization,redefinition of ‘struct ql::Constants<quad::ddfun::ddouble>’
+34,double-to-dd,correctness,kokkosUtils.h,753,redefinition_Constants_specialization,redefinition of ‘struct ql::Constants<quad::ddfun::ddouble>’
+36,double-to-dd,correctness,kokkosUtils.h,183,redefinition_Constants_specialization,redefinition of ‘struct ql::Constants<quad::ddfun::ddouble>’
+37,double-to-dd,correctness,B4m.h,192,redefinition_Constants_specialization,redefinition of ‘struct ql::Constants<quad::ddfun::ddouble>’
+38,double-to-dd,correctness,B4m.h,198,redefinition_Constants_specialization,redefinition of ‘struct ql::Constants<quad::ddfun::ddouble>’
+40,double-to-dd,correctness,B2m.h,355,redefinition_Constants_specialization,redefinition of ‘struct ql::Constants<quad::ddfun::ddouble>’
+42,double-to-dd,correctness,B1m.h,134,redefinition_Constants_specialization,redefinition of ‘struct ql::Constants<quad::ddfun::ddouble>’
+48,double-to-dd,correctness,B1m.h,241,redefinition_Constants_specialization,redefinition of ‘struct ql::Constants<quad::ddfun::ddouble>’
+56,double-to-dd,correctness,B1m.h,204,redefinition_Constants_specialization,redefinition of ‘struct ql::Constants<quad::ddfun::ddouble>’
+58,double-to-dd,correctness,B3m.h,105,other:template-id ‘Real<quad::ddfun::ddouble>’,template-id ‘Real<quad::ddfun::ddouble>’ for ‘quad::ddfun::ddouble ql::Real()’ does not match any template declaration
+59,double-to-dd,correctness,B4m.h,184,R4_constant_derivation_escape,"#error ""DD Regional Integrator: ql::cLn requires manual classification"""
+61,double-to-dd,correctness,kokkosUtils.h,704,duplicate_qualifier,duplicate ‘inline’
+70,double-to-dd,correctness,kokkosUtils.h,401,redefinition_Constants_specialization,redefinition of ‘struct ql::Constants<quad::ddfun::ddouble>’
+71,double-to-dd,correctness,B2m.h,405,redefinition_other,redefinition of ‘quad::ddfun::ddouble ql::Real(const quad::ddfun::ddcomplex&)’
+77,double-to-dd,correctness,B0m.h,69,redefinition_Constants_specialization,redefinition of ‘struct ql::Constants<quad::ddfun::ddouble>’
+78,double-to-dd,correctness,B0m.h,68,redefinition_Constants_specialization,redefinition of ‘struct ql::Constants<quad::ddfun::ddouble>’
+79,double-to-dd,correctness,B1m.h,62,redefinition_Constants_specialization,redefinition of ‘struct ql::Constants<quad::ddfun::ddouble>’
+80,double-to-dd,correctness,B1m.h,63,redefinition_Constants_specialization,redefinition of ‘struct ql::Constants<quad::ddfun::ddouble>’
+81,double-to-dd,correctness,B3m.h,76,redefinition_Constants_specialization,redefinition of ‘struct ql::Constants<quad::ddfun::ddouble>’
+83,double-to-dd,correctness,B0m.h,74,redefinition_Constants_specialization,redefinition of ‘struct ql::Constants<quad::ddfun::ddouble>’
+84,double-to-dd,correctness,B1m.h,66,duplicate_qualifier,duplicate ‘inline’
+86,double-to-dd,correctness,B0m.h,72,redefinition_Constants_specialization,redefinition of ‘struct ql::Constants<quad::ddfun::ddouble>’
+89,double-to-dd,correctness,B2m.h,206,redefinition_other,"redefinition of ‘template<class TOutput, class TMass, class TScale> quad::ddfun::ddouble ql::Lnrat(const quad::ddfun::ddouble&, const quad::ddfun::ddouble&)’"
+90,double-to-dd,correctness,B2m.h,300,redefinition_other,"redefinition of ‘template<class TOutput, class TMass, class TScale> bool ql::iszero(const quad::ddfun::ddouble&)’"
+94,double-to-dd,correctness,B1m.h,241,R4_constant_derivation_escape,"#error ""DD Regional Integrator: ql::Li2omx2 requires manual classification"""
+97,double-to-dd,correctness,B1m.h,234,redefinition_other,"redefinition of ‘template<class TOutput, class TMass, class TScale> quad::ddfun::ddouble ql::Lnrat(const quad::ddfun::ddouble&, const quad::ddfun::ddouble&)’"
+99,double-to-dd,correctness,B1m.h,162,redefinition_Constants_specialization,redefinition of ‘struct ql::Constants<quad::ddfun::ddouble>’
+100,double-to-dd,correctness,B1m.h,227,redefinition_Constants_specialization,redefinition of ‘struct ql::Constants<quad::ddfun::ddouble>’
+101,double-to-dd,correctness,B1m.h,161,redefinition_Constants_specialization,redefinition of ‘struct ql::Constants<quad::ddfun::ddouble>’
+102,double-to-dd,correctness,B1m.h,200,redefinition_Constants_specialization,redefinition of ‘struct ql::Constants<quad::ddfun::ddouble>’
+104,double-to-dd,correctness,B0m.h,329,redefinition_Constants_specialization,redefinition of ‘struct ql::Constants<quad::ddfun::ddouble>’
+109,double-to-dd,correctness,B1m.h,67,redefinition_Constants_specialization,redefinition of ‘struct ql::Constants<quad::ddfun::ddouble>’
+110,double-to-dd,correctness,B2m.h,204,redefinition_Constants_specialization,redefinition of ‘struct ql::Constants<quad::ddfun::ddouble>’
+118,double-to-float,speedup,B0m.h,224,redefinition_Constants_specialization,redefinition of ‘struct ql::Constants<float>’
+120,double-to-float,speedup,B1m.h,106,redefinition_Constants_specialization,redefinition of ‘struct ql::Constants<float>’
+121,double-to-ff,speedup,B1m.h,106,redefinition_Constants_specialization,redefinition of ‘struct ql::Constants<quad::ffun::ffloat>’
+127,double-to-float,speedup,B1m.h,133,redefinition_Constants_specialization,redefinition of ‘struct ql::Constants<float>’
+128,double-to-ff,speedup,B1m.h,133,redefinition_Constants_specialization,redefinition of ‘struct ql::Constants<quad::ffun::ffloat>’
+130,double-to-ff,speedup,kokkosUtils.h,580,redefinition_Constants_specialization,redefinition of ‘struct ql::Constants<quad::ffun::ffloat>’
+132,double-to-ff,speedup,B4m.h,126,redefinition_Constants_specialization,redefinition of ‘struct ql::Constants<quad::ffun::ffcomplex>’
+136,double-to-float,speedup,B0m.h,229,redefinition_Constants_specialization,redefinition of ‘struct ql::Constants<std::complex<float> >’
+137,double-to-ff,speedup,B0m.h,229,redefinition_Constants_specialization,redefinition of ‘struct ql::Constants<quad::ffun::ffloat>’
+142,double-to-float,speedup,B1m.h,132,redefinition_Constants_specialization,redefinition of ‘struct ql::Constants<float>’
+143,double-to-ff,speedup,B1m.h,132,redefinition_Constants_specialization,redefinition of ‘struct ql::Constants<quad::ffun::ffloat>’
+150,double-to-ff,speedup,B1m.h,61,redefinition_Constants_specialization,redefinition of ‘struct ql::Constants<quad::ffun::ffloat>’
+158,double-to-float,speedup,B2m.h,109,redefinition_Constants_specialization,redefinition of ‘class ql::Constants<float>’
+159,double-to-ff,speedup,B2m.h,109,redefinition_Constants_specialization,redefinition of ‘struct ql::Constants<quad::ffun::ffcomplex>’
+174,double-to-float,speedup,B1m.h,167,redefinition_Constants_specialization,redefinition of ‘struct ql::Constants<float>’
+175,double-to-ff,speedup,B1m.h,167,redefinition_Constants_specialization,redefinition of ‘struct ql::Constants<quad::ffun::ffloat>’
+181,double-to-float,speedup,B0m.h,305,redefinition_Constants_specialization,redefinition of ‘struct ql::Constants<std::complex<float> >’
+182,double-to-ff,speedup,B0m.h,305,R4_constant_derivation_escape,"#error ""FF Regional Integrator: ql::Li2omrat<ffloat,...> requires manual classification"""
+185,double-to-float,speedup,B1m.h,138,redefinition_Constants_specialization,redefinition of ‘struct ql::Constants<float>’
+186,double-to-ff,speedup,B1m.h,138,redefinition_Constants_specialization,redefinition of ‘struct ql::Constants<quad::ffun::ffloat>’
+189,double-to-float,speedup,B1m.h,97,redefinition_Constants_specialization,redefinition of ‘struct ql::Constants<float>’
+190,double-to-ff,speedup,B1m.h,97,redefinition_Constants_specialization,redefinition of ‘struct ql::Constants<quad::ffun::ffloat>’
+191,double-to-float,speedup,B1m.h,98,redefinition_Constants_specialization,redefinition of ‘struct ql::Constants<float>’
+192,double-to-ff,speedup,B1m.h,98,redefinition_Constants_specialization,redefinition of ‘struct ql::Constants<quad::ffun::ffloat>’
+193,double-to-float,speedup,B2m.h,105,redefinition_Constants_specialization,redefinition of ‘struct ql::Constants<float>’
+194,double-to-ff,speedup,B2m.h,105,redefinition_Constants_specialization,redefinition of ‘struct ql::Constants<quad::ffun::ffloat>’
+195,double-to-float,speedup,B2m.h,106,redefinition_Constants_specialization,redefinition of ‘struct ql::Constants<float>’
+196,double-to-ff,speedup,B2m.h,106,redefinition_Constants_specialization,redefinition of ‘struct ql::Constants<quad::ffun::ffloat>’
+198,double-to-float,speedup,B2m.h,188,redefinition_Constants_specialization,redefinition of ‘struct ql::Constants<float>’
+199,double-to-ff,speedup,B2m.h,188,redefinition_Constants_specialization,redefinition of ‘struct ql::Constants<quad::ffun::ffloat>’
+218,double-to-float,speedup,B3m.h,97,redefinition_Constants_specialization,redefinition of ‘struct ql::Constants<std::complex<float> >’
+219,double-to-ff,speedup,B3m.h,97,redefinition_Constants_specialization,redefinition of ‘struct ql::Constants<quad::ffun::ffloat>’
