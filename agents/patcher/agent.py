@@ -22,6 +22,9 @@ and the vanilla-driver build gate.
 
 from __future__ import annotations
 
+import json
+import random
+import time
 from pathlib import Path
 from typing import Callable
 
@@ -33,7 +36,26 @@ from agents.state import PipelineState
 
 MAX_INTEGRATOR_RETRIES = 3      # P4b — single shared budget: integrator + build
 
+# Wave-2 backoff — space out the (unchanged) MAX_INTEGRATOR_RETRIES attempts on a
+# retryable llm-driven failure so a transient LLM/service hiccup gets a fresh roll
+# instead of a back-to-back re-hit.  This is SPACING ONLY: the retry budget is not
+# widened, and a deterministic (non-llm) path never sleeps.  Delay is exponential
+# in the (0-based) attempt index — 2s after attempt 0, 4s after attempt 1 — plus a
+# small uniform jitter so concurrent Patchers don't retry in lockstep.
+BACKOFF_BASE_SEC = 2.0
+BACKOFF_JITTER_SEC = 0.5
+
 _REPO = Path(__file__).resolve().parents[2]
+
+
+def _backoff_delay(attempt: int) -> float:
+    """Seconds to wait AFTER a failed ``attempt`` (0-based) before the next one.
+
+    Exponential (``BASE * 2**attempt``) plus uniform jitter in
+    ``[0, BACKOFF_JITTER_SEC)``.  Monotonic non-decreasing across attempts even
+    with jitter (2.0–2.5 < 4.0–4.5), so the retry cadence always widens.
+    """
+    return BACKOFF_BASE_SEC * (2 ** attempt) + random.uniform(0.0, BACKOFF_JITTER_SEC)
 
 
 # ---------------------------------------------------------------------------
@@ -109,8 +131,30 @@ class _Patcher:
         llm_driven = dispatch.is_llm_driven(path)
         attempts = MAX_INTEGRATOR_RETRIES if llm_driven else 1
 
+        # Per-attempt forensic trail (Wave-2 backoff attribution): one JSONL record
+        # per LLM-driven attempt, so the report can answer "how many llm_gen_failed
+        # regions accepted on retry attempt 2/3?".  Sibling to Strategy's
+        # iterations.jsonl in the same run_dir; deterministic paths don't log.
+        attempts_log = run_dir / "patcher_attempts.jsonl"
+
+        def _record_attempt(attempt, outcome, status, elapsed, backoff):
+            if not llm_driven:
+                return
+            _append_attempt(attempts_log, {
+                "iter_id": iter_id,
+                "rationale_id": intent.rationale_id,
+                "target": intent.target.location,
+                "kind": intent.kind,
+                "attempt": attempt,              # 0-based; also the seed-line variation
+                "outcome": outcome,
+                "status": status,
+                "elapsed_sec": round(elapsed, 3),
+                "backoff_sec": round(backoff, 3),
+            })
+
         last_detail = None
         for attempt in range(attempts):
+            t0 = time.monotonic()
             gitops.reset_hard(repo_root, parent)          # clean slate per attempt
             gen = dispatch.generate(intent, deps, attempt, path)
 
@@ -124,7 +168,13 @@ class _Patcher:
                                      llm_tokens=gen.llm_tokens)
                 last_detail = gen.detail
                 if attempt < attempts - 1:
+                    delay = _backoff_delay(attempt)
+                    _record_attempt(attempt, "gen_failed", gen.status,
+                                    time.monotonic() - t0, delay)
+                    time.sleep(delay)
                     continue
+                _record_attempt(attempt, "gen_failed", R.LLM_GEN_FAILED,
+                                time.monotonic() - t0, 0.0)
                 gitops.reset_hard(repo_root, parent)
                 return R.failure(R.LLM_GEN_FAILED, parent, err_kind=gen.err_kind,
                                  detail=f"generation failed after {attempts} attempts: {gen.detail}",
@@ -134,10 +184,13 @@ class _Patcher:
             # ---- P5 build + smoke gate ----
             gate = self._gate(repo_root, run_dir, iter_id, ctx)
             if gate.ok:
+                _record_attempt(attempt, "ok", R.OK, time.monotonic() - t0, 0.0)
                 return self._commit(intent, deps, gen, gate, parent, repo_root)
 
             # timeout is kept standalone so Strategy's P6 timeout-retry can act.
             if gate.status == R.TIMEOUT:
+                _record_attempt(attempt, "timeout", R.TIMEOUT,
+                                time.monotonic() - t0, 0.0)
                 gitops.reset_hard(repo_root, parent)
                 return R.failure(R.TIMEOUT, parent, err_kind=R.ERR_TIMEOUT,
                                  detail=gate.detail,
@@ -148,8 +201,14 @@ class _Patcher:
             last_detail = gate.detail
             retryable = dispatch.is_retryable_misgen(gate)
             if llm_driven and retryable and attempt < attempts - 1:
+                delay = _backoff_delay(attempt)
+                _record_attempt(attempt, "build_failed", gate.status,
+                                time.monotonic() - t0, delay)
+                time.sleep(delay)
                 continue
             if llm_driven and retryable:
+                _record_attempt(attempt, "build_failed", R.LLM_GEN_FAILED,
+                                time.monotonic() - t0, 0.0)
                 # P4a: exhausted retries on a retryable failure → llm_gen_failed
                 # (P6a: at the DD rung Strategy treats this as dd_untested, not a
                 # physics ceiling).
@@ -160,6 +219,8 @@ class _Patcher:
                                  runtime_log_path=gate.runtime_log_path,
                                  llm_tokens=gen.llm_tokens)
             # deterministic path OR non-retryable → Bucket-A status verbatim
+            _record_attempt(attempt, "build_failed", gate.status,
+                            time.monotonic() - t0, 0.0)
             gitops.reset_hard(repo_root, parent)
             return R.failure(gate.status, parent, err_kind=gate.err_kind,
                              detail=gate.detail,
@@ -226,6 +287,21 @@ def _excerpt(dirs: dict, iter_id, detail: str | None) -> Path | None:
     p = dirs["errors"] / f"iter_{iter_id}.txt"
     p.write_text(detail + "\n")
     return p
+
+
+def _append_attempt(log_path: Path, record: dict) -> None:
+    """Append one per-attempt JSON record to ``patcher_attempts.jsonl``.
+
+    Best-effort forensic trail — a logging failure must never break a patch, so
+    any I/O error is swallowed (the run continues; only the attribution line is
+    lost).
+    """
+    try:
+        log_path.parent.mkdir(parents=True, exist_ok=True)
+        with open(log_path, "a", buffering=1) as fh:
+            fh.write(json.dumps(record) + "\n")
+    except OSError:
+        pass
 
 
 def _commit_message(intent) -> str:

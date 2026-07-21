@@ -35,6 +35,16 @@ namespace ql {
 """
 
 
+@pytest.fixture(autouse=True)
+def sleep_calls(monkeypatch):
+    """Record (and never actually perform) the Patcher's inter-attempt backoff
+    sleeps.  Autouse so every retry test runs instantly instead of waiting the
+    real 2s/4s backoff; the backoff test inspects the returned list of delays."""
+    calls: list[float] = []
+    monkeypatch.setattr("agents.patcher.agent.time.sleep", calls.append)
+    return calls
+
+
 @pytest.fixture
 def repo(tmp_path):
     root = tmp_path / "tree"
