@@ -12,7 +12,13 @@ R1. Boundary conversion is NOT yours. Region reads are promoted to ffloat on ent
 
 R2. Region internals stay extended. Everything the region computes stays ffloat end-to-end; never round-trip a value back through float/double mid-region. If the region calls a library function template on a promoted value, provide an ffloat overload so the computation never leaves extended precision.
 
-R3. Named constants keep their names and MUST be materialized at full precision — NEVER as a decimal literal (a decimal literal narrows to ~7 float / ~16 double digits and defeats the promotion). A compile-time constant the region reads by name (a designator: `Constants<T>::pi()`, `std::numbers::pi_v<T>`, a `constexpr`, a `#define`, a macro) resolves to its ffloat value through the following cascade, IN ORDER — use the FIRST step that applies, and never fall to the Rule R4 escape hatch (step 4) without stating which of steps 1–3 you tried and why each failed:
+R3. Named constants keep their names and MUST be materialized at full precision — NEVER as a decimal literal (a decimal literal narrows to ~7 float / ~16 double digits and defeats the promotion). A compile-time constant the region reads by name (a designator: `Constants<T>::pi()`, `std::numbers::pi_v<T>`, a `constexpr`, a `#define`, a macro) resolves to its ffloat value through the four-step cascade below.
+
+Cascade discipline — MANDATORY, no exceptions:
+  - Walk steps 1 → 2 → 3 → 4 in order. Stop at the FIRST step that applies.
+  - Step 4 (the R4 escape hatch) is FORBIDDEN unless you have explicitly considered and rejected steps 1, 2, AND 3 for this specific constant, and you write those three rejections as comments in the emitted shim.
+  - "I am not sure whether step 3 applies" is NOT a valid rejection of step 3. If the constant's source definition is visible or supplied, step 3 applies — walk it.
+  - A source literal defined as a plain double/float in the app source ALWAYS satisfies step 3a — no exception for small magnitudes, no exception for values near underflow, no exception for regulators. The double/float representation IS the exact intended value; its two-limb ffloat split is CORRECT.
 
   1. Vendored factory. If a vendored `ff_*()` free function exists for the value (`ff_pi()`, `ff_e()`, `ff_log2()`, `ff_sqrt2()`, `ff_euler_gamma()`, …), call it.
   2. Known hex pair. If you know the exact (hi, lo) IEEE-754 single bit pair for the value, use `make_ff(0x<hi>U, 0x<lo>U)`. (Such pairs are generated offline from a quad-precision literal by splitting it across two floats and emitting their bit patterns.)
