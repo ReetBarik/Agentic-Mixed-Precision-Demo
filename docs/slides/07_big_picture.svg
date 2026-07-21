@@ -34,7 +34,8 @@
   <text x="40" y="44" class="title">Pipeline — end-to-end data flow</text>
   <text x="40" y="66" class="sub">Data flow between modules with named artifacts on each edge. Pink borders mark the two LLM touchpoints.</text>
 
-  <!-- =================== TOP: Characterization phase =================== -->
+  <!-- =================== TOP: Characterization phase (dashed container) =================== -->
+  <rect x="20" y="90" width="1240" height="130" rx="10" fill="none" stroke="#94a3b8" stroke-width="1.2" stroke-dasharray="6 4"/>
   <text x="40" y="110" class="h">Characterization  (one-shot, offline)</text>
 
   <!-- App (raw) -->
@@ -98,9 +99,10 @@
   <!-- Vertical bridge from Report DOWN to Strategy phase (top-center of Strategy at x=1090) -->
   <path d="M1090 200 L 1090 360" class="edge"/>
 
-  <!-- =================== MIDDLE: Optimization loop =================== -->
-  <text x="40" y="326" class="h">Optimization loop</text>
-  <text x="40" y="346" class="h">(Phase 1: <tspan style="fill:#b45309">Correctness</tspan>,  Phase 2: <tspan style="fill:#166534">Speedup</tspan>)</text>
+  <!-- =================== MIDDLE: Optimization loop (dashed container) =================== -->
+  <rect x="20" y="260" width="1240" height="270" rx="10" fill="none" stroke="#94a3b8" stroke-width="1.2" stroke-dasharray="6 4"/>
+  <text x="40" y="286" class="h">Optimization loop</text>
+  <text x="40" y="306" class="h">(Phase 1: <tspan style="fill:#b45309">Correctness</tspan>,  Phase 2: <tspan style="fill:#166534">Speedup</tspan>)</text>
 
   <!-- Strategy walk -->
   <g transform="translate(980, 360)">
@@ -158,7 +160,8 @@
   <path d="M250 460 L 250 510 L 1090 510 L 1090 460" class="edge-back"/>
   <text x="670" y="502" text-anchor="middle" class="edge-lbl" style="fill:#166534">verdict (accept / reject / patcher-failure)</text>
 
-  <!-- =================== BOTTOM: Terminal state and output =================== -->
+  <!-- =================== BOTTOM: Terminal state and output (dashed container) =================== -->
+  <rect x="20" y="545" width="1240" height="140" rx="10" fill="none" stroke="#94a3b8" stroke-width="1.2" stroke-dasharray="6 4"/>
   <text x="40" y="565" class="h">Output</text>
 
   <!-- Terminal state indicator (kept at 430 wide; ends at x=1300 within viewBox 1280 margin) -->
