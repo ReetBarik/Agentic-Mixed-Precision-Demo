@@ -10,6 +10,7 @@ generic path with zero qcdloop symbols.
 
 from __future__ import annotations
 
+import re
 import subprocess
 from pathlib import Path
 
@@ -167,6 +168,66 @@ _IEPS50_SOURCES = [
     "TScale(1e-50)}; }\n",
     "static constexpr T _zero() { return T(0.0); }\n",
 ]
+
+
+# --------------------------------------------------------------------------- #
+# Wave-3 dedup — two regions merge into ONE canonical per-family shim (engine)
+# --------------------------------------------------------------------------- #
+
+_MULTI_REGION_FILE = (
+    "#pragma once\n"
+    "template<class TMass> TMass fa(TMass a) {\n"
+    "    return a * ql::Constants<TMass>::_one();\n"   # line 3 — region A needs _one
+    "}\n"
+    "template<class TMass> TMass fb(TMass b) {\n"
+    "    return b + ql::Constants<TMass>::_two();\n"   # line 6 — region B needs _two
+    "}\n"
+)
+
+_SHIM_ONE = (
+    "#pragma once\n// SOURCE_HASH: PENDING\n#include <dd_math.hpp>\n"
+    "namespace ql {\n"
+    "template <class T> struct Constants;\n"
+    "template <>\nstruct Constants< ::quad::ddfun::ddouble > {\n"
+    "    static inline ::quad::ddfun::ddouble _one() { return ::quad::ddfun::ddouble(1.0); }\n"
+    "};\n} // namespace ql\n"
+)
+_SHIM_TWO = (
+    "#pragma once\n// SOURCE_HASH: PENDING\n#include <dd_math.hpp>\n"
+    "namespace ql {\n"
+    "template <class T> struct Constants;\n"
+    "template <>\nstruct Constants<quad::ddfun::ddouble> {\n"   # no leading :: — same type
+    "    static inline ::quad::ddfun::ddouble _two() { return ::quad::ddfun::ddouble(2.0); }\n"
+    "};\n} // namespace ql\n"
+)
+
+
+def test_two_regions_merge_into_one_canonical_dd_shim(tmp_path):
+    root = tmp_path / "cand"
+    sha = _init_repo(root, {"kernel.h": _MULTI_REGION_FILE})
+    common = dict(file="kernel.h", working_tree=sha, variables=[],
+                  out_dir=tmp_path / "shims", repo_path=str(root))
+
+    # Region A lands first (first into the TU → creates the canonical shim).
+    ra = dd.integrate_region(line_start=3, line_end=3, llm_fn=_CapturingLLM(_SHIM_ONE),
+                             **common)
+    assert ra.ok, ra.error
+    # Region B lands against the tree carrying A's canonical shim → must MERGE, not
+    # emit a second Constants<ddouble> (the WAVE3 collision).
+    rb = dd.integrate_region(line_start=6, line_end=6, llm_fn=_CapturingLLM(_SHIM_TWO),
+                             **common)
+    assert rb.ok, rb.error
+
+    canonical = (root / "ql_shim_dd.h").read_text()
+    # exactly ONE specialization, both members present (::-agnostic count)
+    assert re.sub(r"\s+", "", canonical).replace("::", "").count(
+        "structConstants<quad::ddfun::ddouble>".replace("::", "")) == 1
+    assert canonical.count("_one()") == 1
+    assert canonical.count("_two()") == 1
+    # no per-region shim leaked into the tree; both boundaries include the canonical
+    assert not list(root.glob("kernel_dd_*.h"))
+    assert '#include "ql_shim_dd.h"' in (ra.boundary_patch or "")
+    assert '#include "ql_shim_dd.h"' in (rb.boundary_patch or "")
 
 
 def test_derive_region_constants_composite_complex_legacy_literals():

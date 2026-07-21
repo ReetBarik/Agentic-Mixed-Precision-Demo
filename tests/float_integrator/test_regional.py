@@ -91,7 +91,8 @@ def test_template_region_generates_float_shim_and_boundary(repo, tmp_path):
     shim = Path(res.shim_paths[0])
     assert shim.exists() and shim.parent == out
     assert shim.name.startswith("kernel_float_") and shim.name.endswith(".h")
-    assert (root / shim.name).exists()
+    # Wave-3 dedup: the per-family canonical shim is installed in the tree.
+    assert (root / "ql_shim_float.h").exists()
     assert "SOURCE_HASH: PENDING" not in shim.read_text()
 
     # boundary: demote reads to float, retype the local to float, WIDEN the write
@@ -106,7 +107,7 @@ def test_template_region_generates_float_shim_and_boundary(repo, tmp_path):
     assert ".hi" not in patch and ".lo" not in patch
     # never promoted to an extended type
     assert "ffloat" not in patch and "ddouble" not in patch
-    assert f'#include "{shim.name}"' in patch
+    assert '#include "ql_shim_float.h"' in patch
 
 
 def test_float_shim_uses_no_vendored_header(repo, tmp_path):

@@ -76,7 +76,12 @@ def test_generates_dd_shim_and_boundary(repo, tmp_path):
     shim = Path(res.shim_paths[0])
     assert shim.name.startswith("kernel_dd_") and shim.name.endswith(".h")
     assert "#include <dd_math.hpp>" in shim.read_text()
-    assert (root / shim.name).exists()
+    # Wave-3 dedup: the region's shim is merged into the canonical per-family shim
+    # installed in the tree (not a per-region file), and the boundary #includes it.
+    canonical = root / "ql_shim_dd.h"
+    assert canonical.exists()
+    assert "#include <dd_math.hpp>" in canonical.read_text()
+    assert '#include "ql_shim_dd.h"' in res.boundary_patch
 
     patch = res.boundary_patch
     assert "quad::ddfun::ddouble a__ff = quad::ddfun::ddouble(a);" in patch

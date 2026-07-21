@@ -78,8 +78,11 @@ def test_generates_shim_and_boundary(repo, tmp_path):
     text = shim.read_text()
     assert "SOURCE_HASH: PENDING" not in text
     assert "#include <ff_math.hpp>" in text
-    # shim also installed into the candidate tree so the build finds it
-    assert (root / shim.name).exists()
+    # Wave-3 dedup: the per-family canonical shim is installed in the tree (the
+    # per-region file stays an out_dir artifact), and the boundary #includes it.
+    canonical = root / "ql_shim_ff.h"
+    assert canonical.exists()
+    assert "#include <ff_math.hpp>" in canonical.read_text()
 
     # boundary patch: promote reads on entry, retype/rename local, demote on exit
     patch = res.boundary_patch
@@ -88,7 +91,7 @@ def test_generates_shim_and_boundary(repo, tmp_path):
     assert "quad::ffun::ffloat b__ff = quad::ffun::ffloat(b);" in patch
     assert "quad::ffun::ffloat r__ext = a__ff + b__ff;" in patch
     assert "double r = static_cast<double>(r__ext.hi) + static_cast<double>(r__ext.lo);" in patch
-    assert f'#include "{shim.name}"' in patch
+    assert '#include "ql_shim_ff.h"' in patch
 
 
 def test_cache_hit_skips_llm(repo, tmp_path):

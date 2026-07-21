@@ -186,7 +186,11 @@ def test_e2e_regional_ff_real_llm(qcdloop_repo, tmp_path):
     assert "quad::ffun::ffloat x1__ff = quad::ffun::ffloat(x1);" in committed
     assert "quad::ffun::ffloat arg__ext = x1__ff * x2__ff;" in committed
     assert "TMass arg = static_cast<TMass>(arg__ext.hi)" in committed
-    assert f'#include "{shim.name}"' in committed
+    # Wave-3 dedup: the region #includes the canonical per-family shim (not a
+    # per-region file); that canonical shim is committed and carries the ff type.
+    assert '#include "ql_shim_ff.h"' in committed
+    canonical = _git(root, "show", f"{resp['candidate_sha']}:ql_shim_ff.h").stdout
+    assert "ff_math.hpp" in canonical and "SOURCE_HASH: PENDING" not in canonical
 
     # -- exactly one commit, schema-conformant subject, smoke produced 21 rows --
     assert _git(root, "rev-list", "--count", f"{start}..HEAD").stdout.strip() == "1"

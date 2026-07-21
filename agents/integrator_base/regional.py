@@ -28,7 +28,7 @@ import re
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from agents.integrator_base import boundary, cache, llm
+from agents.integrator_base import boundary, cache, llm, shim_merge
 from agents.integrator_base.region import RegionIntegrationResult
 from agents.shared import constant_derive as cderive
 from agents.shared.region_scan import RegionScanError, extract_region_writes
@@ -415,9 +415,9 @@ def run_integrate_region(
     # 4. Cache hit (only on the first attempt — a retry must re-roll the shim).
     if attempt == 0 and _is_cache_hit(shim_out, cache_key):
         shim_text = shim_out.read_text(encoding="utf-8")
-        _install_in_tree(repo_path, shim_name, shim_text)
+        canonical_name = _install_canonical(spec, repo_path, shim_text)
         patch = _boundary(spec, file, src, line_start, line_end, variables, writes,
-                          caller_type, shim_name, repo_path)
+                          caller_type, canonical_name, repo_path)
         return RegionIntegrationResult(status="ok", shim_paths=[str(shim_out)],
                                        boundary_patch=patch, llm_tokens=0)
 
@@ -477,14 +477,17 @@ def run_integrate_region(
         if bad_bridge is not None:
             return RegionIntegrationResult.failed(bad_bridge, llm_tokens=tokens)
 
-    # 6. Stamp the SOURCE_HASH and persist (artifact copy + tree copy for the build).
+    # 6. Stamp the SOURCE_HASH and persist the per-region artifact (out_dir copy —
+    #    the forensic/cache record of THIS region's generated shim), then merge it
+    #    into the canonical per-family shim installed in the tree (Wave-3 dedup).
     shim_text = cache.apply_source_hash(shim_body, cache_key)
     shim_out.write_text(shim_text, encoding="utf-8")
-    _install_in_tree(repo_path, shim_name, shim_text)
+    canonical_name = _install_canonical(spec, repo_path, shim_text)
 
-    # 7. Deterministic boundary patch.
+    # 7. Deterministic boundary patch — includes the canonical merged shim, so
+    #    every region of this family shares ONE definition of each TU-global symbol.
     patch = _boundary(spec, file, src, line_start, line_end, variables, writes,
-                      caller_type, shim_name, repo_path)
+                      caller_type, canonical_name, repo_path)
 
     return RegionIntegrationResult(status="ok", shim_paths=[str(shim_out)],
                                    boundary_patch=patch, llm_tokens=tokens)
@@ -550,17 +553,35 @@ def _is_cache_hit(shim_out: Path, cache_key: str) -> bool:
     return cache.extract_source_hash(shim_out.read_text(encoding="utf-8")) == cache_key
 
 
-def _install_in_tree(repo_path: str | None, shim_name: str, shim_text: str) -> None:
-    """Write the shim into the candidate tree so the vanilla build can find it.
+def canonical_shim_name(spec: RegionalSpec) -> str:
+    """Filename of the single per-family canonical shim (Wave-3 dedup).
 
-    In Patcher usage ``repo_path`` is the candidate repo root, which equals
-    ``QL_HEADERS`` (on the compiler's include path), so a shim at the tree root is
-    resolved by a basename ``#include``.  The Patcher cleans the tree per attempt
-    and ``git add -A`` picks the file up at commit time.
+    All regions of a family (``dd`` / ``ff`` / ``float``) merge their generated
+    TU-global symbols into this one header, so the translation unit sees exactly
+    one definition of each ``Constants<T>`` specialization / ``ql::`` helper.
     """
+    return f"ql_shim_{spec.shim_prefix}.h"
+
+
+def _install_canonical(spec: RegionalSpec, repo_path: str | None,
+                       shim_body: str) -> str:
+    """Merge ``shim_body`` into the canonical per-family shim in the tree.
+
+    Reads the current canonical shim (if the Patcher already committed a sibling
+    region's shim for this family), merges the new region's symbols in — class
+    specializations accumulate members, free functions/namespaces dedup by
+    signature (keep-first) — and writes the merged canonical back.  Returns the
+    canonical shim's basename (what the boundary patch ``#include``s).  When
+    ``repo_path`` is unset (no candidate tree) this is a no-op returning the name.
+    """
+    canonical_name = canonical_shim_name(spec)
     if not repo_path:
-        return
-    (Path(repo_path) / shim_name).write_text(shim_text, encoding="utf-8")
+        return canonical_name
+    canonical_path = Path(repo_path) / canonical_name
+    existing = canonical_path.read_text(encoding="utf-8") if canonical_path.exists() else None
+    merged = shim_merge.merge_into_canonical(existing, shim_body)
+    canonical_path.write_text(merged, encoding="utf-8")
+    return canonical_name
 
 
 def _rel_file(file: str, repo_path: str | None) -> str:
