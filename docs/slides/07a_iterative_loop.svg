@@ -88,9 +88,9 @@
   </g>
   <!-- Arrow from report.json bottom edge down then LEFT to tail-sample store's right edge -->
   <path d="M1140 200 L 1140 243 L 710 243" class="edge-data"/>
-  <!-- Arrow from tail-sample store LEFT then DOWN to Sample slice selector top edge (selector now at x=330-590, midpoint x=460) -->
-  <path d="M570 243 L 460 243 L 460 300" class="edge-data"/>
-  <text x="420" y="236" text-anchor="middle" class="sub-sm" style="fill:#dc2626">tail slices</text>
+  <!-- Arrow from tail-sample store LEFT then DOWN to Sample slice selector top edge; turn-down at x=400 (inside new selector at x=250-510) -->
+  <path d="M570 243 L 400 243 L 400 300" class="edge-data"/>
+  <text x="415" y="270" class="sub-sm" style="fill:#dc2626">tail slices</text>
 
   <!-- =================== MIDDLE: Optimization loop (now iterative) =================== -->
   <rect x="20" y="260" width="1240" height="270" rx="10" fill="none" stroke="#94a3b8" stroke-width="1.2" stroke-dasharray="6 4"/>
@@ -128,14 +128,14 @@
     <text x="110" y="56" text-anchor="middle" class="lbl-lg">Validator</text>
   </g>
 
-  <!-- Sample slice selector — midpoint shifted to sit between Validator (mid x=250) and Patcher (mid x=670); midpoint at x=460 with width 260 -->
-  <g transform="translate(330, 300)">
+  <!-- Sample slice selector — left edge aligned with Validator midpoint (x=250); width 260 spans x=250-510 -->
+  <g transform="translate(250, 300)">
     <rect x="0" y="0" width="260" height="50" rx="6" class="new-box"/>
     <text x="130" y="20" text-anchor="middle" class="sub" style="fill:#dc2626" font-weight="700">Sample slice selector</text>
     <text x="130" y="38" text-anchor="middle" class="sub-sm" style="fill:#dc2626">worst-tail slice (rotated) + fresh random</text>
   </g>
-  <!-- Arrow from selector's left-underside DOWN into Validator top edge (Validator spans x=140-360; drop at x=350) -->
-  <path d="M350 350 L 350 360" class="edge-data"/>
+  <!-- Arrow from selector DOWN into Validator top edge (drop at x=300, inside both selector x=250-510 and Validator x=140-360) -->
+  <path d="M300 350 L 300 360" class="edge-data"/>
 
   <!-- Strategy → Patcher (candidate) -->
   <path d="M980 410 L 780 410" class="edge"/>
@@ -166,8 +166,9 @@
   <!-- Arrow from Strategy DOWN to terminal state -->
   <path d="M1150 460 L 1150 585" class="edge"/>
 
-  <!-- NEW: 'next iteration' loop-back from terminal TOP edge; 4-segment up-left-up-left path ending at selector left edge -->
-  <path d="M1070 585 L 1070 537 L 880 537 L 880 325 L 330 325" class="edge-iter"/>
+  <!-- NEW: 'next iteration' loop-back from terminal TOP edge; 4-segment up-left-up-left path landing on selector RIGHT edge -->
+  <!-- 1: up  2: left past Validator's left edge  3: up past Validator's top edge  4: left back to selector's right edge (x=510, y=325) -->
+  <path d="M1070 585 L 1070 537 L 100 537 L 100 325 L 510 325" class="edge-iter"/>
   <text x="600" y="318" text-anchor="middle" class="sub-sm" style="fill:#dc2626" font-weight="700">next iteration (not converged)</text>
 
   <!-- Arrow from terminal LEFT to Optimized app (converged path) -->
