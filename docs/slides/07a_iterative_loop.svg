@@ -81,19 +81,22 @@
   <!-- Vertical bridge from Report DOWN to Strategy -->
   <path d="M1090 200 L 1090 360" class="edge"/>
 
-  <!-- =================== NEW: Sample slice selector (side box, on right of characterization) =================== -->
-  <!-- Placed just below top band, above middle band, on the right -->
-  <g transform="translate(1070, 232)">
+  <!-- =================== NEW: Tail-sample store (centered horizontally in gap between bands) =================== -->
+  <g transform="translate(570, 232)">
     <rect x="0" y="0" width="140" height="22" rx="4" class="new-box"/>
     <text x="70" y="15" text-anchor="middle" class="sub" style="fill:#dc2626" font-weight="700">tail-sample store</text>
   </g>
-  <!-- Arrow from tail-sample store: down along right edge, across the bottom below middle band, up into Sample slice selector left edge -->
-  <path d="M1140 254 L 1230 254 L 1230 540 L 120 540 L 120 500 L 140 500" class="edge-data"/>
-  <text x="680" y="555" text-anchor="middle" class="sub-sm" style="fill:#dc2626">tail slices</text>
+  <!-- Arrow from report.json bottom edge down then LEFT to tail-sample store's right edge -->
+  <path d="M1140 200 L 1140 243 L 710 243" class="edge-data"/>
+  <!-- Arrow from tail-sample store LEFT then DOWN to Sample slice selector top edge -->
+  <path d="M570 243 L 270 243 L 270 300" class="edge-data"/>
+  <text x="420" y="236" text-anchor="middle" class="sub-sm" style="fill:#dc2626">tail slices</text>
 
   <!-- =================== MIDDLE: Optimization loop (now iterative) =================== -->
   <rect x="20" y="260" width="1240" height="270" rx="10" fill="none" stroke="#94a3b8" stroke-width="1.2" stroke-dasharray="6 4"/>
-  <text x="40" y="286" class="h">Optimization loop  <tspan style="fill:#dc2626">(iterative over rotating sample slices)</tspan></text>
+  <text x="40" y="278" class="h">Optimization loop</text>
+  <text x="40" y="296" class="h" style="fill:#dc2626">(iterative over</text>
+  <text x="40" y="314" class="h" style="fill:#dc2626">rotating sample slices)</text>
 
   <!-- Strategy walk -->
   <g transform="translate(980, 360)">
@@ -125,14 +128,14 @@
     <text x="110" y="56" text-anchor="middle" class="lbl-lg">Validator</text>
   </g>
 
-  <!-- Sample slice selector — new red-outlined box, feeding validator -->
-  <g transform="translate(140, 480)">
-    <rect x="0" y="0" width="220" height="42" rx="6" class="new-box"/>
-    <text x="110" y="18" text-anchor="middle" class="sub" style="fill:#dc2626" font-weight="700">Sample slice selector</text>
-    <text x="110" y="34" text-anchor="middle" class="sub-sm" style="fill:#dc2626">worst-tail slice (rotated) + fresh random</text>
+  <!-- Sample slice selector — ABOVE the Validator, widened to 260 -->
+  <g transform="translate(140, 300)">
+    <rect x="0" y="0" width="260" height="50" rx="6" class="new-box"/>
+    <text x="130" y="20" text-anchor="middle" class="sub" style="fill:#dc2626" font-weight="700">Sample slice selector</text>
+    <text x="130" y="38" text-anchor="middle" class="sub-sm" style="fill:#dc2626">worst-tail slice (rotated) + fresh random</text>
   </g>
-  <!-- Arrow from selector UP into Validator bottom -->
-  <path d="M250 480 L 250 460" class="edge-data"/>
+  <!-- Arrow from selector DOWN into Validator top edge -->
+  <path d="M270 350 L 270 360" class="edge-data"/>
 
   <!-- Strategy → Patcher (candidate) -->
   <path d="M980 410 L 780 410" class="edge"/>
@@ -146,11 +149,6 @@
   <path d="M250 460 L 250 500 L 1090 500 L 1090 460" class="edge-back"/>
   <text x="670" y="492" text-anchor="middle" class="edge-lbl" style="fill:#166534">verdict</text>
 
-  <!-- =================== NEW: Outer iteration loop arrow =================== -->
-  <!-- From Strategy right side, up and over, back into Strategy top-left as "next iteration" -->
-  <path d="M1200 380 C 1250 380, 1250 340, 1200 340 L 1140 340" class="edge-iter"/>
-  <text x="1215" y="360" text-anchor="middle" class="sub-sm" style="fill:#dc2626" font-weight="700">next</text>
-  <text x="1215" y="374" text-anchor="middle" class="sub-sm" style="fill:#dc2626" font-weight="700">iteration</text>
 
   <!-- =================== BOTTOM: Output (name-only + new terminal) =================== -->
   <rect x="20" y="545" width="1240" height="140" rx="10" fill="none" stroke="#94a3b8" stroke-width="1.2" stroke-dasharray="6 4"/>
@@ -168,8 +166,13 @@
   <!-- Arrow from Strategy DOWN to terminal state -->
   <path d="M1150 460 L 1150 585" class="edge"/>
 
-  <!-- Arrow from terminal LEFT to Optimized app -->
-  <path d="M870 630 L 800 630" class="edge"/>
+  <!-- NEW: 'next iteration' loop-back from terminal box LEFT edge, along the far left, up to Sample slice selector -->
+  <path d="M870 630 L 60 630 L 60 325 L 140 325" class="edge-iter"/>
+  <text x="460" y="622" text-anchor="middle" class="sub-sm" style="fill:#dc2626" font-weight="700">next iteration (not converged)</text>
+
+  <!-- Arrow from terminal LEFT to Optimized app (converged path) -->
+  <path d="M870 660 L 800 660" class="edge"/>
+  <text x="835" y="654" text-anchor="middle" class="sub-sm" style="fill:#166534" font-weight="700">converged</text>
 
   <!-- Optimized app (name-only) -->
   <g transform="translate(540, 585)">
