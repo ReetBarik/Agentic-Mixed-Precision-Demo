@@ -100,15 +100,15 @@
     <text x="110" y="82" text-anchor="middle" class="sub-sm" style="fill:#dc2626" font-weight="700">then upcast / downcast fallback</text>
   </g>
 
-  <!-- =================== NEW: Algorithmic rewrite catalog ABOVE the Patcher (trimmed to 2 items) =================== -->
-  <g transform="translate(370, 285)">
-    <rect x="0" y="0" width="290" height="60" rx="8" class="new-box"/>
-    <text x="145" y="20" text-anchor="middle" class="lbl" style="fill:#dc2626">Algorithmic rewrite catalog</text>
-    <text x="14" y="38" class="catalog-item">• Kahan / Neumaier compensated sum</text>
-    <text x="14" y="52" class="catalog-item">• TwoProduct compensated multiplication,  etc.</text>
+  <!-- =================== NEW: Algorithmic rewrite catalog (same height/y as precision containers) =================== -->
+  <g transform="translate(150, 280)">
+    <rect x="0" y="0" width="320" height="50" rx="6" class="new-box"/>
+    <text x="160" y="18" text-anchor="middle" class="lbl" style="fill:#dc2626">Algorithmic rewrite catalog</text>
+    <text x="12" y="34" class="catalog-item">• Kahan / Neumaier compensated sum</text>
+    <text x="12" y="48" class="catalog-item">• TwoProduct compensated multiplication,  etc.</text>
   </g>
-  <!-- Arrow from catalog (bottom-left) down then LEFT into Patcher's LEFT edge (two straight segments) -->
-  <path d="M400 345 L 400 420 L 560 420" class="edge-new"/>
+  <!-- Arrow from bottom of catalog (below its right side) down then RIGHT to Patcher's LEFT edge at ~75% height (y=385) -->
+  <path d="M430 330 L 430 385 L 560 385" class="edge-new"/>
 
   <!-- Precision containers (fallback, name-only, right of Patcher for asymmetry) -->
   <g transform="translate(675, 280)">
