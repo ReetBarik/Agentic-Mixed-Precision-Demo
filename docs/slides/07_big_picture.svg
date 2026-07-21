@@ -94,11 +94,9 @@
   <text x="830" y="142" text-anchor="middle" class="edge-lbl">journal</text>
   <text x="830" y="156" text-anchor="middle" class="edge-lbl">(transient)</text>
   <path d="M970 165 L 1070 165" class="edge"/>
-  <text x="1020" y="158" text-anchor="middle" class="edge-lbl">report.json</text>
 
   <!-- Vertical bridge from Report DOWN to Strategy phase (top-center of Strategy at x=1090) -->
   <path d="M1090 200 L 1090 360" class="edge"/>
-  <text x="1103" y="282" class="edge-lbl">report.json</text>
 
   <!-- =================== MIDDLE: Optimization loop =================== -->
   <text x="40" y="326" class="h">Optimization loop</text>
