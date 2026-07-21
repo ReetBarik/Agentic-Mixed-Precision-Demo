@@ -88,8 +88,8 @@
   </g>
   <!-- Arrow from report.json bottom edge down then LEFT to tail-sample store's right edge -->
   <path d="M1140 200 L 1140 243 L 710 243" class="edge-data"/>
-  <!-- Arrow from tail-sample store LEFT then DOWN to Sample slice selector top edge -->
-  <path d="M570 243 L 270 243 L 270 300" class="edge-data"/>
+  <!-- Arrow from tail-sample store LEFT then DOWN to Sample slice selector top edge (selector now at x=330-590, midpoint x=460) -->
+  <path d="M570 243 L 460 243 L 460 300" class="edge-data"/>
   <text x="420" y="236" text-anchor="middle" class="sub-sm" style="fill:#dc2626">tail slices</text>
 
   <!-- =================== MIDDLE: Optimization loop (now iterative) =================== -->
@@ -128,14 +128,14 @@
     <text x="110" y="56" text-anchor="middle" class="lbl-lg">Validator</text>
   </g>
 
-  <!-- Sample slice selector — ABOVE the Validator, widened to 260 -->
-  <g transform="translate(140, 300)">
+  <!-- Sample slice selector — midpoint shifted to sit between Validator (mid x=250) and Patcher (mid x=670); midpoint at x=460 with width 260 -->
+  <g transform="translate(330, 300)">
     <rect x="0" y="0" width="260" height="50" rx="6" class="new-box"/>
     <text x="130" y="20" text-anchor="middle" class="sub" style="fill:#dc2626" font-weight="700">Sample slice selector</text>
     <text x="130" y="38" text-anchor="middle" class="sub-sm" style="fill:#dc2626">worst-tail slice (rotated) + fresh random</text>
   </g>
-  <!-- Arrow from selector DOWN into Validator top edge -->
-  <path d="M270 350 L 270 360" class="edge-data"/>
+  <!-- Arrow from selector's left-underside DOWN into Validator top edge (Validator spans x=140-360; drop at x=350) -->
+  <path d="M350 350 L 350 360" class="edge-data"/>
 
   <!-- Strategy → Patcher (candidate) -->
   <path d="M980 410 L 780 410" class="edge"/>
@@ -166,9 +166,9 @@
   <!-- Arrow from Strategy DOWN to terminal state -->
   <path d="M1150 460 L 1150 585" class="edge"/>
 
-  <!-- NEW: 'next iteration' loop-back from terminal box LEFT edge, along the far left, up to Sample slice selector -->
-  <path d="M870 630 L 60 630 L 60 325 L 140 325" class="edge-iter"/>
-  <text x="460" y="622" text-anchor="middle" class="sub-sm" style="fill:#dc2626" font-weight="700">next iteration (not converged)</text>
+  <!-- NEW: 'next iteration' loop-back from terminal TOP edge; 4-segment path up-left-up-right ending at selector left edge (330, 325) -->
+  <path d="M1070 585 L 1070 537 L 250 537 L 250 325 L 330 325" class="edge-iter"/>
+  <text x="640" y="530" text-anchor="middle" class="sub-sm" style="fill:#dc2626" font-weight="700">next iteration (not converged)</text>
 
   <!-- Arrow from terminal LEFT to Optimized app (converged path) -->
   <path d="M870 660 L 800 660" class="edge"/>
