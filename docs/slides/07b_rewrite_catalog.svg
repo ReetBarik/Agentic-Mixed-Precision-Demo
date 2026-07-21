@@ -1,0 +1,183 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1280 720" font-family="ui-sans-serif, system-ui, -apple-system, sans-serif">
+  <style>
+    .title { font-size: 26px; font-weight: 700; fill: #172033; }
+    .h { font-size: 16px; font-weight: 650; fill: #172033; }
+    .lbl { font-size: 14px; font-weight: 700; fill: #172033; }
+    .lbl-lg { font-size: 15px; font-weight: 700; fill: #172033; }
+    .sub { font-size: 12px; fill: #5b6475; }
+    .sub-sm { font-size: 11px; fill: #5b6475; }
+    .catalog-item { font-size: 11px; fill: #172033; font-family: ui-monospace, "SF Mono", Menlo, monospace; }
+    .edge-lbl { font-size: 11px; fill: #172033; font-weight: 600; font-family: ui-monospace, "SF Mono", Menlo, monospace; }
+    .box { stroke: #64748b; stroke-width: 1; fill: #f8fafc; }
+    .app-box { stroke: #1e40af; stroke-width: 1.6; fill: #dbeafe; }
+    .tracked-box { stroke: #6d28d9; stroke-width: 1.6; fill: #ede9fe; }
+    .llm-box { stroke: #be185d; stroke-width: 2; fill: #fce7f3; }
+    .char-box { stroke: #b45309; stroke-width: 1.6; fill: #fef3c7; }
+    .report-box { stroke: #6d28d9; stroke-width: 1.6; fill: #ede9fe; }
+    .strat-box { stroke: #b45309; stroke-width: 1.6; fill: #fef3c7; }
+    .patcher-box { stroke: #be185d; stroke-width: 2; fill: #fce7f3; }
+    .val-box { stroke: #0f766e; stroke-width: 1.6; fill: #99f6e4; }
+    .output-box { stroke: #166534; stroke-width: 2; fill: #bbf7d0; }
+    .container-box { stroke: #475569; stroke-width: 1; fill: #f1f5f9; }
+    .new-box { stroke: #dc2626; stroke-width: 2; fill: #fef2f2; }
+    .edge { stroke: #475569; stroke-width: 2; fill: none; marker-end: url(#arrow); }
+    .edge-back { stroke: #166534; stroke-width: 2; fill: none; marker-end: url(#arrow-green); stroke-dasharray: 4 3; }
+    .edge-new { stroke: #dc2626; stroke-width: 1.6; fill: none; marker-end: url(#arrow-iter); stroke-dasharray: 3 3; }
+  </style>
+  <defs>
+    <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" fill="#475569"/>
+    </marker>
+    <marker id="arrow-green" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" fill="#166534"/>
+    </marker>
+    <marker id="arrow-iter" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" fill="#dc2626"/>
+    </marker>
+  </defs>
+
+  <!-- Title -->
+  <text x="40" y="44" class="title">Future work — algorithmic rewrite catalog</text>
+  <text x="40" y="66" class="sub">Patcher attempts algorithmic rewrites before upcast/downcast — reach algorithmic precision floor first.</text>
+
+  <!-- =================== TOP: Characterization band (name-only, unchanged) =================== -->
+  <rect x="20" y="90" width="1240" height="130" rx="10" fill="none" stroke="#94a3b8" stroke-width="1.2" stroke-dasharray="6 4"/>
+  <text x="40" y="110" class="h">Characterization  (one-shot, offline)</text>
+
+  <g transform="translate(40, 130)">
+    <rect x="0" y="0" width="140" height="70" rx="8" class="app-box"/>
+    <text x="70" y="42" text-anchor="middle" class="lbl">App source</text>
+  </g>
+  <g transform="translate(220, 130)">
+    <rect x="0" y="0" width="140" height="70" rx="8" class="tracked-box"/>
+    <text x="70" y="42" text-anchor="middle" class="lbl">Tracked&lt;T&gt;</text>
+  </g>
+  <g transform="translate(400, 130)">
+    <rect x="0" y="0" width="150" height="70" rx="8" class="llm-box"/>
+    <text x="75" y="42" text-anchor="middle" class="lbl">Tracked Integrator</text>
+  </g>
+  <g transform="translate(660, 130)">
+    <rect x="0" y="0" width="130" height="70" rx="8" class="char-box"/>
+    <text x="65" y="42" text-anchor="middle" class="lbl">Sample driver</text>
+  </g>
+  <g transform="translate(870, 130)">
+    <rect x="0" y="0" width="100" height="70" rx="8" class="char-box"/>
+    <text x="50" y="42" text-anchor="middle" class="lbl">Reduce</text>
+  </g>
+  <g transform="translate(1070, 130)">
+    <rect x="0" y="0" width="140" height="70" rx="8" class="report-box"/>
+    <text x="70" y="42" text-anchor="middle" class="lbl">report.json</text>
+  </g>
+
+  <!-- Top-row arrows -->
+  <path d="M180 165 L 220 165" class="edge"/>
+  <path d="M360 165 L 400 165" class="edge"/>
+  <path d="M550 165 L 660 165" class="edge"/>
+  <path d="M790 165 L 870 165" class="edge"/>
+  <path d="M970 165 L 1070 165" class="edge"/>
+
+  <!-- Vertical bridge from Report DOWN to Strategy -->
+  <path d="M1090 200 L 1090 360" class="edge"/>
+
+  <!-- =================== MIDDLE: Optimization loop =================== -->
+  <rect x="20" y="260" width="1240" height="270" rx="10" fill="none" stroke="#94a3b8" stroke-width="1.2" stroke-dasharray="6 4"/>
+  <text x="40" y="286" class="h">Optimization loop</text>
+  <text x="40" y="306" class="h">(Phase 1: <tspan style="fill:#b45309">Correctness</tspan>,  Phase 2: <tspan style="fill:#166534">Speedup</tspan>)</text>
+
+  <!-- Strategy walk (name-only) -->
+  <g transform="translate(980, 360)">
+    <rect x="0" y="0" width="220" height="100" rx="8" class="strat-box"/>
+    <text x="110" y="56" text-anchor="middle" class="lbl-lg">Strategy walk</text>
+  </g>
+
+  <!-- Patcher (name-only, but with a note about rewrite-first) -->
+  <g transform="translate(560, 360)">
+    <rect x="0" y="0" width="220" height="100" rx="8" class="patcher-box"/>
+    <text x="110" y="48" text-anchor="middle" class="lbl-lg">Patcher</text>
+    <text x="110" y="68" text-anchor="middle" class="sub-sm" style="fill:#dc2626" font-weight="700">rewrite first,</text>
+    <text x="110" y="82" text-anchor="middle" class="sub-sm" style="fill:#dc2626" font-weight="700">then upcast / downcast fallback</text>
+  </g>
+
+  <!-- =================== NEW: Algorithmic rewrite catalog ABOVE the Patcher =================== -->
+  <g transform="translate(370, 275)">
+    <rect x="0" y="0" width="290" height="80" rx="8" class="new-box"/>
+    <text x="145" y="20" text-anchor="middle" class="lbl" style="fill:#dc2626">Algorithmic rewrite catalog</text>
+    <text x="14" y="38" class="catalog-item">• Kahan / Neumaier compensated sum</text>
+    <text x="14" y="52" class="catalog-item">• TwoProduct compensated multiplication</text>
+    <text x="14" y="66" class="catalog-item">• log(1+x)  →  log1p(x),   expm1, hypot</text>
+    <text x="14" y="80" class="catalog-item">• algebraic reformulation of cancellations</text>
+  </g>
+  <!-- Arrow from catalog INTO Patcher (top edge) -->
+  <path d="M515 355 L 570 360" class="edge-new"/>
+
+  <!-- Precision containers (fallback, name-only, right of Patcher for asymmetry) -->
+  <g transform="translate(675, 280)">
+    <rect x="0" y="0" width="90" height="50" rx="6" class="container-box"/>
+    <text x="45" y="22" text-anchor="middle" class="sub-sm" font-weight="700">dd_math</text>
+    <text x="45" y="40" text-anchor="middle" class="sub-sm">(fallback)</text>
+  </g>
+  <g transform="translate(775, 280)">
+    <rect x="0" y="0" width="90" height="50" rx="6" class="container-box"/>
+    <text x="45" y="22" text-anchor="middle" class="sub-sm" font-weight="700">ff_math</text>
+    <text x="45" y="40" text-anchor="middle" class="sub-sm">(fallback)</text>
+  </g>
+  <path d="M720 330 L 720 360" stroke="#475569" stroke-width="1.2" stroke-dasharray="3 3" fill="none" marker-end="url(#arrow)"/>
+  <path d="M780 330 L 770 360" stroke="#475569" stroke-width="1.2" stroke-dasharray="3 3" fill="none" marker-end="url(#arrow)"/>
+
+  <!-- Validator (name-only) -->
+  <g transform="translate(140, 360)">
+    <rect x="0" y="0" width="220" height="100" rx="8" class="val-box"/>
+    <text x="110" y="56" text-anchor="middle" class="lbl-lg">Validator</text>
+  </g>
+
+  <!-- Strategy → Patcher (candidate) -->
+  <path d="M980 410 L 780 410" class="edge"/>
+  <text x="880" y="402" text-anchor="middle" class="edge-lbl">candidate</text>
+
+  <!-- Patcher → Validator (built binary) -->
+  <path d="M560 410 L 360 410" class="edge"/>
+  <text x="460" y="402" text-anchor="middle" class="edge-lbl">built binary + rewrite or shim</text>
+
+  <!-- Validator → Strategy (verdict) -->
+  <path d="M250 460 L 250 510 L 1090 510 L 1090 460" class="edge-back"/>
+  <text x="670" y="502" text-anchor="middle" class="edge-lbl" style="fill:#166534">verdict</text>
+
+  <!-- =================== BOTTOM: Output (name-only, unchanged) =================== -->
+  <rect x="20" y="545" width="1240" height="140" rx="10" fill="none" stroke="#94a3b8" stroke-width="1.2" stroke-dasharray="6 4"/>
+  <text x="40" y="565" class="h">Output</text>
+
+  <!-- Terminal state box (unchanged) -->
+  <g transform="translate(870, 585)">
+    <rect x="0" y="0" width="400" height="90" rx="8" class="box"/>
+    <text x="200" y="52" text-anchor="middle" class="lbl-lg">Loop drains → success</text>
+  </g>
+
+  <!-- Arrow from Strategy DOWN to terminal state -->
+  <path d="M1150 460 L 1150 585" class="edge"/>
+
+  <!-- Arrow from terminal LEFT to Optimized app -->
+  <path d="M870 630 L 800 630" class="edge"/>
+
+  <!-- Optimized app (name-only) -->
+  <g transform="translate(540, 585)">
+    <rect x="0" y="0" width="260" height="90" rx="8" class="output-box"/>
+    <text x="130" y="52" text-anchor="middle" class="lbl-lg">Optimized app</text>
+  </g>
+
+  <!-- Telemetry (name-only) -->
+  <g transform="translate(260, 585)">
+    <rect x="0" y="0" width="260" height="90" rx="8" class="box"/>
+    <text x="130" y="52" text-anchor="middle" class="lbl-lg">Telemetry log</text>
+  </g>
+
+  <path d="M540 630 L 520 630" class="edge"/>
+
+  <!-- Legend -->
+  <g transform="translate(40, 690)">
+    <rect x="0" y="0" width="18" height="14" class="llm-box"/>
+    <text x="26" y="12" class="sub-sm">= LLM agent  (Patcher LLM now selects from rewrite catalog)</text>
+    <rect x="360" y="0" width="18" height="14" class="new-box"/>
+    <text x="386" y="12" class="sub-sm" style="fill:#dc2626">= new / modified for rewrite-first design</text>
+  </g>
+</svg>
