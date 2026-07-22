@@ -94,7 +94,13 @@ class ReducerConfig:
     cascade_cancel_ratio: float = 0.1
 
 
-SCHEMA_VERSION = 1
+# v2 (2026-07-22): every region record and cascade-chain record gains an
+# explicit ``integral`` field carrying its parent ``integrals[<name>]`` bucket
+# name.  Purely additive/self-describing — the report was ALREADY per-integral
+# (top-level bucketing), so this only stamps the bucket name onto each record so
+# a downstream consumer can key on (line, integral) without re-deriving it from
+# the enclosing bucket.  No structural change; v1 readers ignore the new field.
+SCHEMA_VERSION = 2
 
 
 # ---------------------------------------------------------------------------
@@ -570,6 +576,10 @@ def _extract_cascade_chains(nodes: dict[str, dict], amp: dict[str, float],
         chains[chain_id] = {
             "kind": "cascade_chain",
             "chain_id": chain_id,
+            # explicit parent-integral tag (v2).  Already implicit in chain_id
+            # (``cascade_<integral>_...``); stamped here for symmetry with the
+            # region records so a consumer never has to parse it back out.
+            "integral": integral,
             "chain": [spans[k] for k in sorted(spans)],
             "signal_class": "cancellation_cascade",
             "non_localizable": False,
@@ -694,17 +704,19 @@ def reduce_journal(path, cfg: ReducerConfig | None = None) -> dict:
         "kind": "stability_shard_report",
         "samples_seen": samples_seen,
         "no_id_records": no_id_records,
-        "integrals": {name: _integral_to_json(data) for name, data in integrals.items()},
+        "integrals": {name: _integral_to_json(name, data)
+                      for name, data in integrals.items()},
     }
 
 
-def _integral_to_json(data: dict) -> dict:
+def _integral_to_json(name: str, data: dict) -> dict:
     regions = {}
     for loc, reg in data["regions"].items():
         r = dict(reg)
         r["rel_err_hist"] = reg["rel_err_hist"].to_dict()
         r["prov_vars"] = sorted(reg["prov_vars"])
         r["region_local_vars"] = sorted(reg["region_local_vars"])
+        r["integral"] = name          # v2: explicit parent-bucket tag
         regions[loc] = r
     return {"regions": regions, "variables": data["variables"],
             "cascade_chains": data.get("cascade_chains", {})}
@@ -733,7 +745,9 @@ def merge_reports(reports: list[dict]) -> dict:
             dst = out_integrals.setdefault(
                 name, {"regions": {}, "variables": {}, "cascade_chains": {}})
             for loc, reg in idata.get("regions", {}).items():
-                _merge_region(dst["regions"].setdefault(loc, _new_region_json()), reg)
+                mreg = dst["regions"].setdefault(loc, _new_region_json())
+                _merge_region(mreg, reg)
+                mreg["integral"] = name    # v2: authoritative parent-bucket tag
             for vid, var in idata.get("variables", {}).items():
                 _merge_variable(dst["variables"].setdefault(vid, _new_variable_json()), var)
             # cascade chains are per-(sample, victim) — union by chain_id, never
@@ -754,7 +768,7 @@ def _new_region_json() -> dict:
             "max_rel_err": 0.0, "rel_err_hist": {"buckets": {}, "total": 0},
             "max_sensitivity": 0.0, "max_amp": 0.0,
             "abs_val_min": None, "abs_val_max": None, "prov_vars": [],
-            "region_local_vars": []}
+            "region_local_vars": [], "integral": ""}
 
 
 def _new_variable_json() -> dict:
@@ -779,6 +793,12 @@ def _merge_region(dst: dict, src: dict) -> None:
     dst["prov_vars"] = sorted(set(dst["prov_vars"]) | set(src.get("prov_vars", [])))
     dst["region_local_vars"] = sorted(
         set(dst["region_local_vars"]) | set(src.get("region_local_vars", [])))
+    # v2: carry the parent-bucket tag through the merge so consumers that only
+    # call _merge_region (fast_merge's partitioned merge) inherit it without a
+    # separate stamp.  All src regions for a given loc share one bucket, so this
+    # is order-independent; empty on legacy (v1) shards that carry no tag.
+    if src.get("integral"):
+        dst["integral"] = src["integral"]
 
 
 def _merge_variable(dst: dict, src: dict) -> None:
@@ -845,12 +865,17 @@ def _signal_class(reg: dict, cfg: ReducerConfig) -> tuple[str, str]:
     return "stable", "no elevated conditioning or accumulated-error signal"
 
 
-def _classify_region(reg: dict, cfg: ReducerConfig) -> dict:
+def _classify_region(reg: dict, cfg: ReducerConfig,
+                     integral: str | None = None) -> dict:
     cond = reg.get("max_cond", 0.0)
     sens = reg.get("max_sensitivity", 0.0)
     cls, note = _signal_class(reg, cfg)
     hist = LogHist.from_dict(reg.get("rel_err_hist", {}))
     return {
+        # v2: explicit parent-integral tag.  finalize_report passes the bucket
+        # name; fast_merge calls without it and we read the tag _merge_region
+        # carried onto the region dict (empty on a legacy v1 region).
+        "integral": integral if integral is not None else reg.get("integral", ""),
         "signal_class": cls,                     # mechanistic; Strategy branches on it
         "note": note,                            # describes the measurement, not a fix
         "non_localizable": cls == "cancellation_cascade",
@@ -901,7 +926,7 @@ def finalize_report(merged: dict, cfg: ReducerConfig | None = None) -> dict:
     out_integrals: dict[str, dict] = {}
 
     for name, idata in merged.get("integrals", {}).items():
-        regions = {loc: _classify_region(reg, cfg)
+        regions = {loc: _classify_region(reg, cfg, name)
                    for loc, reg in idata.get("regions", {}).items()}
         variables = {vid: _classify_variable(var, cfg)
                      for vid, var in idata.get("variables", {}).items()
