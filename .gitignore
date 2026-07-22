@@ -17,6 +17,9 @@ runs/qcdloop/validator/*/
 runs/qcdloop/strategy/*/
 !runs/qcdloop/strategy/.gitkeep
 
+# Per-integral orchestrator run artifacts (filtered reports + cloned trees + manifests)
+runs/qcdloop/per_integral_out/
+
 # Python caches
 **/__pycache__/
 *.py[cod]
