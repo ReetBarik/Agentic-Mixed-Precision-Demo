@@ -85,3 +85,101 @@ is done.
 Call-graph-aware fan-out (`g_f1_B3` variants, regions only) → rename cascade →
 per-integral validation scope → combine step (21 trees → one app) → dedup at
 combine. Chains stay merged throughout.
+
+---
+
+# Addendum — BIN4 tail-sizing pass (2026-07-22)
+
+_A second single-integral pass on a chain-heavy integral to establish the tail of
+the 21-integral sizing extrapolation. **BIN4 (38,605 chains)**, not BIN2: the probe
+"~32k mid-range BIN2" was wrong — the actual chain counts are BIN2=59,001 (max),
+BIN1=56,723, BIN4=38,605, BIN0=32,302, BIN3=31,630. BIN4 is the true mid-of-pack._
+
+## BIN4 run (report_5k, tol=10, seed=12345, 5k samples, run `20260722_230945`)
+
+| metric | B1 (ref) | BIN4 |
+|---|---|---|
+| chains in report | 0 | 38,605 |
+| status | success | **partial** (dr_k=40 tripped) |
+| wall (strategy pass) | 794 s | **1432 s (~23.9 min)** |
+| iterations | 40 (corr 2, spd 38) | 40 (**corr 40, spd 0**) |
+| accepts / rejects | 0 / 40 | 0 / 40 |
+| settled dist | double×32, dd×2 | double×82, **dd×14** |
+| regions_at_threshold (chain-floored lines) | 32 | **38,673** |
+| regions_dd_untested / unresolved | 0 / 0 | 13 / 1 |
+| disk / pass | 48 MB | **80.6 MB** |
+| filtered-report slice | 27 MB | **75 MB** |
+
+## Where BIN4's cost goes
+
+- **All 40 iterations were correctness** — chains flood the correctness (dd-promotion)
+  queue and BIN4 tripped `dr_k=40` before draining it; **it never reached the speedup
+  phase.** B1 spent 2 iters in correctness and 38 in speedup. This is the chain-driven
+  divergence the pass was launched to measure.
+- **Per-iter cost:** B1 19.9 s/iter (float/ff speedup), BIN4 35.8 s/iter — but only
+  **14/40** BIN4 iters reached the Validator (`patcher_status=ok`, dd candidate built +
+  run); the other 26 failed upstream and were cheap. The 14 dd-validate iters carry the
+  weight.
+
+## Reject-cause breakdown (demonstrates the Phase-2 manifest gap concretely)
+
+BIN4's 40 "rejects" are **three distinct causes** — unlike B1, where all 40 were the
+same `insufficient_fix`:
+
+| patcher_status | count | meaning |
+|---|---|---|
+| `ok` (→ validator) | 14 | dd candidate built + run → all `insufficient_fix`, `cand_min_precise_digits = 3.691` |
+| `llm_gen_failed` | 12 | LLM could not generate the `reformulate-identity` rewrite (R3 cascade) |
+| `empty_candidate` | 14 | Patcher produced no candidate (non-fatal empty, dd promotions) |
+
+The manifest's coarse `verdict` field collapses all three into `"reject"`. **This is
+exactly the Phase-2 followup flagged during Phase 1** (see below): fine for B1, lossy
+for BIN4. `patcher_status` + `verdict_reason` are in `iterations.jsonl` and just need
+threading into `_decision_from_iter`.
+
+Note also: the `cand_min_precise_digits = 3.691` on BIN4's validated candidates is the
+**same global floor** as B1 — confirming the Validator is still whole-app (global min
+across all 21 integrals, pinned by B1's cancellation), so BIN4 candidates fail the same
+floor. Blocker #2 (whole-app validation) reconfirmed on a second integral.
+
+## DD-oracle cache — warm, no invalidation
+
+BIN4 reused B1's cached oracle (`dd_2229ec4…_seed12345_n5000.pkl`) and vanilla baseline
+(`current_…_n5000.pkl`); **no oracle rebuild.** Per-iter cost is candidate build+run
+only. Cache behaves as designed (atomic `.tmp`+replace, content-keyed) — no
+invalidation bug on the second pass. Base repo pristine after the run.
+
+## Revised 21-integral extrapolation
+
+**Key correction: wall is `dr_k`-bounded, not chain-count-bounded.** Both B1 and BIN4
+hit the 40-iter `dr_k` cap, so wall does **not** scale linearly with chain count —
+scaling BIN* by chains (32k→59k) would overestimate. The right model is per-family,
+per-iter cost × the `dr_k` cap:
+
+- **16 B-family** (few/no chains, speedup-dominated) ≈ **794 s** each
+- **5 BIN\*** (chain-heavy, correctness-dominated) ≈ **1432 s** each
+
+| scheduling | wall | vs naive flat |
+|---|---|---|
+| sequential | 16·794 + 5·1432 = **~5.5 h** | flat-from-B1 4.6 h (under), flat-from-BIN4 8.4 h (over) |
+| @4 workers | **~1.4 h** (LPT makespan; BIN* are the long poles) | — |
+| @8 workers | **~0.85 h** (bounded below by one 1432 s task + load balance) | — |
+
+**Caveat:** these are `dr_k=40` *partial*-pass walls for the BIN* family (BIN4 never
+ran speedup). A full drain (correctness + speedup) needs a higher `dr_k` for chain-heavy
+integrals — MEMORY already notes raising `dr_k` when the cascade phase's repeated
+`llm_gen_failed`/`empty_candidate` trip the streak (here 26/40 non-validator failures
+tripped it). A full-pass 21-run would be longer; this sizing is for the current config.
+
+**Disk, by contrast, *is* chain-driven** (the filtered-report slice: BIN4 75 MB ≈
+1.9 KB/chain). All-21 retained ≈ **~1.2 GB** (16·48 MB + BIN* report slices scaled by
+chain count); naive 80.6 MB×21 = 1.7 GB overestimates. Report slices are ephemeral
+(gitignored) and can be deleted post-pass to cut peak disk.
+
+## Phase-2 followup recorded (not fixed in Phase 1)
+
+`build_manifest`'s decision row keeps only a coarse `verdict`; it drops `patcher_status`
+(build_failed / llm_gen_failed / empty_candidate / timeout) and `verdict_reason`
+(insufficient_fix / regressed / tolerance). BIN4 (3 distinct causes) makes the loss
+concrete. Phase 2's fan-out will produce genuinely mixed causes → add both fields to
+`agents/per_integral_orchestrator/manifest.py:_decision_from_iter`. Not blocking.
