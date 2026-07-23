@@ -318,6 +318,16 @@ def _gen_regional_fanout(intent: RemediationIntent, deps: PatchDeps, attempt: in
         # → fall back to the classic regional boundary path.
         return _gen_regional(intent, deps, attempt)
 
+    # Phase 2c promotion_no_op gate: the fan-out placed + wired the variant, but the
+    # region promotion retyped nothing (empty payload) — the body is byte-identical to
+    # the original at the region, so the candidate would be a bit-for-bit clone of the
+    # baseline.  Terminal + deterministic (source-derived reads won't change on retry).
+    if not fr.promotion_applied:
+        return Gen(False, R.PROMOTION_NO_OP, R.ERR_EMPTY,
+                   f"promotion_no_op: region {intent.target.location} promotes nothing "
+                   f"(empty payload; reads={fr.reads_used}) — variant body is "
+                   f"byte-identical to the original")
+
     return Gen(True, shim_paths=list(res.shim_paths), llm_tokens=res.llm_tokens,
                declared_variants=list(fr.declared_variants),
                files_touched=list(fr.files_touched),

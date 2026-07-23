@@ -82,6 +82,10 @@ _PATCHER_STATUS_TO_CELL_STATUS = {
     "llm_gen_failed": STATUS_PATCHER_FAILED,
     "empty_candidate": STATUS_PATCHER_FAILED,
     "patch_inapplicable": STATUS_PATCHER_FAILED,
+    # Phase 2c: an empty promotion payload is a codegen gap (nothing retyped), so it
+    # folds to patcher_failed — never a silent ``measured`` cell.  The finer
+    # ``promotion_no_op`` label is preserved in the manifest failure_modes histogram.
+    "promotion_no_op": STATUS_PATCHER_FAILED,
     "timeout": STATUS_PATCHER_FAILED,
     "build_failed": STATUS_BUILD_FAILED,
     "call_graph_build_failed": STATUS_BUILD_FAILED,

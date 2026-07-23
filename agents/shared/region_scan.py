@@ -57,6 +57,27 @@ _ASSIGN_OPS = {"=", "+=", "-=", "*=", "/=", "%=", "&=", "|=", "^=", "<<=", ">>="
 _MULTI_OPS = ("<<=", ">>=", "==", "!=", "<=", ">=", "&&", "||", "::",
               "+=", "-=", "*=", "/=", "%=", "&=", "|=", "^=", "<<", ">>")
 
+# Discrete/integer type spellings whose locals are never promoted to an extended
+# float scalar (Rule 1 — an ``int`` index or count must stay integral; promoting
+# ``i`` in ``res(i,0)`` would corrupt the subscript).  Same alphabet the boundary
+# transform's ``_INT_TYPES`` keys off.
+_INT_TYPE_TOKENS = frozenset({
+    "int", "bool", "char", "short", "long", "unsigned", "signed", "size_t",
+    "int8_t", "int16_t", "int32_t", "int64_t",
+    "uint8_t", "uint16_t", "uint32_t", "uint64_t", "ptrdiff_t", "void",
+})
+
+# Container / aggregate core type spellings whose locals are never a *scalar* read
+# (a ``Kokkos::View`` / ``Kokkos::Array`` is an output view or coefficient buffer,
+# not a value the boundary transform can wrap in ``ext(x)``).  Matched on the
+# last ``::`` segment of the core type, so ``Kokkos::View`` matches ``View``.
+_AGGREGATE_TYPE_TOKENS = frozenset({"View", "Array"})
+
+# Type qualifiers / storage specifiers stripped when reducing a declaration's type
+# tokens to its core type spelling.
+_TYPE_QUALIFIERS = frozenset({"const", "volatile", "constexpr", "static",
+                              "inline", "register", "mutable", "typename"})
+
 
 class RegionScanError(RuntimeError):
     """Raised when the region source cannot be read at the requested SHA."""
@@ -81,6 +102,238 @@ def extract_region_writes(
     if names is not None:
         return names
     return _extract_fallback(src, line_start, line_end, tracked_type)
+
+
+# --------------------------------------------------------------------------- #
+# region *read* derivation (Phase 2c — source-derived promotion payload)
+# --------------------------------------------------------------------------- #
+
+def region_reads_from_function(func_source: str, func_line_start: int,
+                               region_start: int, region_end: int) -> list[str]:
+    """Scalar-typed reads a region consumes, derived from its enclosing function.
+
+    Phase 2c fix for the *empty promotion payload*: the characterizer emits
+    ``region_local_vars=[]`` (or provenance-indexed junk) for qcdloop's template
+    regions, so :func:`agents.integrator_base.boundary.promote_region_block` had no
+    reads to retype and returned the region verbatim (a bit-identical no-op).  This
+    recovers a usable reads set the only way it survives for a template region:
+    from **source**.
+
+    The reads set is the region's *scalar value reads* — identifiers appearing in
+    ``[region_start, region_end]`` (absolute 1-based file lines) that are declared
+    as function-scope **params or locals of a scalar (floating / template) type**.
+    It is deliberately conservative: it excludes
+
+    * integer indices/counts (``const int i`` — promoting ``i`` would corrupt a
+      ``res(i,0)`` subscript) and other discrete-typed locals;
+    * aggregate containers (``Kokkos::View`` / ``Kokkos::Array`` — a view/buffer is
+      not an ``ext(x)``-wrappable scalar);
+    * type names, namespace qualifiers, member fields, and call targets (these are
+      never declared *names*, so they never enter the scalar-name universe);
+
+    while including the floating/template locals the promotion actually needs
+    (``si``, ``ta``, ``fac``, ``lnrat_*``, ``mu2``, ``scalefac2``, …).
+
+    ``func_source`` is the enclosing function's source text (the lines
+    ``func_line_start..func_end`` of the file); ``func_line_start`` is that first
+    line's 1-based file number, used to map the absolute region range onto
+    ``func_source``.  Deterministic, source-only, no runtime or type-resolution
+    dependency — a pure token scan (reads, unlike writes, need no AST type
+    resolution, and libclang cannot resolve a template region's types without its
+    include context anyway; see the module docstring).
+
+    A read that turns out to be region-*local* (declared inside the region) or a
+    pre-declared *write* is harmlessly re-classified by ``_compute_promotion``'s
+    dataflow — over-inclusion here costs nothing, so the scan errs toward the
+    superset of scalar names and lets the boundary transform partition them.
+    """
+    toks = _tokenize(func_source)                 # ``.line`` is 1-based in func_source
+    universe = _scalar_name_universe(toks)
+    rs = region_start - func_line_start + 1
+    re_ = region_end - func_line_start + 1
+
+    reads: list[str] = []
+    seen: set[str] = set()
+    n = len(toks)
+    for idx, t in enumerate(toks):
+        if not (rs <= t.line <= re_):
+            continue
+        if not _is_ident_tok(t.text) or t.text not in universe or t.text in seen:
+            continue
+        # A bare ``name =`` at this position is a pure (non-compound) write target,
+        # not a read; ``_compute_promotion`` seeds it from Fix-C's write set.  A
+        # compound ``name +=`` reads too, so only plain ``=`` is excluded (the
+        # tokenizer emits ``+=`` etc. whole, so this never mistakes one for ``=``).
+        nxt = toks[idx + 1].text if idx + 1 < n else ""
+        if nxt == "=":
+            continue
+        seen.add(t.text)
+        reads.append(t.text)
+    return reads
+
+
+def _scalar_name_universe(toks: list["_Tok"]) -> set[str]:
+    """Names declared (as params or body locals) with a scalar (float/template) type.
+
+    Params are the identifiers in the function's parameter list; body locals are the
+    ``<type> <name> = <init>`` statement-level declarations.  Both are classified by
+    their core type spelling (:func:`_core_type_is_scalar`)."""
+    names: set[str] = set()
+    names |= _param_scalar_names(toks)
+    names |= _local_decl_scalar_names(toks)
+    return names
+
+
+def _param_scalar_names(toks: list["_Tok"]) -> set[str]:
+    """Scalar-typed parameter names from the function's parameter list.
+
+    The parameter list is the first ``(...)`` in ``toks`` (a template ``<...>`` or a
+    bare ``KOKKOS_INLINE_FUNCTION`` macro carries no ``(``, so the first ``(`` opens
+    the params).  Each top-level ``,``-separated clause's *name* is its last
+    identifier (skipping a trailing ``[...]``); the tokens before the name are its
+    type."""
+    n = len(toks)
+    open_idx = next((k for k in range(n) if toks[k].text == "("), None)
+    if open_idx is None:
+        return set()
+    close_idx = _match_paren(toks, open_idx)
+    if close_idx is None:
+        return set()
+
+    names: set[str] = set()
+    depth = 0          # () [] {} nesting
+    angle = 0          # <> template-argument nesting (params are type contexts, so
+                       # ``<`` opens a template arg list, never a comparison)
+    clause: list[_Tok] = []
+
+    def flush(cl: list["_Tok"]) -> None:
+        if _param_is_scalar(cl):
+            nm = _param_name(cl)
+            if nm:
+                names.add(nm)
+
+    for k in range(open_idx + 1, close_idx):
+        tx = toks[k].text
+        if tx in "([{":
+            depth += 1; clause.append(toks[k]); continue
+        if tx in ")]}":
+            depth -= 1; clause.append(toks[k]); continue
+        if tx == "<":
+            angle += 1; clause.append(toks[k]); continue
+        if tx == ">":
+            angle = max(0, angle - 1); clause.append(toks[k]); continue
+        if tx == ">>":
+            angle = max(0, angle - 2); clause.append(toks[k]); continue
+        if tx == "," and depth == 0 and angle == 0:
+            flush(clause); clause = []; continue
+        clause.append(toks[k])
+    flush(clause)
+    return names
+
+
+def _param_name(clause: list["_Tok"]) -> str | None:
+    """The parameter name: the last identifier before any trailing ``[...]``."""
+    end = len(clause)
+    # drop a trailing array extent ``[...]`` (e.g. ``T (&a)[4]``) if present
+    while end > 0 and clause[end - 1].text == "]":
+        depth = 0
+        j = end - 1
+        while j >= 0:
+            if clause[j].text == "]":
+                depth += 1
+            elif clause[j].text == "[":
+                depth -= 1
+                if depth == 0:
+                    break
+            j -= 1
+        end = j
+    for j in range(end - 1, -1, -1):
+        if _is_ident_tok(clause[j].text):
+            return clause[j].text
+    return None
+
+
+def _param_is_scalar(clause: list["_Tok"]) -> bool:
+    """A parameter is a scalar read source iff its *type* is scalar (non-int,
+    non-aggregate, non-pointer)."""
+    name = _param_name(clause)
+    type_toks = [t.text for t in clause if t.text != name]
+    return _core_type_is_scalar(type_toks)
+
+
+def _local_decl_scalar_names(toks: list["_Tok"]) -> set[str]:
+    """Scalar-typed body-local names from ``<type> <name> = <init>`` declarations.
+
+    Mirrors the boundary transform's decl detection (two adjacent identifiers then
+    ``=``) but keyed on the *type token* (the identifier before the name) being a
+    scalar spelling — so ``const TMass si = …`` adds ``si`` while ``int massive =
+    0`` and ``Kokkos::Array<…> xpi = …`` are skipped."""
+    names: set[str] = set()
+    n = len(toks)
+    for i in range(n - 2):
+        type_tok, name_tok, eq_tok = toks[i], toks[i + 1], toks[i + 2]
+        if not (_is_ident_tok(type_tok.text) and _is_ident_tok(name_tok.text)
+                and eq_tok.text == "="):
+            continue
+        # ``a = b`` re-assignment (``name_tok`` is the RHS lead, not a decl name):
+        # a decl needs the type token to be a type, so a preceding ``.``/``::``/``(``
+        # (member/qualified/call context) disqualifies it.
+        prev = toks[i - 1].text if i >= 1 else ""
+        if prev in (".", "::") or prev == "->":
+            continue
+        if _core_type_is_scalar([type_tok.text]):
+            names.add(name_tok.text)
+    return names
+
+
+def _core_type_is_scalar(type_toks: list[str]) -> bool:
+    """True if a declaration's type tokens denote a scalar (float/template) type.
+
+    The *core* type is the leading ``ident(::ident)*`` run (after skipping leading
+    qualifiers), taken up to the first ``<`` / ``&`` / trailing qualifier — i.e. the
+    **outermost** type name, not an inner template argument, so
+    ``Kokkos::Array<...TMass...>`` resolves to ``Array`` (aggregate), not ``TMass``.
+    The last ``::`` segment of the core is matched against the integer and aggregate
+    blocklists.  A pointer (``*``) or C-array (``[``) anywhere makes it non-scalar.
+    What remains — ``double`` / ``float`` or a template type parameter (``TMass`` /
+    ``TOutput`` / ``T``) — is scalar."""
+    if any(tx in ("*", "[", "]") for tx in type_toks):
+        return False                           # pointer / C-array → not a scalar
+    name_parts: list[str] = []
+    started = False
+    for tx in type_toks:
+        if tx in _TYPE_QUALIFIERS:
+            if started:
+                break                          # trailing qualifier ends the name
+            continue
+        if tx == "::":
+            if started:
+                name_parts.append(tx)
+            continue
+        if _is_ident_tok(tx):
+            name_parts.append(tx)
+            started = True
+            continue
+        break                                  # '<', '&', ',', '>', … end the name
+    if not name_parts:
+        return False
+    core = "".join(name_parts).rsplit("::", 1)[-1]
+    if core in _INT_TYPE_TOKENS or core in _AGGREGATE_TYPE_TOKENS:
+        return False
+    return True
+
+
+def _match_paren(toks: list["_Tok"], open_idx: int) -> int | None:
+    """Index of the ``)`` matching the ``(`` at ``open_idx`` (or ``None``)."""
+    depth = 0
+    for k in range(open_idx, len(toks)):
+        if toks[k].text == "(":
+            depth += 1
+        elif toks[k].text == ")":
+            depth -= 1
+            if depth == 0:
+                return k
+    return None
 
 
 # --------------------------------------------------------------------------- #

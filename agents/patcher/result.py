@@ -45,11 +45,19 @@ EMPTY_CANDIDATE = "empty_candidate"
 # revert commit): an inapplicable rung is benign — Strategy advances the walk
 # (settling at the current rung) instead of flagging a bug.
 PATCH_INAPPLICABLE = "patch_inapplicable"
+# A fan-out variant / in-place promotion whose rendered region body is byte-identical
+# to the original — an *empty promotion payload* (no reads/writes retyped), so the
+# candidate would be a bit-for-bit clone of the baseline at plain double.  Terminal
+# and deterministic (retrying the LLM shim cannot change the source-derived reads):
+# distinct from EMPTY_CANDIDATE (a whole-tree no-diff after a *real* edit) — this is
+# specifically "the promotion transform did nothing".  Phase 2c defense-in-depth so
+# an empty payload can never again masquerade as a silent ``measured`` scorer cell.
+PROMOTION_NO_OP = "promotion_no_op"
 
 STATUSES = frozenset({
     OK, LLM_GEN_FAILED, PATCH_APPLY_FAILED, COMMIT_FAILED,
     BUILD_FAILED, RUNTIME_CRASHED, RUNTIME_NAN, TIMEOUT, EMPTY_CANDIDATE,
-    PATCH_INAPPLICABLE,
+    PATCH_INAPPLICABLE, PROMOTION_NO_OP,
 })
 
 # error.kind vocabulary (design §P2).

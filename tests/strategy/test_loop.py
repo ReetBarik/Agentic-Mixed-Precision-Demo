@@ -73,7 +73,7 @@ def const_validator(verdict):
 # --------------------------------------------------------------------------
 
 def test_commit_failed_aborts_internal_error(tmp_path):
-    report = write_report(tmp_path, [("A", "a.h", 5, "stable", 1e-3, 1e-2)])
+    report = write_report(tmp_path, [("A", "a.h", 5, "log_near_root", 1e-3, 1e-2)])
     res, rep = run_agent(tmp_path, report, ok_patcher(["commit_failed"]),
                          const_validator("accept"))
     assert res["status"] == "internal_error"
@@ -88,7 +88,7 @@ def test_budget_max_iters_correctness_only(tmp_path):
     # A correctness-only workload soft-exhausts phase 1 at its cap and (phase 2
     # empty) ends "success" (overall status = phase-2's status), NOT a run-level
     # budget_exhausted — phase-1 hitting its cap is a soft hand-off.
-    regions = [(f"I{i}", "a.h", 10 + i, "stable", 1e-3, 1e-2) for i in range(5)]
+    regions = [(f"I{i}", "a.h", 10 + i, "log_near_root", 1e-3, 1e-2) for i in range(5)]
     report = write_report(tmp_path, regions)
     res, rep = run_agent(tmp_path, report, ok_patcher(), const_validator("reject"),
                          max_iters=2)
@@ -100,14 +100,14 @@ def test_budget_max_iters_correctness_only(tmp_path):
 
 
 def test_diminishing_returns_partial(tmp_path):
-    regions = [(f"I{i}", "a.h", 10 + i, "stable", 1e-3, 1e-2) for i in range(5)]
+    regions = [(f"I{i}", "a.h", 10 + i, "log_near_root", 1e-3, 1e-2) for i in range(5)]
     report = write_report(tmp_path, regions)
     res, rep = run_agent(tmp_path, report, ok_patcher(), const_validator("reject"), k=2)
     assert res["status"] == "partial"
 
 
 def test_dd_untested_via_build_failed(tmp_path):
-    report = write_report(tmp_path, [("A", "a.h", 5, "stable", 1e-3, 1e-2)])
+    report = write_report(tmp_path, [("A", "a.h", 5, "log_near_root", 1e-3, 1e-2)])
     res, rep = run_agent(tmp_path, report, ok_patcher(["build_failed"]),
                          const_validator("accept"))
     cs = rep["correctness_summary"]
@@ -119,7 +119,7 @@ def test_dd_untested_via_build_failed(tmp_path):
 
 
 def test_timeout_retries_once_then_ok(tmp_path):
-    report = write_report(tmp_path, [("A", "a.h", 5, "stable", 1e-3, 1e-2)])
+    report = write_report(tmp_path, [("A", "a.h", 5, "log_near_root", 1e-3, 1e-2)])
     patcher = ok_patcher(["timeout", "ok"])
     res, rep = run_agent(tmp_path, report, patcher, const_validator("accept"))
     # same intent tried twice (timeout → retry → ok), then validated + cleared
@@ -129,7 +129,7 @@ def test_timeout_retries_once_then_ok(tmp_path):
 
 
 def test_timeout_twice_folds_to_reject(tmp_path):
-    report = write_report(tmp_path, [("A", "a.h", 5, "stable", 1e-3, 1e-2)])
+    report = write_report(tmp_path, [("A", "a.h", 5, "log_near_root", 1e-3, 1e-2)])
     res, rep = run_agent(tmp_path, report, ok_patcher(["timeout", "timeout"]),
                          const_validator("accept"))
     # second timeout folds to build_failed-equivalent → DD never tested → untested
@@ -137,7 +137,7 @@ def test_timeout_twice_folds_to_reject(tmp_path):
 
 
 def test_patch_apply_failed_is_strategy_bug_and_free(tmp_path):
-    report = write_report(tmp_path, [("A", "a.h", 5, "stable", 1e-3, 1e-2)])
+    report = write_report(tmp_path, [("A", "a.h", 5, "log_near_root", 1e-3, 1e-2)])
     res, rep = run_agent(tmp_path, report, ok_patcher(["patch_apply_failed"]),
                          const_validator("accept"))
     rec = json.loads(Path(rep["iteration_log_path"]).read_text().splitlines()[0])

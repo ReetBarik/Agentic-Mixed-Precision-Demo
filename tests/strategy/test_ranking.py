@@ -23,7 +23,9 @@ def test_error_threshold():
 
 
 def test_tier_order_is_fixed():
-    # one region per class, all above the error threshold where relevant
+    # one region per class, all above the error threshold where relevant.  The
+    # stable region is dropped from correctness (Phase 2c); the three signal tiers
+    # keep their fixed order.
     lc = make_region("B14", "B2m.h", 401, "local_cancellation", max_cond=1e16, max_rel_err=ABOVE)
     cc = make_region("B12", "B2m.h", 355, "cancellation_cascade", max_cond=1e6, max_rel_err=ABOVE)
     lnr = make_region("B10", "B0m.h", 230, "log_near_root", max_cond=1e3, max_rel_err=ABOVE)
@@ -31,7 +33,7 @@ def test_tier_order_is_fixed():
 
     q = build_correctness_queue([st, lnr, cc, lc], TOL)
     assert [r.signal_class for r in q] == [
-        "local_cancellation", "cancellation_cascade", "log_near_root", "stable"]
+        "local_cancellation", "cancellation_cascade", "log_near_root"]
 
 
 def test_local_cancellation_always_tier1_even_at_low_error():
@@ -51,10 +53,22 @@ def test_stable_within_tolerance_not_in_correctness():
     assert build_correctness_queue([st], TOL) == []
 
 
-def test_stable_surprising_error_is_tier4():
+def test_stable_surprising_error_excluded_from_correctness():
+    # Phase 2c: a stable region above the error bar is NOT queued for correctness —
+    # a well-conditioned region has no error to fix, so a promotion can only be inert.
     st = make_region("B1", "B0m.h", 116, "stable", max_rel_err=ABOVE)
-    q = build_correctness_queue([st], TOL)
-    assert len(q) == 1 and q[0].signal_class == "stable"
+    assert build_correctness_queue([st], TOL) == []
+
+
+def test_2c_stable_dropped_from_correctness_but_kept_in_speedup():
+    # Both directions of the Phase 2c signal gate on ONE region: a stable, above-bar,
+    # demotable (ff-safe) region is dropped from correctness (nothing to fix) yet
+    # retained in speedup (a well-conditioned region is the intended demotion target).
+    st = make_region("B1", "B0m.h", 116, "stable", max_rel_err=ABOVE,
+                     pred_float=BELOW, pred_ff=BELOW, op_count=50)
+    corr, spd = build_queues([st], TOL)
+    assert corr == []
+    assert [r.target.location for r in spd] == ["B0m.h:116"]
 
 
 def test_intratier_sorted_by_cond_desc():
@@ -98,12 +112,16 @@ def test_speedup_ff_gate_subsumes_float_at_low_tolerance():
 
 
 def test_speedup_excludes_correctness_regions():
-    # a stable region above the error bar AND float-safe: goes to correctness tier4,
-    # must NOT also appear in speedup.
+    # The two queues are disjoint by signal_class after Phase 2c (correctness =
+    # signal tiers only, speedup = stable only), and the exclude-set still guards the
+    # invariant: a region never appears in both.  A stable, above-bar, float-safe
+    # region now lands in speedup (its intended queue), not correctness.
     dual = make_region("B1", "f.h", 1, "stable", max_rel_err=ABOVE, pred_float=BELOW, op_count=50)
     corr, spd = build_queues([dual], TOL)
-    assert len(corr) == 1
-    assert spd == []
+    assert corr == []
+    assert [r.target.location for r in spd] == ["f.h:1"]
+    # no region is ever in both queues
+    assert not ({r.key for r in corr} & {r.key for r in spd})
 
 
 def test_speedup_nonstable_excluded():

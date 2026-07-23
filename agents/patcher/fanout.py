@@ -53,6 +53,7 @@ from pathlib import Path
 from agents.integrator_base import boundary
 from agents.patcher.call_graph import CallGraph, FuncDef
 from agents.patcher.variant_naming import assert_no_collisions, variant_names_for_path
+from agents.shared import region_scan
 
 # Per-file generated-variant block markers.  The manifest comment on the first line
 # after BEGIN is the source of truth; the rendered definitions below it are derived
@@ -191,6 +192,15 @@ class FanoutResult:
     in_place_region: bool = False       # region was IN the entry point (no new symbol)
     paths_enumerated: int = 0
     truncated: bool = False             # path enumeration hit its cap
+    # Phase 2c promotion_no_op gate: True iff the intent's region promotion actually
+    # retyped something (``promote_region_block`` returned ``promoted=True``).  When
+    # False the variant/in-place body is byte-identical to the original at the region
+    # — an empty promotion payload — which the Patcher turns into a terminal
+    # ``promotion_no_op`` failure instead of a silent inert (bit-identical) candidate.
+    promotion_applied: bool = False
+    # The reads set actually used (source-derived when the intent carried none) —
+    # surfaced for forensics / tests.
+    reads_used: list[str] = field(default_factory=list)
 
 
 # --------------------------------------------------------------------------- #
@@ -230,13 +240,31 @@ def fan_out_region(
             f"region {file}:{line_start}-{line_end} is not inside any known function "
             f"(call graph rooted at {graph.root!r}); cannot fan out")
 
+    # Phase 2c: source-derive the promotion reads when the intent carried none
+    # (qcdloop's template regions report ``region_local_vars=[]``).  Derived from the
+    # enclosing function's own source (the same original text the variant is copied
+    # from), so the reads are consistent with the body that gets promoted.
+    reads = list(reads)
+    if not reads:
+        func_src = "\n".join(_original_text(fd.file, fd.line_start, fd.line_end))
+        reads = region_scan.region_reads_from_function(
+            func_src, fd.line_start, line_start, line_end)
+
+    # Compute the promotion payload up front (independent of the variant/in-place
+    # rendering path): ``promoted`` is False when the region retypes nothing — an
+    # empty payload the caller turns into a terminal ``promotion_no_op``.
+    region_text = "\n".join(_original_text(fd.file, line_start, line_end))
+    _, promotion_applied = boundary.promote_region_block(
+        region_text, reads, writes, scalar_type, caller_type, two_limb)
+
     # --- degenerate: region is IN the entry point -> promote in place ---------
     if fd.name == graph.root:
         touched = _promote_in_place(tree, fd, line_start, line_end, reads, writes,
                                     scalar_type, two_limb, caller_type, shim_include)
         return FanoutResult(declared_variants=[], files_touched=touched,
                             root_edited=True, in_place_region=True,
-                            paths_enumerated=1)
+                            paths_enumerated=1, promotion_applied=promotion_applied,
+                            reads_used=list(reads))
 
     paths, truncated = graph.enumerate_paths(fd.name, max_paths=max_paths)
     if not paths:
@@ -295,7 +323,8 @@ def fan_out_region(
 
     return FanoutResult(declared_variants=sorted(set(declared)),
                         files_touched=sorted(touched), root_edited=True,
-                        paths_enumerated=len(paths), truncated=truncated)
+                        paths_enumerated=len(paths), truncated=truncated,
+                        promotion_applied=promotion_applied, reads_used=list(reads))
 
 
 # --------------------------------------------------------------------------- #

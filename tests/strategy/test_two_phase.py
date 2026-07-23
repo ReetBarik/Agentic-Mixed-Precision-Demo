@@ -25,11 +25,21 @@ def _stable(pf, pff, rel, ops):
             "prov_vars": ["v"], "ops": ops, "n": 100, "non_localizable": False}
 
 
+def _correctness_region(pf, pff, rel, ops):
+    # Phase 2c: correctness regions must carry a NON-stable signal class (stable
+    # regions no longer enter the correctness queue).  ``log_near_root`` is gated on
+    # ``max_rel_err > thr`` and (like the former stable-tier-4) has no rewrite step —
+    # it walks straight to the dd ceiling, so the scripted-walk expectations hold.
+    r = _stable(pf, pff, rel, ops)
+    r["signal_class"] = "log_near_root"
+    return r
+
+
 def write_report(tmp_path, *, correctness=(), speedup=(), chains=()):
     """Build a stability report.
 
-    * ``correctness`` — ``(integral, file, line)`` stable regions with high
-      rel-err (correctness tier 4) that are ff-*unsafe* (never in the speedup q).
+    * ``correctness`` — ``(integral, file, line)`` ``log_near_root`` regions with
+      high rel-err (correctness tier 3) that are ff-*unsafe* (never in the speedup q).
     * ``speedup``     — ``(integral, file, line, op_count)`` stable, ff-safe AND
       float-safe (``pred_float`` under the tol=10 bar so the Wave-3 WI2 float gate
       does not pre-empt the ``ff->float`` step), low-rel-err regions (speedup queue
@@ -44,7 +54,7 @@ def write_report(tmp_path, *, correctness=(), speedup=(), chains=()):
             integ, {"class_counts": {}, "regions": {}, "cascade_chains": []})
 
     for integ, file, line in correctness:
-        _slot(integ)["regions"][f"{file}:{line}"] = _stable(1e-2, 1e-2, 1e-3, {"sub": 2})
+        _slot(integ)["regions"][f"{file}:{line}"] = _correctness_region(1e-2, 1e-2, 1e-3, {"sub": 2})
     for integ, file, line, opc in speedup:
         _slot(integ)["regions"][f"{file}:{line}"] = _stable(1e-12, 1e-12, 1e-16, {"mul": opc})
     for integ, cid, spans in chains:

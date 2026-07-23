@@ -33,6 +33,8 @@ _FANOUT_FAILURE_PREFIXES = (
     "variant_name_collision",
     "rename_cascade_incomplete",
     "silent_bypass",
+    # Phase 2c: an empty promotion payload (region body byte-identical to original).
+    "promotion_no_op",
 )
 
 

@@ -1,11 +1,14 @@
 """Ranking function — two class-driven queues (design: "Ranking function").
 
-Correctness queue (fixed 4-tier order, drained first):
+Correctness queue (fixed 3-tier order, drained first):
 
   1. All ``local_cancellation`` regions (cond > 1e15 by construction).
   2. ``cancellation_cascade`` regions with ``max_rel_err > 10^-tolerance``.
   3. ``log_near_root`` regions with ``max_rel_err > 10^-tolerance``.
-  4. ``stable`` regions that surprisingly show ``max_rel_err > 10^-tolerance``.
+
+``stable`` regions are deliberately *not* queued for correctness (Phase 2c): a
+well-conditioned region has no error to fix, so promoting it can only be inert.
+They remain the intended targets of the speedup queue below.
 
 Speedup queue: ``stable`` regions demotable to a cheaper-than-baseline rung that
 still meets tolerance, ranked biggest-hardware-win first — flop-weighted
@@ -90,7 +93,18 @@ def _correctness_sort_key(r: RegionRecord):
 
 
 def build_correctness_queue(regions: list[RegionRecord], tolerance: float) -> list[RegionRecord]:
-    """The 4-tier correctness queue in fixed tier order."""
+    """The class-driven correctness queue in fixed tier order.
+
+    Phase 2c: ``stable`` regions are **not** queued for correctness.  A region the
+    characterizer classed ``stable`` carries "no elevated conditioning or
+    accumulated-error signal" — there is no error to fix, so promoting it can only be
+    inert (an upcast of a well-conditioned region reproduces the baseline bit-for-bit;
+    see runs/qcdloop/INERT_PATCH_INVESTIGATION).  The former tier-4 ("stable but
+    ``max_rel_err > 10^-tolerance``") turned an all-stable integral like B1 into a
+    queue of inert intents; dropping it makes the correctness manifest honest ("nothing
+    to fix") instead.  Stable regions remain the *intended* targets of the **speedup**
+    queue (:func:`build_speedup_queue`) — that gate is deliberately untouched, so a
+    well-conditioned region is still attempted for demotion."""
     thr = error_threshold(tolerance)
 
     tier1 = [r for r in regions if r.signal_class == SIGNAL_LOCAL_CANCELLATION]
@@ -98,11 +112,9 @@ def build_correctness_queue(regions: list[RegionRecord], tolerance: float) -> li
              if r.signal_class == SIGNAL_CANCELLATION_CASCADE and r.max_rel_err > thr]
     tier3 = [r for r in regions
              if r.signal_class == SIGNAL_LOG_NEAR_ROOT and r.max_rel_err > thr]
-    tier4 = [r for r in regions
-             if r.signal_class == SIGNAL_STABLE and r.max_rel_err > thr]
 
     queue: list[RegionRecord] = []
-    for tier in (tier1, tier2, tier3, tier4):
+    for tier in (tier1, tier2, tier3):
         queue.extend(sorted(tier, key=_correctness_sort_key))
     return queue
 

@@ -262,3 +262,100 @@ def test_bad_sha_raises(tmp_path, backend):
     root, sha, f = _init_repo(tmp_path, "k.h", content)
     with pytest.raises(region_scan.RegionScanError):
         extract_region_writes(str(f), 2, 2, "deadbeefdeadbeefdeadbeefdeadbeefdeadbeef")
+
+
+# --------------------------------------------------------------------------- #
+# region *read* derivation (Phase 2c) — pure token scan, no backend/libclang
+# --------------------------------------------------------------------------- #
+
+from agents.shared.region_scan import region_reads_from_function  # noqa: E402
+
+# The real qcdloop B1 function (box/B0m.h:108-127), a template region whose
+# characterizer ``region_local_vars`` is empty — the case Phase 2c must recover.
+_B1_FUNC = """\
+    template<typename TOutput, typename TMass, typename TScale>
+    KOKKOS_INLINE_FUNCTION
+    void B1(
+        const Kokkos::View<TOutput* [3]>& res,
+        const Kokkos::Array<Kokkos::Array<TMass, 4>, 4>& Y,
+        TScale const& mu2,
+        const int i) {
+
+        const TMass si = ql::Constants<TMass>::_two() * Y[0][2];
+        const TMass ta = ql::Constants<TMass>::_two() * Y[1][3];
+        const TOutput fac = ql::Constants<TOutput>::_one() / (si * ta);
+
+        const TOutput lnrat_tamu2 = ql::Lnrat<TOutput, TMass, TScale>(ta, mu2);
+        const TOutput lnrat_simu2 = ql::Lnrat<TOutput, TMass, TScale>(si, mu2);
+        const TOutput lnrat_tasi = ql::Lnrat<TOutput, TMass, TScale>(ta, si);
+
+        res(i,2) = fac * ql::Constants<TOutput>::_two() * ql::Constants<TOutput>::_two();
+        res(i,1) = fac * ql::Constants<TOutput>::_two() * (-lnrat_tamu2 - lnrat_simu2);
+        res(i,0) = fac * (lnrat_tamu2 * lnrat_tamu2 + lnrat_simu2 * lnrat_simu2 - lnrat_tasi * lnrat_tasi - TOutput(ql::Constants<TScale>::_pi2()));
+    }"""
+_B1_START = 108   # file line of the ``template<...>`` first line
+
+
+def test_reads_single_assignment_line():
+    # res(i,0) = fac * (lnrat_tamu2*... - TOutput(ql::Constants<TScale>::_pi2()))
+    # Hand-verified scalar reads: fac + the three lnrat locals.  Excludes the write
+    # target res, the int index i, the type name TOutput, and the qualified call
+    # chain ql::Constants<TScale>::_pi2.
+    reads = region_reads_from_function(_B1_FUNC, _B1_START, 126, 126)
+    assert reads == ["fac", "lnrat_tamu2", "lnrat_simu2", "lnrat_tasi"]
+
+
+def test_reads_multi_line_region_source_order():
+    # A region spanning the local decls + the res writes: params/locals of scalar
+    # type in source order.  Excludes int index i, View res, Array Y, and every
+    # type/namespace/call token.
+    reads = region_reads_from_function(_B1_FUNC, _B1_START, 116, 126)
+    assert reads == ["si", "ta", "mu2", "fac",
+                     "lnrat_tamu2", "lnrat_simu2", "lnrat_tasi"]
+
+
+def test_reads_exclude_int_index_and_aggregates():
+    reads = region_reads_from_function(_B1_FUNC, _B1_START, 116, 126)
+    for excluded in ("i", "res", "Y", "TOutput", "TMass", "TScale", "ql",
+                     "Constants", "Lnrat"):
+        assert excluded not in reads
+
+
+def test_reads_entry_point_normalize_region():
+    # The BO entry-point normalize region: res(i,0) /= scalefac2 — scalefac2 is a
+    # TScale local declared just above; the only scalar read.
+    bo = """\
+    void BO(const Kokkos::View<TOutput* [3]>& res, const int i) {
+        const TScale scalefac = ql::Max(ql::kAbs(p(i, 4)));
+        const TScale scalefac2 = scalefac * scalefac;
+        res(i, 0) /= scalefac2;
+        res(i, 1) /= scalefac2;
+    }"""
+    # function starts at line 1; scalefac2 decl at line 3, region at line 4.
+    assert region_reads_from_function(bo, 1, 4, 4) == ["scalefac2"]
+    assert region_reads_from_function(bo, 1, 3, 5) == ["scalefac", "scalefac2"]
+
+
+def test_reads_empty_when_no_scalar_operands():
+    # A region that writes a view element from literals only — no scalar reads, so
+    # the derivation is empty (which the Patcher turns into promotion_no_op).
+    fn = """\
+    void f(const Kokkos::View<TOutput* [3]>& res, const int i) {
+        res(i, 0) = ql::Constants<TOutput>::_zero();
+    }"""
+    assert region_reads_from_function(fn, 1, 2, 2) == []
+
+
+def test_reads_compound_assign_is_a_read_plain_assign_is_not():
+    fn = """\
+    void f() {
+        TMass acc = 0.0;
+        TMass val = 3.0;
+        acc += val;
+        acc = val;
+    }"""
+    # `acc += val` reads both acc and val; `acc = val` (plain) reads val only. Over
+    # the union region, acc appears via the compound op, val throughout.
+    assert region_reads_from_function(fn, 1, 4, 4) == ["acc", "val"]
+    # A region with ONLY a plain assignment: the LHS name is a write, not a read.
+    assert region_reads_from_function(fn, 1, 5, 5) == ["val"]
