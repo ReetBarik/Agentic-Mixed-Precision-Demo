@@ -39,7 +39,8 @@ class DispatchEntry:
     dd_untested: bool
 
 
-# The 8 Patcher statuses (P2), exhaustive.
+# Every Patcher status (``agents.patcher.result.STATUSES``), exhaustive.  The
+# test suite pins ``set(DISPATCH) == set(result.STATUSES)`` so the two can't drift.
 DISPATCH: dict[str, DispatchEntry] = {
     "ok": DispatchEntry(
         action="validate", log_tag="", counts_budget=True,
@@ -78,6 +79,17 @@ DISPATCH: dict[str, DispatchEntry] = {
     "patch_inapplicable": DispatchEntry(
         action="advance", log_tag="patch_inapplicable", counts_budget=False,
         is_reject=False, dd_untested=True),
+    # Phase 2c: the fan-out promotion produced a variant byte-identical to the
+    # original (empty read/write payload even after source-derivation) — the
+    # region has no promotable scalar operands, so NO rung would promote anything.
+    # Terminal for this intent (never retry — the result is deterministic and
+    # rung-independent), git-only so it doesn't count vs budget, and a reject that
+    # leaves the rung dd_untested.  Distinct from empty_candidate (which is a
+    # gen+build no-op) and llm_gen_failed (an LLM capacity miss): this is a
+    # deterministic structural detection at gen time, upstream of any build.
+    "promotion_no_op": DispatchEntry(
+        action="advance_terminal", log_tag="promotion_no_op", counts_budget=False,
+        is_reject=True, dd_untested=True),
 }
 
 

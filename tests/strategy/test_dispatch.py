@@ -2,6 +2,7 @@
 
 import pytest
 
+from agents.patcher import result as R
 from agents.strategy.dispatch import DISPATCH, dispatch
 
 
@@ -9,8 +10,15 @@ def test_all_statuses_present():
     assert set(DISPATCH) == {
         "ok", "build_failed", "runtime_nan", "runtime_crashed",
         "llm_gen_failed", "patch_apply_failed", "timeout", "commit_failed",
-        "empty_candidate", "patch_inapplicable",
+        "empty_candidate", "patch_inapplicable", "promotion_no_op",
     }
+
+
+def test_dispatch_covers_every_patcher_status():
+    # The guard that would have caught the Phase 2c drift: the dispatch table must
+    # handle exactly the statuses the Patcher can return — no missing key (a real
+    # status the loop would crash on) and no stale one.
+    assert set(DISPATCH) == set(R.STATUSES)
 
 
 def test_patch_inapplicable_is_benign_advance():
@@ -55,6 +63,17 @@ def test_llm_gen_failed_is_terminal_and_free():
     assert e.counts_budget is False           # doesn't count vs budget
 
 
+def test_promotion_no_op_is_terminal_and_free():
+    # Phase 2c: an empty promotion payload is a deterministic, rung-independent
+    # structural miss — terminal for the intent (like llm_gen_failed), git-only so
+    # free vs budget, but a real reject (unlike patch_inapplicable).
+    e = dispatch("promotion_no_op")
+    assert e.action == "advance_terminal"     # no rung would promote anything
+    assert e.log_tag == "promotion_no_op"
+    assert e.counts_budget is False
+    assert e.is_reject is True
+
+
 def test_patch_apply_failed_is_strategy_bug_and_free():
     e = dispatch("patch_apply_failed")
     assert e.action == "skip_intent"
@@ -76,7 +95,7 @@ def test_non_ok_statuses_flag_dd_untested():
     # P6a: any Patcher failure at the DD rung means DD was never honestly tested.
     for status in ["build_failed", "runtime_nan", "runtime_crashed",
                    "llm_gen_failed", "patch_apply_failed", "timeout",
-                   "empty_candidate", "patch_inapplicable"]:
+                   "empty_candidate", "patch_inapplicable", "promotion_no_op"]:
         assert dispatch(status).dd_untested is True
     assert dispatch("ok").dd_untested is False
 
