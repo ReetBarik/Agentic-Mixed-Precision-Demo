@@ -35,13 +35,24 @@ def run(state: PipelineState) -> dict:
 
 def make_validator_fn(base_state: dict, starting_sha: str, repo_path: str,
                       *, tolerance: float = 8.0,
-                      validate_fn: Callable | None = None):
+                      validate_fn: Callable | None = None,
+                      scorer_manifest_path: str | None = None,
+                      iteration_id: int = 0,
+                      baseline_spec: dict | None = None):
     """Build ``validator_fn(candidate_sha, ctx) -> verdict`` for Strategy's state.
 
     ``base_state`` / ``tolerance`` are the validate() inputs; ``starting_sha`` is
     the branch base the cumulative candidate diff is taken against; ``repo_path``
     is the strategy working tree.  ``validate_fn`` is injectable for tests
     (defaults to the real Validator).
+
+    Phase 2b — when ``scorer_manifest_path`` is set, each call additionally reduces
+    the app-level delta attributable to the intent's region (the ``scorer_cell`` on
+    ``ctx``, supplied by Strategy) into a ``(region_id, rung)`` cell appended to that
+    manifest.  ``iteration_id`` tags every cell (working-tree baseline policy: cells
+    are not cross-iteration-comparable); ``baseline_spec`` overrides the ground-truth
+    reference (defaults to qcdloop's ``dd`` instantiation inside ``validate``).  With
+    no ``scorer_manifest_path`` the Validator behaves exactly as pre-2b.
     """
     vfn = validate_fn if validate_fn is not None else _validate
 
@@ -53,7 +64,11 @@ def make_validator_fn(base_state: dict, starting_sha: str, repo_path: str,
         # tree it was built against matches the candidate tree (CALIBRATION.md §Bug 5).
         return vfn(base_state, patch, tol, snapshot,
                    reuse_binary=ctx.get("gate_binary"),
-                   reuse_tree_hash=ctx.get("gate_tree_hash"))
+                   reuse_tree_hash=ctx.get("gate_tree_hash"),
+                   cell=ctx.get("scorer_cell"),
+                   scorer_manifest_path=scorer_manifest_path,
+                   iteration_id=iteration_id,
+                   baseline_spec=baseline_spec)
 
     return validator_fn
 

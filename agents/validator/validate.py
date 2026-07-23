@@ -71,6 +71,7 @@ from pathlib import Path
 from agents.integrator_base import cache as _hashcache
 from agents.dd_integrator import agent as dd_integrator
 from agents.validator import runner
+from agents.validator import scorer as _scorer
 from agents.validator import tail as _tail
 from agents.validator.coeffs import COMPONENT_LABELS, N_COMPONENTS
 from agents.validator.precise_digits import (
@@ -94,11 +95,27 @@ def validate(base_state: dict, candidate_patch: str | None, tolerance: float = 8
              chunk: int = 0, workers: int = 1,
              run_id: str | None = None, persist: bool = True,
              reuse_binary: str | None = None,
-             reuse_tree_hash: str | None = None) -> dict:
+             reuse_tree_hash: str | None = None,
+             cell: dict | None = None,
+             scorer_manifest_path: str | None = None,
+             iteration_id: int = 0,
+             baseline_spec: dict | None = None) -> dict:
     """Precision-loss acceptance test for one ``candidate_patch``.
 
     Returns the verdict object (see module docstring / the task contract).
     Stateless: no memory of prior calls.
+
+    Phase 2b — the scorer (measurement) is now split from the verdict (decision).
+    When ``cell`` is supplied (``{region_id, rung, intent_id, integrals}``), the
+    already-computed candidate + DD-reference coeff arrays are additionally reduced
+    into a ``(region_id, rung) -> delta`` manifest cell (see
+    :mod:`agents.validator.scorer`) — the app-level relative error *attributable to
+    that region at that rung*, un-buried from the whole-app min the verdict gates on.
+    The cell is appended to ``scorer_manifest_path`` (a documented side-effect
+    artifact) and echoed back under the verdict's additive ``"scorer"`` key.  The
+    verdict itself (returned keys, gate logic) is unchanged: existing callers that
+    pass no ``cell`` see exactly the pre-2b behavior.  This reduction is pure over
+    arrays the Validator already builds, so it adds no wall-clock.
 
     Two gates, evaluated in order:
 
@@ -220,6 +237,17 @@ def validate(base_state: dict, candidate_patch: str | None, tolerance: float = 8
     verdict, reason = _decide_tail(rand_cand_min, comb_cand_min, comb_curr_min,
                                    max_regression, floor=tolerance)
 
+    # ---- 6. scorer (Phase 2b): reduce the SAME candidate + DD arrays into a
+    #         per-(region_id, rung) manifest cell, split from this verdict.  Pure
+    #         reduction — no extra build/run; skipped entirely when no cell given. ----
+    scorer_out = None
+    if cell:
+        scorer_out = _emit_scorer_cell(
+            cell, candidate_coeffs, dd_ref_coeffs, cand_tail, tail_offsets,
+            dd_repo, dd_ref, kokkos_root, dd_tree_hash,
+            work_tree_hash, snapshot, baseline_spec, iteration_id,
+            scorer_manifest_path)
+
     return {
         "verdict": verdict,
         "threshold": float(tolerance),          # absolute precise-digit accept bar (random)
@@ -234,7 +262,47 @@ def validate(base_state: dict, candidate_patch: str | None, tolerance: float = 8
         "snapshot": {"seed": seed, "sample_count": total},
         "run_id": run_id,
         "wall_seconds": round(time.monotonic() - t0, 1),
+        # Phase 2b additive field: the measured manifest cell + its artifact path.
+        # None when no cell was requested (unchanged behavior for pre-2b callers).
+        "scorer": scorer_out,
     }
+
+
+def _emit_scorer_cell(cell: dict, candidate_coeffs, dd_ref_coeffs,
+                      cand_tail, tail_offsets, dd_repo, dd_ref, kokkos_root,
+                      dd_tree_hash, work_tree_hash, snapshot,
+                      baseline_spec, iteration_id,
+                      manifest_path: str | None) -> dict:
+    """Build the measured manifest cell for ``cell`` and append it to the manifest.
+
+    ``cell`` = ``{region_id, rung, intent_id, integrals}``.  The reduction is over
+    the candidate + DD arrays already computed for the verdict (random battery) and,
+    when present, the sparse adversarial tail (``None`` -> ``delta_adversarial``
+    null, the 2b stub).  Returns ``{row, manifest_path}`` for the verdict echo.
+    """
+    spec = baseline_spec or _scorer.qcdloop_baseline_spec()
+    bid = _scorer.baseline_id(spec, work_tree_hash, dd_tree_hash)
+    battery = _scorer.snapshot_battery_spec(snapshot, tail_offsets)
+    bver = battery["version"]
+
+    # DD reference at the adversarial offsets (cached; returns {} when no offsets —
+    # the 2b report_5k case, so this is free).
+    dd_ref_tail = _dd_tail_coeffs(dd_repo, dd_ref, kokkos_root,
+                                  tail_offsets, dd_tree_hash) if tail_offsets else None
+
+    row = _scorer.score_cell(
+        region_id=cell["region_id"], rung=cell["rung"],
+        iteration_id=int(iteration_id),
+        candidate_coeffs=candidate_coeffs, dd_ref_coeffs=dd_ref_coeffs,
+        integrals_scope=cell.get("integrals"),
+        baseline_id=bid, battery_version=bver,
+        candidate_tail=cand_tail, dd_ref_tail=dd_ref_tail,
+        intent_id=cell.get("intent_id"),
+        patcher_metadata=cell.get("patcher_metadata"))
+
+    if manifest_path:
+        _scorer.append_row(manifest_path, row)
+    return {"row": row.to_dict(), "manifest_path": manifest_path}
 
 
 # ---------------------------------------------------------------------------

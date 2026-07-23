@@ -60,10 +60,16 @@ def _run_one(task: dict) -> dict:
     from agents.validator import tail as _tail
     from agents.validator.agent import make_validator_fn
 
+    from agents.validator import scorer as _scorer
+
     integral = task["integral"]
     out_dir = Path(task["out_dir"])
     starting_sha = task["starting_sha"]
     kokkos_root = task["kokkos_root"]
+    # Phase 2b: the scorer appends one measured (region_id, rung) cell per validated
+    # candidate here during the pass; the un-measured (patcher_failed / build_failed /
+    # wire_failed) cells are folded in from the iteration log after the pass.
+    scored_manifest = out_dir / f"scored_{integral}.jsonl"
 
     def build_gate(tree: Path) -> None:
         """Fail-fast: the fresh clone must build vanilla before any Patcher work."""
@@ -110,7 +116,9 @@ def _run_one(task: dict) -> dict:
             "tail_samples": tail_samples,
         }
         validator_fn = make_validator_fn(
-            base_state, starting_sha, str(tree), tolerance=task["tolerance"])
+            base_state, starting_sha, str(tree), tolerance=task["tolerance"],
+            scorer_manifest_path=str(scored_manifest), iteration_id=0,
+            baseline_spec=_scorer.qcdloop_baseline_spec())
         state = {
             "characterization_report_path": str(filtered_report),
             "strategy_repo_path": str(tree),
@@ -131,6 +139,14 @@ def _run_one(task: dict) -> dict:
         return {"integral": integral, "ok": False,
                 "err": repr(exc), "wall_sec": time.monotonic() - t0}
 
+    # Phase 2b: assemble the full scorer manifest (measured cells + the un-measured
+    # codegen/build/wire cells recovered from the iteration log) and record its path.
+    scorer_manifest_path = out_dir / f"manifest_scorer_{integral}.jsonl"
+    iter_log = (manifest.get("artifacts") or {}).get("iteration_log_path")
+    scorer_rows = _scorer.assemble_manifest(
+        scored_manifest, iter_log, scorer_manifest_path)
+    _annotate_manifest(manifest, scorer_manifest_path, scorer_rows)
+
     disk_bytes = _dir_size(out_dir)
     return {
         "integral": integral,
@@ -141,7 +157,33 @@ def _run_one(task: dict) -> dict:
         "wall_sec": manifest.get("timing", {}).get("wall_sec"),
         "disk_bytes": disk_bytes,
         "manifest_path": manifest.get("_manifest_path"),
+        "scorer_manifest_path": str(scorer_manifest_path),
+        "scorer_cells": _scorer_cell_summary(scorer_rows),
     }
+
+
+def _annotate_manifest(manifest: dict, scorer_manifest_path: Path,
+                       scorer_rows: list) -> None:
+    """Record the scorer-manifest path + cell tally into the pass manifest JSON."""
+    manifest["scorer_manifest_path"] = str(scorer_manifest_path)
+    manifest["scorer_cells"] = _scorer_cell_summary(scorer_rows)
+    mpath = manifest.get("_manifest_path")
+    if mpath and Path(mpath).is_file():
+        persisted = {k: v for k, v in manifest.items() if k != "_manifest_path"}
+        Path(mpath).write_text(json.dumps(persisted, indent=2))
+
+
+def _scorer_cell_summary(scorer_rows: list) -> dict:
+    """Small status tally over the assembled scorer rows (for the run summary)."""
+    from agents.validator.scorer import STATUS_MEASURED
+    by_status: dict[str, int] = {}
+    measured_deltas = 0
+    for r in scorer_rows:
+        by_status[r["status"]] = by_status.get(r["status"], 0) + 1
+        if r["status"] == STATUS_MEASURED and r.get("delta_effective") is not None:
+            measured_deltas += 1
+    return {"total": len(scorer_rows), "by_status": by_status,
+            "measured_with_delta": measured_deltas}
 
 
 def _dir_size(path: Path) -> int:
@@ -281,10 +323,15 @@ def _print_pass(res: dict) -> None:
         print(f"  {res['integral']}: FAILED ({res.get('err','')[:300]})", flush=True)
         return
     c = res.get("counts") or {}
+    sc = res.get("scorer_cells") or {}
     print(f"  {res['integral']}: {res.get('status')} "
           f"accepts={c.get('accepted')} rejects={c.get('rejected')} "
           f"iters={res.get('iterations')} wall={res.get('wall_sec')}s "
           f"disk={(res.get('disk_bytes') or 0)/1e6:.1f}MB", flush=True)
+    if sc:
+        print(f"      scorer cells: {sc.get('total')} "
+              f"({sc.get('by_status')}); manifest={res.get('scorer_manifest_path')}",
+              flush=True)
 
 
 def _sizing_summary(results, total_wall, workers, n_total) -> dict:

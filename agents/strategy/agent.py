@@ -406,7 +406,7 @@ class StrategyRun:
             verdict_tail = None
             verdict_reason = None
             if patcher_ok:
-                verdict = self._invoke_validator(resp, iter_id)
+                verdict = self._invoke_validator(resp, iter_id, intent, record)
                 validator_verdict = verdict.get("verdict")
                 verdict_digits = (verdict.get("candidate") or {}).get("min_precise_digits")
                 verdict_tail = verdict.get("tail")
@@ -483,7 +483,8 @@ class StrategyRun:
                         "error": {"kind": "timeout", "detail": "second timeout folded to build_failed"}}
         return resp
 
-    def _invoke_validator(self, resp: dict, iter_id: int) -> dict:
+    def _invoke_validator(self, resp: dict, iter_id: int,
+                          intent=None, record=None) -> dict:
         artifacts = resp.get("artifacts") or {}
         ctx = {"run_id": self.run_id, "branch": self.branch,
                "repo_path": str(self.repo_path) if self.repo_path else None,
@@ -493,7 +494,28 @@ class StrategyRun:
                # reuses the just-built candidate binary instead of rebuilding it.
                "gate_binary": artifacts.get("gate_binary"),
                "gate_tree_hash": artifacts.get("gate_tree_hash")}
+        # Phase 2b: hand the Validator the (region_id, rung) cell descriptor so its
+        # scorer can attribute the app-level delta to this region.  ``target.location``
+        # is byte-identical to scorer.canonical_region_id (both "file:line" /
+        # "file:start-end"); ``record.integrals`` scopes the output reduction to the
+        # region's integral(s).  Ignored by validator_fn when no scorer is wired.
+        if intent is not None:
+            ctx["scorer_cell"] = self._scorer_cell(intent, record, iter_id)
         return self.validator_fn(resp.get("candidate_sha"), ctx)
+
+    @staticmethod
+    def _scorer_cell(intent, record, iter_id: int) -> dict:
+        from agents.validator.scorer import rung_from_kind
+        integrals = list(getattr(record, "integrals", None) or
+                         ([record.integral] if getattr(record, "integral", None) else []))
+        return {
+            "region_id": intent.target.location,
+            "rung": rung_from_kind(intent.kind),
+            "intent_id": iter_id,
+            "integrals": integrals,
+            "patcher_metadata": {"kind": intent.kind, "intent": intent.intent,
+                                 "via": getattr(intent, "via", None)},
+        }
 
     def _patcher_ctx(self, iter_id: int) -> dict:
         return {"run_id": self.run_id, "branch": self.branch,
