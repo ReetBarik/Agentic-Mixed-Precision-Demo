@@ -88,8 +88,18 @@ def _run_one(task: dict) -> dict:
         )
         build_config = {"app_cmake_dir": str(APP_CMAKE_DIR),
                         "kokkos_root": kokkos_root}
+        # Phase 2a: enable call-graph fan-out for regional intents (variants instead
+        # of dead type-specialization shims).  The call graph is rooted at the
+        # integral entry point and built once per pass against the cloned tree.
+        fanout = None
+        if task.get("fanout"):
+            from agents.patcher.fanout import FanoutSettings, clear_graph_cache
+            clear_graph_cache()          # fresh graph per pass (per-process reuse only)
+            fanout = FanoutSettings(
+                entry_point=task["entry_point"], integral=integral,
+                max_paths=task.get("fanout_max_paths", 1024))
         patcher_fn = make_patcher_fn(build_config=build_config,
-                                     config=PipelineConfig())
+                                     config=PipelineConfig(), fanout=fanout)
         tail_samples = _tail.load_tail_samples(filtered_report)
         base_state = {
             "vanilla_headers": task["vanilla_headers"],
@@ -170,6 +180,14 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--max-iters-speedup", type=int, default=None)
     ap.add_argument("--max-wall-hours", type=float, default=4.0)
     ap.add_argument("--dr-k", type=int, default=None)
+    ap.add_argument("--fanout", action="store_true",
+                    help="Phase 2a: realize regional intents as per-caller-path "
+                         "function variants (call-graph fan-out) instead of shims.")
+    ap.add_argument("--entry-point", default="BO",
+                    help="Call-graph root for fan-out (qcdloop integral entry point).")
+    ap.add_argument("--fanout-max-paths", type=int, default=1024,
+                    help="Cap on caller-paths enumerated per intent (over-generation "
+                         "bound; a hit is logged, not silent).")
     ap.add_argument("--clean", action="store_true",
                     help="Remove --out-dir before running.")
     args = ap.parse_args(argv)
@@ -207,6 +225,8 @@ def main(argv: list[str] | None = None) -> int:
     print(f"  vanilla       : {vanilla_headers}", flush=True)
     print(f"  dd_repo@ref   : {args.dd_repo}@{args.dd_ref}", flush=True)
     print(f"  tolerance     : {args.tolerance}", flush=True)
+    print(f"  fanout        : {args.fanout} (entry={args.entry_point}, "
+          f"max_paths={args.fanout_max_paths})", flush=True)
     print("===================================", flush=True)
 
     tasks = [{
@@ -227,6 +247,9 @@ def main(argv: list[str] | None = None) -> int:
         "max_iters_speedup": args.max_iters_speedup,
         "max_wall_hours": args.max_wall_hours,
         "dr_k": args.dr_k,
+        "fanout": args.fanout,
+        "entry_point": args.entry_point,
+        "fanout_max_paths": args.fanout_max_paths,
     } for integral in integrals]
 
     t0 = time.monotonic()

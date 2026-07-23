@@ -79,6 +79,11 @@ _SPEC = regional.RegionalSpec(
     derive_constants=False,
 )
 
+# Public alias — the Patcher fan-out (Phase 2a) reads the concrete C++ scalar
+# spelling / two_limb flag from here so type spellings have one source of truth.
+SPEC = _SPEC
+
+
 
 def integrate(*args, **kwargs):
     """Whole-app float mode — not implemented (documented follow-up).

@@ -85,6 +85,10 @@ class Gen:
     shim_paths: list[str] = field(default_factory=list)
     boundary_patch_path: str | None = None
     llm_tokens: int = 0
+    # Phase-2a fan-out extras (empty on the classic regional / non-fan-out paths):
+    declared_variants: list[str] = field(default_factory=list)
+    files_touched: list[str] = field(default_factory=list)
+    in_place_region: bool = False      # region was IN the entry point (no new symbol)
 
 
 @dataclass
@@ -98,12 +102,21 @@ class PatchDeps:
     integrators: dict
     # llm_call(system, user, attempt) -> str  (rewrite text)
     llm_call: Callable[[str, str, int], str]
+    # Phase-2a: per-pass fan-out settings (None -> classic regional shim+boundary path)
+    fanout: object | None = None
 
 
 def generate(intent: RemediationIntent, deps: PatchDeps, attempt: int,
              path: str) -> Gen:
     """Run the generator for ``path``, mutating the (clean) working tree."""
     if path == PATH_REGIONAL:
+        # Phase 2a: a regional intent in a fan-out-enabled pass is realized as
+        # per-caller-path function variants instead of a type-specialization shim
+        # (Blocker #1 fix).  Falls back to the classic path when fan-out cannot place
+        # the region (not in a resolvable/reachable function — e.g. a chain rep).
+        fanout = getattr(deps, "fanout", None)
+        if fanout is not None and getattr(fanout, "enabled", False):
+            return _gen_regional_fanout(intent, deps, attempt)
         return _gen_regional(intent, deps, attempt)
     if path == PATH_PLAIN_EDIT:
         return _gen_plain_edit(intent, deps)
@@ -194,6 +207,121 @@ def _gen_regional(intent: RemediationIntent, deps: PatchDeps, attempt: int) -> G
     return Gen(True, shim_paths=list(res.shim_paths),
                boundary_patch_path=str(boundary_patch_path) if boundary_patch_path else None,
                llm_tokens=res.llm_tokens)
+
+
+# ---------------------------------------------------------------------------
+# 1b. regional-integrator via call-graph fan-out (Phase 2a)
+# ---------------------------------------------------------------------------
+
+def _precision_cpp(which: str) -> tuple[str, bool]:
+    """Concrete C++ scalar spelling + two-limb flag for ``which`` (ff/dd/float).
+
+    Read from the integrator ``SPEC`` objects so type spellings have one source of
+    truth (no duplication of ``quad::ffun::ffloat`` etc. in the Patcher)."""
+    from agents.dd_integrator.agent import SPEC as _DD
+    from agents.ff_integrator.agent import SPEC as _FF
+    from agents.float_integrator.agent import SPEC as _FL
+    spec = {"dd": _DD, "ff": _FF, "float": _FL}[which]
+    return spec.cpp_scalar, spec.two_limb
+
+
+def _gen_regional_fanout(intent: RemediationIntent, deps: PatchDeps, attempt: int) -> Gen:
+    """Realize a regional intent as per-caller-path variants (design Phase 2a).
+
+    Generates+installs the extended-precision shim via the same integrator as the
+    classic path (LLM, retryable), then — instead of applying that integrator's
+    include-site boundary patch — splices the promoted region into copied function
+    variants and cascades the renames up to the entry point (see
+    :mod:`agents.patcher.fanout`).  Falls back to :func:`_gen_regional` when the
+    region cannot be placed in the call graph (e.g. a chain representative).
+    """
+    from agents.patcher import fanout as fo
+    from agents.patcher.call_graph import CallGraphError
+    from agents.shared.region_scan import extract_region_writes
+
+    to = intent.kind.split("-to-")[-1]
+    scalar = {"ff": "ffloat", "dd": "ddouble"}.get(to, "float")
+    which = {"ff": "ff", "dd": "dd"}.get(to, "float")
+    caller_type = "float" if intent.kind == "float-to-ff" else "double"
+    integrator = deps.integrators.get(which)
+    if integrator is None:
+        return Gen(False, R.LLM_GEN_FAILED, R.ERR_INTEGRATOR, f"no {which}_integrator wired")
+
+    try:
+        rel_file = deps.target_path.resolve().relative_to(
+            deps.repo_root.resolve()).as_posix()
+    except (AttributeError, ValueError):
+        rel_file = intent.target.file
+
+    # composite ff-to-dd / ff-to-float: strip the prior ff install first (as classic).
+    if intent.kind in ("ff-to-dd", "ff-to-float"):
+        rv = _do_revert(intent, deps, "-to-ff")
+        if not rv.ok:
+            return rv
+
+    # Call graph (built once per pass, cached).  A build failure is terminal — fail
+    # loud rather than silently miss edges (new manifest mode call_graph_build_failed).
+    try:
+        graph = fo.graph_for_pass(deps.fanout, deps.repo_root)
+    except CallGraphError as exc:
+        return Gen(False, R.PATCH_APPLY_FAILED, R.ERR_APPLY,
+                   f"call_graph_build_failed: {exc}")
+
+    # 1. Generate + install the shim (LLM); its boundary patch is intentionally
+    #    ignored — the fan-out splices the promotion into variant copies instead.
+    try:
+        res: RegionIntegrationResult = integrator(
+            file=rel_file, line_start=intent.target.line_start,
+            line_end=intent.target.line_end, variables=list(intent.target.variables),
+            working_tree=deps.parent_sha, repo_path=str(deps.repo_root),
+            scalar_type=scalar, caller_type=caller_type, direction="in",
+            out_dir=deps.shims_dir, attempt=attempt)
+    except NotImplementedError as exc:
+        return Gen(False, R.LLM_GEN_FAILED, R.ERR_INTEGRATOR, str(exc))
+    except Exception as exc:  # noqa: BLE001
+        return Gen(False, R.LLM_GEN_FAILED, R.ERR_INTEGRATOR, repr(exc))
+    if res is None or not getattr(res, "ok", False):
+        detail = getattr(res, "error", None) or "integrator returned no result"
+        toks = getattr(res, "llm_tokens", 0) if res else 0
+        return Gen(False, R.LLM_GEN_FAILED, R.ERR_INTEGRATOR, detail, llm_tokens=toks)
+
+    shim_include = f"ql_shim_{which}.h"          # regional.canonical_shim_name
+    scalar_cpp, two_limb = _precision_cpp(which)
+
+    # 2. Region writes (Fix C) for the promotion; non-fatal on scan error.
+    try:
+        writes = extract_region_writes(rel_file, intent.target.line_start,
+                                       intent.target.line_end, deps.parent_sha,
+                                       tracked_type=caller_type)
+    except Exception:  # noqa: BLE001
+        writes = []
+
+    # 3. Fan out: variant copies + rename cascade.  A FanoutError (region not in a
+    #    resolvable/reachable function — e.g. a chain representative) falls back to
+    #    the classic regional boundary path so the intent still gets a fair shot.
+    from agents.patcher.variant_naming import VariantNameError
+    try:
+        fr = fo.fan_out_region(
+            file=rel_file, line_start=intent.target.line_start,
+            line_end=intent.target.line_end, reads=list(intent.target.variables),
+            writes=list(writes), integral=deps.fanout.integral, graph=graph,
+            tree_root=str(deps.repo_root), scalar_type=scalar_cpp, two_limb=two_limb,
+            shim_include=shim_include, caller_type=caller_type,
+            max_paths=deps.fanout.max_paths)
+    except VariantNameError as exc:
+        # A collision is a fan-out bug, not a chain rep — surface it terminally
+        # (deterministic; retrying cannot help) as the new manifest failure mode.
+        return Gen(False, R.PATCH_APPLY_FAILED, R.ERR_APPLY,
+                   f"variant_name_collision: {exc}")
+    except fo.FanoutError:
+        # Region not in a resolvable/reachable function (e.g. a chain representative)
+        # → fall back to the classic regional boundary path.
+        return _gen_regional(intent, deps, attempt)
+
+    return Gen(True, shim_paths=list(res.shim_paths), llm_tokens=res.llm_tokens,
+               declared_variants=list(fr.declared_variants),
+               files_touched=list(fr.files_touched),
+               in_place_region=fr.in_place_region)
 
 
 # ---------------------------------------------------------------------------

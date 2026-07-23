@@ -87,6 +87,11 @@ _SPEC = regional.RegionalSpec(
     ),
 )
 
+# Public alias — the Patcher fan-out (Phase 2a) reads the concrete C++ scalar
+# spelling / two_limb flag from here so type spellings have one source of truth.
+SPEC = _SPEC
+
+
 # The ddfun_enabled DD triple that marks a qcdloop tree as DD-ready.  All three
 # must be co-located (same directory) — a bare kokkosMaths_dd.h without the
 # dd_math/dd_complex it includes is not a usable DD tree.

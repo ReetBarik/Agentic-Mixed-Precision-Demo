@@ -58,6 +58,11 @@ _SPEC = regional.RegionalSpec(
     shim_prefix="ff",
 )
 
+# Public alias — the Patcher fan-out (Phase 2a) reads the concrete C++ scalar
+# spelling / two_limb flag from here so type spellings have one source of truth.
+SPEC = _SPEC
+
+
 
 def integrate(*args, **kwargs):
     """Whole-app ff mode — not implemented (documented follow-up).

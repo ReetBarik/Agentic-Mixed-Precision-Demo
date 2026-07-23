@@ -29,6 +29,10 @@ from agents.build_run.agent import _module_settings
 from agents.integrator_base.cache import hash_header_dir
 from agents.patcher import result as R
 
+# Source extensions scanned for variant reference-counting (the fan-out wiring gate).
+_SRC_EXTS = (".h", ".hpp", ".hh", ".hxx", ".cuh", ".inl", ".ipp", ".cpp", ".cc", ".cxx")
+_IDENT_CHARS = set("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_")
+
 _REPO = Path(__file__).resolve().parents[2]
 DEFAULT_APP_CMAKE_DIR = _REPO / "runs" / "qcdloop" / "app"
 DEFAULT_KOKKOS_ROOT = Path.home() / "kokkos-install"
@@ -150,3 +154,152 @@ def _scan_smoke(run: subprocess.CompletedProcess, expected_rows: int,
                           f"only {len(res_lines)} result rows (<{expected_rows})",
                           build_log, runtime_log)
     return GateResult(R.OK, None, None, build_log, runtime_log)
+
+
+# ===========================================================================
+# Phase 2a — variant-wiring gate (rename-cascade guard) + nm telemetry
+# ===========================================================================
+#
+# The fan-out (:mod:`agents.patcher.fanout`) turns a region intent into per-caller-
+# path function *variants* and reroutes the call chain up to the entry point.  A
+# rename-cascade bug leaves a variant DEFINED but never CALLED (its parent still
+# calls the original), which compiles fine (both exist) yet silently bypasses the
+# precision change — the very "shim exists but nothing routes to it" failure fan-out
+# is meant to eliminate, one level up.
+#
+# The reliable detector is source-level, not ``nm``.  qcdloop's variants are
+# ``KOKKOS_INLINE_FUNCTION`` *templates*; once instantiated they are usually inlined
+# away, so a correctly-wired variant legitimately produces NO defined symbol — an
+# ``nm``-only check would false-fail on every real variant.  So the HARD gate is
+# "every declared variant is referenced (called) somewhere in the tree source"
+# (an orphan variant is defined but appears only at its own definition site), and
+# ``nm`` is kept as *supplementary telemetry* (which variants did emit a symbol, and
+# what the candidate binary carries that the baseline does not).
+
+
+def _tree_sources(tree_root: Path) -> list[Path]:
+    return [p for p in sorted(Path(tree_root).rglob("*"))
+            if p.suffix.lower() in _SRC_EXTS and p.is_file() and ".git" not in p.parts]
+
+
+def _callable_occurrences(text: str, name: str) -> int:
+    """Count whole-word ``name`` tokens immediately followed by ``(`` or ``<``.
+
+    Comment/string-agnostic *over-count* is fine here — we only compare against the
+    single guaranteed definition-site occurrence, and any extra (a call) proves the
+    variant is referenced.  Uses a cheap whole-word regex; the definition's
+    ``name(`` param list always contributes exactly one.
+    """
+    count = 0
+    for m in re.finditer(r"(?<![\w])" + re.escape(name) + r"\s*[<(]", text):
+        # guard the left boundary: the char before must not be an identifier char
+        start = m.start()
+        if start > 0 and text[start - 1] in _IDENT_CHARS:
+            continue
+        count += 1
+    return count
+
+
+def referenced_variants(tree_root: Path, declared: list[str]) -> set[str]:
+    """Subset of ``declared`` variants that are *called* somewhere in the tree.
+
+    A declared variant is "referenced" if its callable-occurrence count across all
+    tree sources exceeds one (one occurrence is its own definition signature; two or
+    more means at least one call site).
+    """
+    if not declared:
+        return set()
+    counts = {v: 0 for v in declared}
+    for src in _tree_sources(tree_root):
+        try:
+            text = src.read_text(encoding="utf-8", errors="ignore")
+        except OSError:
+            continue
+        for v in declared:
+            if v in text:                       # cheap prefilter
+                counts[v] += _callable_occurrences(text, v)
+    return {v for v, c in counts.items() if c >= 2}
+
+
+def check_variant_wiring(tree_root: Path, declared: list[str]) -> str | None:
+    """HARD rename-cascade guard: return an error detail if any declared variant is
+    orphaned (defined but never called), else ``None``.
+
+    Robust to inlining (source-level).  The returned detail is prefixed
+    ``rename_cascade_incomplete:`` so the manifest can classify the new failure mode.
+    """
+    if not declared:
+        return None
+    referenced = referenced_variants(tree_root, declared)
+    orphans = sorted(set(declared) - referenced)
+    if orphans:
+        return (f"rename_cascade_incomplete: {len(orphans)} declared variant(s) are "
+                f"defined but never called (orphaned by a broken reroute): {orphans}. "
+                f"A caller was left pointing at the original, silently bypassing the "
+                f"precision change.")
+    return None
+
+
+def check_no_silent_bypass(tree_root: Path, reroutes: dict[str, str]) -> str | None:
+    """Assert each expected reroute actually landed: the variant is referenced and,
+    for each ``original -> variant`` pair, the variant's call count is non-zero.
+
+    ``reroutes`` maps an original callee name to the variant it should now route to
+    (collected from the fan-out manifest / result).  Returns an error detail
+    (prefixed ``silent_bypass:``) if a variant that should be called is not, else
+    ``None``.  Complements :func:`check_variant_wiring` (which guards orphans) by
+    naming the specific reroute that failed.
+    """
+    if not reroutes:
+        return None
+    variants = sorted({v for v in reroutes.values()})
+    referenced = referenced_variants(tree_root, variants)
+    missed = [f"{orig}->{var}" for orig, var in sorted(reroutes.items())
+              if var not in referenced]
+    if missed:
+        return (f"silent_bypass: expected reroute(s) not wired in — {missed}; a caller "
+                f"still calls the original instead of the variant.")
+    return None
+
+
+def nm_defined_symbols(*paths: Path, demangle: bool = True) -> set[str]:
+    """Defined symbols in the given object/binary files via ``nm --defined-only``.
+
+    Best-effort telemetry: returns the raw (optionally C++-demangled) symbol name
+    strings.  Any ``nm`` failure (missing tool, unreadable file) yields an empty set
+    rather than raising — the variant-wiring gate does not depend on this.
+    """
+    flags = ["--defined-only"]
+    if demangle:
+        flags.append("-C")
+    syms: set[str] = set()
+    for p in paths:
+        p = Path(p)
+        if not p.is_file():
+            continue
+        try:
+            r = subprocess.run(["nm", *flags, str(p)],
+                               capture_output=True, text=True, timeout=120)
+        except (OSError, subprocess.SubprocessError):
+            continue
+        for line in r.stdout.splitlines():
+            parts = line.split(" ", 2)
+            if len(parts) == 3 and parts[1] in "TtWwVvDdBbRr":
+                syms.add(parts[2].strip())
+    return syms
+
+
+def variant_symbols_present(binary: Path, declared: list[str]) -> tuple[list[str], list[str]]:
+    """Split ``declared`` into (present, absent) by substring match against the
+    binary's defined (demangled) symbols.
+
+    Telemetry only — an *absent* variant is expected for an inlined template and is
+    NOT a failure (the hard guard is :func:`check_variant_wiring`).  ``present`` is
+    the honest "the pipeline produced real, emitted new code" signal the Phase-2a
+    sizing asks for.
+    """
+    syms = nm_defined_symbols(binary)
+    blob = "\n".join(syms)
+    present = [v for v in declared if v in blob]
+    absent = [v for v in declared if v not in blob]
+    return present, absent

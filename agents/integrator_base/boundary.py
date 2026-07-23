@@ -303,6 +303,73 @@ def _demote_expr(name: str, caller_type: str, two_limb: bool = True) -> str:
             f"static_cast<{caller_type}>({ext}.lo)")
 
 
+def promote_region_block(
+    region_text: str,
+    reads: list[str],
+    writes: list[str],
+    scalar_type: str,
+    caller_type: str = "double",
+    two_limb: bool = True,
+) -> tuple[list[str], bool]:
+    """Promote a region's source to ``scalar_type``; return ``(block_lines, promoted)``.
+
+    ``block_lines`` is the region rewritten as entry casts (reads/pre-declared
+    writes → extended) + the retyped/renamed region body + exit demotions (writes →
+    caller precision), one source line per element, ready to splice in place of the
+    original region.  ``promoted`` is ``False`` when nothing in the region promotes
+    (no reads, no pre-declared writes, no dataflow-reached local decls) — in that
+    case ``block_lines`` is the region verbatim.
+
+    This is the single definition of the regional promotion transform: both the
+    *diff-producing* :func:`synthesize_boundary_patch` (Phase-1 include-site
+    boundary patch) and the *text-producing* Phase-2a fan-out (which splices the
+    promoted block into a copied function variant) build on it, so the two realizations
+    of "promote this region" stay bit-identical.
+    """
+    prom = _compute_promotion(region_text, reads, writes)
+    toks = prom.toks
+    pure_reads = prom.pure_reads
+    caseB = prom.caseB
+    decl_writes = prom.decl_writes
+
+    if not pure_reads and not decl_writes and not caseB:
+        return region_text.split("\n"), False
+
+    rename_map = {r: r + _READ_SUFFIX for r in pure_reads}
+    rename_map.update({w: w + _WRITE_SUFFIX for w in caseB})
+    rename_map.update({d.name: d.name + _WRITE_SUFFIX for d in decl_writes})
+    retype_idx = {d.type_idx for d in decl_writes}
+
+    edits: list[tuple[int, int, str]] = []
+    for i, t in enumerate(toks):
+        if i in retype_idx:
+            edits.append((t.start, t.end, scalar_type))
+        elif t.text in rename_map:
+            edits.append((t.start, t.end, rename_map[t.text]))
+    new_region_text = _apply_spans(region_text, edits)
+
+    region_lines = region_text.split("\n")
+    indent = _leading_ws(region_lines[0]) if region_lines else ""
+    entry: list[str] = []
+    for r in pure_reads:
+        entry.append(f"{indent}{scalar_type} {r}{_READ_SUFFIX} = {scalar_type}({r});"
+                     f"  // Rule R1: promote region read to {scalar_type}")
+    for w in caseB:
+        entry.append(f"{indent}{scalar_type} {w}{_WRITE_SUFFIX} = {scalar_type}({w});"
+                     f"  // Rule R1: seed pre-declared write in {scalar_type}")
+
+    exit_lines: list[str] = []
+    for d in decl_writes:   # region-local decl → declare the alias at its own type
+        exit_lines.append(
+            f"{indent}{d.type_text} {d.name} = {_demote_expr(d.name, d.type_text, two_limb)};"
+            f"  // Rule R1: demote region write to {d.type_text}")
+    for w in caseB:         # pre-declared write → assign back at the caller type
+        exit_lines.append(f"{indent}{w} = {_demote_expr(w, caller_type, two_limb)};"
+                          f"  // Rule R1: demote region write to {caller_type}")
+
+    return entry + new_region_text.split("\n") + exit_lines, True
+
+
 def synthesize_boundary_patch(
     *,
     rel_file: str,
@@ -337,50 +404,14 @@ def synthesize_boundary_patch(
     region_text = "\n".join(region_lines)
 
     # Dataflow promotion partition (reads / pre-declared writes / promoted local
-    # decls) — shared with the Gap-A lint via :func:`compute_promoted_names`.
-    prom = _compute_promotion(region_text, reads, writes)
-    toks = prom.toks
-    pure_reads = prom.pure_reads
-    caseB = prom.caseB
-    decl_writes = prom.decl_writes
+    # decls) via the shared transform — same block the Phase-2a fan-out splices into
+    # a variant copy.  ``promoted`` is False when nothing in the region promotes.
+    new_block, promoted = promote_region_block(
+        region_text, reads, writes, scalar_type, caller_type, two_limb)
 
-    if not pure_reads and not decl_writes and not caseB and not shim_include:
+    if not promoted and not shim_include:
         return None
 
-    rename_map = {r: r + _READ_SUFFIX for r in pure_reads}
-    rename_map.update({w: w + _WRITE_SUFFIX for w in caseB})
-    rename_map.update({d.name: d.name + _WRITE_SUFFIX for d in decl_writes})
-    retype_idx = {d.type_idx for d in decl_writes}
-
-    # -- rewrite region tokens (retype promoted decls + rename reads/writes) -----
-    edits: list[tuple[int, int, str]] = []
-    for i, t in enumerate(toks):
-        if i in retype_idx:
-            edits.append((t.start, t.end, scalar_type))
-        elif t.text in rename_map:
-            edits.append((t.start, t.end, rename_map[t.text]))
-    new_region_text = _apply_spans(region_text, edits)
-
-    # -- entry / exit lines (match region indentation) --------------------------
-    indent = _leading_ws(region_lines[0]) if region_lines else ""
-    entry: list[str] = []
-    for r in pure_reads:
-        entry.append(f"{indent}{scalar_type} {r}{_READ_SUFFIX} = {scalar_type}({r});"
-                     f"  // Rule R1: promote region read to {scalar_type}")
-    for w in caseB:
-        entry.append(f"{indent}{scalar_type} {w}{_WRITE_SUFFIX} = {scalar_type}({w});"
-                     f"  // Rule R1: seed pre-declared write in {scalar_type}")
-
-    exit_lines: list[str] = []
-    for d in decl_writes:   # region-local decl → declare the alias at its own type
-        exit_lines.append(
-            f"{indent}{d.type_text} {d.name} = {_demote_expr(d.name, d.type_text, two_limb)};"
-            f"  // Rule R1: demote region write to {d.type_text}")
-    for w in caseB:         # pre-declared write → assign back at the caller type
-        exit_lines.append(f"{indent}{w} = {_demote_expr(w, caller_type, two_limb)};"
-                          f"  // Rule R1: demote region write to {caller_type}")
-
-    new_block = entry + new_region_text.split("\n") + exit_lines
     patched_lines = original_lines[:line_start - 1] + new_block + original_lines[line_end:]
 
     # -- shim include after #pragma once ---------------------------------------
@@ -401,6 +432,12 @@ def synthesize_boundary_patch(
     )
     combined = "".join(diff)
     return combined if combined.strip() else None
+
+
+def insert_shim_include(lines: list[str], shim_include: str) -> list[str]:
+    """Public wrapper over :func:`_insert_shim_include` (used by the Phase-2a fan-out
+    to give a variant-bearing file its shim ``#include``, idempotently)."""
+    return _insert_shim_include(lines, shim_include)
 
 
 def _insert_shim_include(lines: list[str], shim_include: str) -> list[str]:

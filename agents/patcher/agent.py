@@ -75,17 +75,20 @@ def make_patcher_fn(*, integrators: dict | None = None,
                     llm_call: Callable[[str, str, int], str] | None = None,
                     gate_fn: Callable | None = None,
                     build_config: dict | None = None,
-                    config: PipelineConfig | None = None):
+                    config: PipelineConfig | None = None,
+                    fanout=None):
     """Build ``patcher_fn(intent, ctx) -> P2`` for Strategy's state.
 
     All heavy dependencies are injectable; unset ones fall back to the real
     integrators, the Argo LLM (via :mod:`agents.integrator_base.llm`), and the
-    real vanilla-driver build gate.
+    real vanilla-driver build gate.  ``fanout`` (a
+    :class:`agents.patcher.fanout.FanoutSettings`) enables Phase-2a call-graph
+    fan-out for regional intents; ``None`` keeps the classic shim+boundary path.
     """
     def patcher_fn(intent: dict, ctx: dict) -> dict:
         return _Patcher(integrators=integrators, llm_call=llm_call,
                         gate_fn=gate_fn, build_config=build_config or {},
-                        config=config).patch(intent, ctx)
+                        config=config, fanout=fanout).patch(intent, ctx)
     return patcher_fn
 
 
@@ -94,11 +97,13 @@ def make_patcher_fn(*, integrators: dict | None = None,
 # ---------------------------------------------------------------------------
 
 class _Patcher:
-    def __init__(self, *, integrators, llm_call, gate_fn, build_config, config):
+    def __init__(self, *, integrators, llm_call, gate_fn, build_config, config,
+                 fanout=None):
         self.integrators = integrators if integrators is not None else _default_integrators()
         self.llm_call = llm_call if llm_call is not None else _default_llm_call(config)
         self.gate_fn = gate_fn if gate_fn is not None else gates.run_gate
         self.build_config = build_config
+        self.fanout = fanout
 
     # -- entry --------------------------------------------------------------
     def patch(self, intent_dict: dict, ctx: dict) -> dict:
@@ -125,7 +130,8 @@ class _Patcher:
             repo_root=repo_root, parent_sha=parent,
             target_path=resolve_in_tree(repo_root, intent.target.file),
             shims_dir=dirs["shims"], patches_dir=dirs["patches"],
-            integrators=self.integrators, llm_call=self.llm_call)
+            integrators=self.integrators, llm_call=self.llm_call,
+            fanout=self.fanout)
 
         path = dispatch.dispatch_path(intent.kind, intent.via)
         llm_driven = dispatch.is_llm_driven(path)
@@ -159,8 +165,13 @@ class _Patcher:
             gen = dispatch.generate(intent, deps, attempt, path)
 
             if not gen.ok:
-                # deterministic gen failure (apply/edit) → terminal, no retry
-                if not llm_driven:
+                # deterministic gen failure (apply/edit) → terminal, no retry.  Also
+                # terminal on any LLM-driven path when the failure is a deterministic
+                # "cannot apply / inapplicable" (Phase-2a call_graph_build_failed /
+                # variant_name_collision surface as PATCH_APPLY_FAILED) — retrying a
+                # deterministic failure only wastes the LLM budget.
+                if not llm_driven or gen.status in (R.PATCH_APPLY_FAILED,
+                                                    R.PATCH_INAPPLICABLE):
                     gitops.reset_hard(repo_root, parent)
                     return R.failure(gen.status, parent, err_kind=gen.err_kind,
                                      detail=gen.detail,
@@ -184,6 +195,22 @@ class _Patcher:
             # ---- P5 build + smoke gate ----
             gate = self._gate(repo_root, run_dir, iter_id, ctx)
             if gate.ok:
+                # Phase-2a variant-wiring gate (rename-cascade guard): every declared
+                # variant must be referenced (an orphaned variant means a caller was
+                # left pointing at the original, silently bypassing the precision
+                # change).  Deterministic → a terminal build_failed, not retried.
+                wiring_err = gates.check_variant_wiring(repo_root, gen.declared_variants)
+                if wiring_err:
+                    _record_attempt(attempt, "build_failed", R.BUILD_FAILED,
+                                    time.monotonic() - t0, 0.0)
+                    gitops.reset_hard(repo_root, parent)
+                    return R.failure(R.BUILD_FAILED, parent, err_kind=R.ERR_COMPILE,
+                                     detail=wiring_err,
+                                     excerpt_path=_excerpt(dirs, iter_id, wiring_err),
+                                     build_log_path=gate.build_log_path,
+                                     runtime_log_path=gate.runtime_log_path,
+                                     llm_tokens=gen.llm_tokens)
+                self._log_fanout(run_dir, iter_id, intent, gen, gate)
                 _record_attempt(attempt, "ok", R.OK, time.monotonic() - t0, 0.0)
                 return self._commit(intent, deps, gen, gate, parent, repo_root)
 
@@ -246,6 +273,37 @@ class _Patcher:
                 kwargs[k] = cfg[k]
         return self.gate_fn(headers_dir, run_dir / "build", run_dir / "logs",
                             iter_id, **kwargs)
+
+    def _log_fanout(self, run_dir, iter_id, intent, gen, gate) -> None:
+        """Best-effort per-accept fan-out sizing record (``fanout.jsonl`` in run_dir).
+
+        Only emitted when the accept came from the fan-out path (declared variants,
+        or an in-place entry-point region).  Carries the declared variant count and
+        the nm-visible subset (present as emitted symbols vs inlined-away) so the
+        Phase-2a sizing doc can report over-generation + real-symbol emission without
+        touching Strategy's untouched iteration log.
+        """
+        if not gen.declared_variants and not gen.in_place_region:
+            return
+        present, absent = [], list(gen.declared_variants)
+        if gate.binary_path and gen.declared_variants:
+            try:
+                present, absent = gates.variant_symbols_present(
+                    gate.binary_path, gen.declared_variants)
+            except Exception:  # noqa: BLE001 - telemetry must never break a patch
+                present, absent = [], list(gen.declared_variants)
+        _append_attempt(Path(run_dir) / "fanout.jsonl", {
+            "iter_id": iter_id,
+            "rationale_id": intent.rationale_id,
+            "target": intent.target.location,
+            "kind": intent.kind,
+            "in_place_region": gen.in_place_region,
+            "n_declared_variants": len(gen.declared_variants),
+            "declared_variants": gen.declared_variants,
+            "n_symbols_present": len(present),
+            "symbols_present": present,
+            "files_touched": gen.files_touched,
+        })
 
     def _commit(self, intent, deps, gen, gate, parent, repo_root) -> dict:
         try:
