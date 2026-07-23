@@ -33,7 +33,10 @@ from agents.shared.region_scan import extract_region_writes  # noqa: E402
 def _clone(base: Path, dest: Path) -> str:
     if dest.exists():
         shutil.rmtree(dest)
-    subprocess.run(["git", "clone", "--local", "--quiet", str(base), str(dest)], check=True)
+    # --no-hardlinks: --out often lands on /tmp (a different filesystem from the
+    # base repo under /home), where --local's object hardlinks fail cross-device.
+    subprocess.run(["git", "clone", "--no-hardlinks", "--quiet", str(base), str(dest)],
+                   check=True)
     for k, v in (("user.name", "probe"), ("user.email", "p@l")):
         subprocess.run(["git", "-C", str(dest), "config", k, v], check=True)
     return subprocess.run(["git", "-C", str(dest), "rev-parse", "HEAD"],
