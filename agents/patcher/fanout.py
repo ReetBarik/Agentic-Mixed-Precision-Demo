@@ -339,10 +339,41 @@ def render_variant(spec: VariantSpec) -> str:
     return _rewrite_calls(text, rename_map)
 
 
+def _topo_order(specs: dict[str, VariantSpec]) -> list[VariantSpec]:
+    """Order variants so a callee variant precedes every caller variant.
+
+    A variant ``A`` that reroutes a call to variant ``B`` (``B`` in ``A.reroutes``)
+    references ``B`` by its *qualified* name (``ql::B<...>``); qualified name lookup
+    inside a template body is NOT deferred to instantiation, so ``B`` must be
+    *defined earlier* in the namespace.  Callee variants are always deeper on the
+    path than their callers, so this DFS post-order (dependencies first) is a valid
+    topological emission order; ties broken by name for determinism.
+    """
+    names = set(specs)
+    deps = {a: sorted(v for v in specs[a].reroutes.values() if v in names)
+            for a in names}
+    ordered: list[str] = []
+    visited: set[str] = set()
+
+    def visit(a: str) -> None:
+        if a in visited:
+            return
+        visited.add(a)
+        for b in deps[a]:
+            visit(b)
+        ordered.append(a)
+
+    for a in sorted(names):
+        visit(a)
+    return [specs[a] for a in ordered]
+
+
 def _render_block(specs: dict[str, VariantSpec]) -> list[str]:
     """Render the full per-file fan-out block (manifest comment + variant defs)."""
-    ordered = [specs[k] for k in sorted(specs)]
-    manifest = {"variants": [s.to_json() for s in ordered]}
+    ordered = _topo_order(specs)
+    # manifest key order stays name-sorted (stable spec record), independent of the
+    # emission order (which is topological so callee variants are defined first).
+    manifest = {"variants": [specs[k].to_json() for k in sorted(specs)]}
     out = [_BLOCK_BEGIN, _MANIFEST_PREFIX + json.dumps(manifest, sort_keys=True), ""]
     for s in ordered:
         out.append(f"// --- variant {s.variant_name} (of {s.orig_name}) ---")

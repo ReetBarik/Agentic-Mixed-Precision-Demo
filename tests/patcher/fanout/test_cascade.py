@@ -5,7 +5,68 @@ from __future__ import annotations
 from pathlib import Path
 
 from agents.patcher import fanout
+from agents.patcher.fanout import VariantSpec
 from tests.patcher.fanout.conftest import requires_libclang
+
+
+def _spec(name: str, orig: str, reroutes: dict[str, str] | None = None) -> VariantSpec:
+    """A VariantSpec carrying only what ``_topo_order`` reads (name + reroutes)."""
+    return VariantSpec(variant_name=name, orig_name=orig, file="x.h",
+                       orig_start=1, orig_end=1, reroutes=dict(reroutes or {}))
+
+
+def _assert_callees_first(specs: dict[str, VariantSpec]) -> None:
+    """Every rerouted callee variant must be emitted before its caller."""
+    ordered = fanout._topo_order(specs)
+    pos = {s.variant_name: i for i, s in enumerate(ordered)}
+    assert set(pos) == set(specs)                       # no variant dropped
+    for caller in specs.values():
+        for callee in caller.reroutes.values():
+            if callee in pos:
+                assert pos[callee] < pos[caller.variant_name], (
+                    f"callee {callee} emitted after caller {caller.variant_name}")
+
+
+def test_topo_order_when_alpha_inverts_topo():
+    """Regression: qualified template-id ``ql::<callee>`` is looked up at definition
+    time, so a callee variant must be *defined earlier* than its caller.  On real
+    qcdloop the alphabetical variant name of the caller (``B0m_B1``) sorts *before*
+    its callee (``B1_B0m_B1``) — the old ``sorted(specs)`` emission put the caller
+    first and the vanilla build failed.  Topological emission must fix the order even
+    though the synthetic ``f_g_h`` naming (leaf-first) happens to hide it."""
+    specs = {
+        "B0m_B1": _spec("B0m_B1", "B0m", {"B1": "B1_B0m_B1"}),  # caller (sorts first)
+        "B1_B0m_B1": _spec("B1_B0m_B1", "B1"),                  # callee (sorts second)
+    }
+    ordered = fanout._topo_order(specs)
+    assert [s.variant_name for s in ordered] == ["B1_B0m_B1", "B0m_B1"]
+    _assert_callees_first(specs)
+
+
+def test_topo_order_deep_chain_and_diamond():
+    """Multi-level + fan-in: names chosen so alphabetical order contradicts the
+    dependency order at every edge, and one callee has two callers (diamond)."""
+    # dep chain c3 -> c2 -> c1 (c1 is the deepest/leaf); alpha order is c1<c2<c3,
+    # i.e. leaf LAST alphabetically — the inverse of what emission needs.
+    specs = {
+        "c3": _spec("c3", "top", {"mid": "c2"}),
+        "c2": _spec("c2", "mid", {"leaf": "c1", "leaf2": "d1"}),  # diamond: two callees
+        "c1": _spec("c1", "leaf"),
+        "d1": _spec("d1", "leaf2"),
+    }
+    _assert_callees_first(specs)
+
+
+def test_topo_order_stable_and_manifest_name_sorted():
+    """Emission is deterministic; the manifest key list stays name-sorted regardless
+    of the (topological) emission order, so the spec record is a stable diff."""
+    specs = {
+        "B0m_B1": _spec("B0m_B1", "B0m", {"B1": "B1_B0m_B1"}),
+        "B1_B0m_B1": _spec("B1_B0m_B1", "B1"),
+    }
+    assert [s.variant_name for s in fanout._topo_order(specs)] == \
+           [s.variant_name for s in fanout._topo_order(specs)]
+    assert sorted(specs) == ["B0m_B1", "B1_B0m_B1"]     # manifest order (name-sorted)
 
 
 def _region_in(graph, name, needle="T b = a * T(2);"):
