@@ -357,6 +357,14 @@ class ManifestRow:
     delta_adversarial: float | None = None
     delta_random: float | None = None
     delta_effective: float | None = None
+    # Baseline (working-tree, unpatched) delta at the same scope — a pure
+    # measurement attribute, not a verdict.  Makes patch *inertness* a one-field
+    # read: ``delta_effective == baseline_delta_effective`` means the candidate did
+    # not change the region's output (the finer-grained residue of the numerical
+    # no-op that a whole-app min could not surface).  None when not supplied.
+    baseline_delta_adversarial: float | None = None
+    baseline_delta_random: float | None = None
+    baseline_delta_effective: float | None = None
     baseline_id: str | None = None
     battery_version: str | None = None
     intent_id: str | int | None = None   # attribute (traceability)
@@ -373,6 +381,9 @@ class ManifestRow:
         if self.delta_effective is None:
             self.delta_effective = effective_delta(
                 self.delta_adversarial, self.delta_random)
+        if self.baseline_delta_effective is None:
+            self.baseline_delta_effective = effective_delta(
+                self.baseline_delta_adversarial, self.baseline_delta_random)
 
     def to_dict(self) -> dict:
         return asdict(self)
@@ -411,6 +422,8 @@ def score_cell(*, region_id: str, rung: str, iteration_id: int,
                integrals_scope: Iterable[str] | None,
                baseline_id: str | None = None, battery_version: str | None = None,
                candidate_tail: dict | None = None, dd_ref_tail: dict | None = None,
+               baseline_coeffs: dict | None = None,
+               baseline_tail: dict | None = None,
                intent_id: str | int | None = None,
                patcher_metadata: dict | None = None) -> ManifestRow:
     """Reduce already-computed coeff arrays into a ``measured`` manifest cell.
@@ -419,14 +432,20 @@ def score_cell(*, region_id: str, rung: str, iteration_id: int,
     spawns no build/run, so folding it into a ``validate()`` call costs no extra
     wall-clock.  ``delta_random`` is the p100 rel-err over the random battery;
     ``delta_adversarial`` is the p100 over the tail (``None`` when the tail is
-    empty — the 2b stub).
+    empty — the 2b stub).  ``baseline_coeffs`` (the unpatched working-tree app) is
+    reduced at the same scope into ``baseline_delta_*`` so patch inertness is a
+    one-field comparison; omit it to leave those attributes null.
     """
     d_rand = delta_over_arrays(candidate_coeffs, dd_ref_coeffs, integrals_scope)
     d_adv = delta_over_tail(candidate_tail, dd_ref_tail, integrals_scope)
+    b_rand = (delta_over_arrays(baseline_coeffs, dd_ref_coeffs, integrals_scope)
+              if baseline_coeffs is not None else None)
+    b_adv = delta_over_tail(baseline_tail, dd_ref_tail, integrals_scope)
     return ManifestRow(
         region_id=region_id, rung=rung, iteration_id=int(iteration_id),
         status=STATUS_MEASURED,
         delta_adversarial=d_adv, delta_random=d_rand,
+        baseline_delta_adversarial=b_adv, baseline_delta_random=b_rand,
         baseline_id=baseline_id, battery_version=battery_version,
         intent_id=intent_id,
         integrals_scope=sorted(set(integrals_scope)) if integrals_scope else [],

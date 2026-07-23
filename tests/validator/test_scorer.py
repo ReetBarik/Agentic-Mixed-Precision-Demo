@@ -146,6 +146,41 @@ def test_adversarial_null_when_tail_empty():
     assert row.delta_effective == row.delta_random
 
 
+def test_baseline_delta_exposes_inertness():
+    """When the candidate output equals the unpatched baseline, delta_effective ==
+    baseline_delta_effective — the manifest's one-field inertness signal."""
+    ref = _arrays(1)
+    inert = _arrays(1)
+    _set(inert, 0, 0, 1.0 + 1e-13)   # candidate == baseline (both this value)
+    baseline = _arrays(1)
+    _set(baseline, 0, 0, 1.0 + 1e-13)
+    row = sc.score_cell(
+        region_id="B0m.h:126", rung="dd", iteration_id=0,
+        candidate_coeffs={"B1": inert}, dd_ref_coeffs={"B1": ref},
+        integrals_scope=["B1"], baseline_coeffs={"B1": baseline})
+    assert row.delta_effective == row.baseline_delta_effective   # inert patch
+
+    # a genuinely improving candidate: delta below baseline_delta
+    better = _arrays(1)
+    _set(better, 0, 0, 1.0 + 1e-16)
+    row2 = sc.score_cell(
+        region_id="B0m.h:126", rung="dd", iteration_id=0,
+        candidate_coeffs={"B1": better}, dd_ref_coeffs={"B1": ref},
+        integrals_scope=["B1"], baseline_coeffs={"B1": baseline})
+    assert row2.delta_effective < row2.baseline_delta_effective
+
+
+def test_baseline_delta_null_when_omitted():
+    ref = _arrays(1)
+    cand = _arrays(1)
+    _set(cand, 0, 0, 1.0 + 1e-12)
+    row = sc.score_cell(
+        region_id="B0m.h:126", rung="dd", iteration_id=0,
+        candidate_coeffs={"B1": cand}, dd_ref_coeffs={"B1": ref},
+        integrals_scope=["B1"])
+    assert row.baseline_delta_effective is None
+
+
 def test_effective_delta_helper():
     assert sc.effective_delta(1e-7, 1e-12) == 1e-7
     assert sc.effective_delta(None, 1e-12) == 1e-12

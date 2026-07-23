@@ -243,7 +243,8 @@ def validate(base_state: dict, candidate_patch: str | None, tolerance: float = 8
     scorer_out = None
     if cell:
         scorer_out = _emit_scorer_cell(
-            cell, candidate_coeffs, dd_ref_coeffs, cand_tail, tail_offsets,
+            cell, candidate_coeffs, current_coeffs, dd_ref_coeffs,
+            cand_tail, tail_offsets,
             dd_repo, dd_ref, kokkos_root, dd_tree_hash,
             work_tree_hash, snapshot, baseline_spec, iteration_id,
             scorer_manifest_path)
@@ -268,7 +269,7 @@ def validate(base_state: dict, candidate_patch: str | None, tolerance: float = 8
     }
 
 
-def _emit_scorer_cell(cell: dict, candidate_coeffs, dd_ref_coeffs,
+def _emit_scorer_cell(cell: dict, candidate_coeffs, current_coeffs, dd_ref_coeffs,
                       cand_tail, tail_offsets, dd_repo, dd_ref, kokkos_root,
                       dd_tree_hash, work_tree_hash, snapshot,
                       baseline_spec, iteration_id,
@@ -278,7 +279,9 @@ def _emit_scorer_cell(cell: dict, candidate_coeffs, dd_ref_coeffs,
     ``cell`` = ``{region_id, rung, intent_id, integrals}``.  The reduction is over
     the candidate + DD arrays already computed for the verdict (random battery) and,
     when present, the sparse adversarial tail (``None`` -> ``delta_adversarial``
-    null, the 2b stub).  Returns ``{row, manifest_path}`` for the verdict echo.
+    null, the 2b stub).  The unpatched ``current_coeffs`` (also already computed)
+    are reduced at the same scope into ``baseline_delta_*`` so inertness is visible.
+    Returns ``{row, manifest_path}`` for the verdict echo.
     """
     spec = baseline_spec or _scorer.qcdloop_baseline_spec()
     bid = _scorer.baseline_id(spec, work_tree_hash, dd_tree_hash)
@@ -297,6 +300,7 @@ def _emit_scorer_cell(cell: dict, candidate_coeffs, dd_ref_coeffs,
         integrals_scope=cell.get("integrals"),
         baseline_id=bid, battery_version=bver,
         candidate_tail=cand_tail, dd_ref_tail=dd_ref_tail,
+        baseline_coeffs=current_coeffs,
         intent_id=cell.get("intent_id"),
         patcher_metadata=cell.get("patcher_metadata"))
 
