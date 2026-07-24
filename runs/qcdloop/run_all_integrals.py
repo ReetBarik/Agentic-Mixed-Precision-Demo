@@ -103,7 +103,12 @@ def _run_one(task: dict) -> dict:
             clear_graph_cache()          # fresh graph per pass (per-process reuse only)
             fanout = FanoutSettings(
                 entry_point=task["entry_point"], integral=integral,
-                max_paths=task.get("fanout_max_paths", 1024))
+                max_paths=task.get("fanout_max_paths", 1024),
+                # Phase 2d: the driver dir carries the entry-template instantiation
+                # (run_app<Kokkos::complex<double>, double, double, ...>) that binds
+                # TOutput→complex / TMass,TScale→double, so the boundary transform can
+                # promote complex operands to the extended complex container.
+                app_source_roots=[str(HERE / "src")])
         patcher_fn = make_patcher_fn(build_config=build_config,
                                      config=PipelineConfig(), fanout=fanout)
         tail_samples = _tail.load_tail_samples(filtered_report)

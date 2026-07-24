@@ -477,6 +477,13 @@ def run_integrate_region(
         if bad_bridge is not None:
             return RegionIntegrationResult.failed(bad_bridge, llm_tokens=tokens)
 
+    # 5c. Deterministic complex anti-pattern lint (Phase 2d, bucket (a) insurance).
+    #     A shim must never wrap the extended scalar in a std/Kokkos complex; the
+    #     vendored ffcomplex/ddcomplex is the container.  Retryable misgen.
+    bad_complex = _lint_complex_antipattern(shim_body, spec.cpp_scalar)
+    if bad_complex is not None:
+        return RegionIntegrationResult.failed(bad_complex, llm_tokens=tokens)
+
     # 6. Stamp the SOURCE_HASH and persist the per-region artifact (out_dir copy —
     #    the forensic/cache record of THIS region's generated shim), then merge it
     #    into the canonical per-family shim installed in the tree (Wave-3 dedup).
@@ -532,6 +539,36 @@ def _lint_include_set(shim_body: str, allowed: frozenset[str]) -> str | None:
         f"headers {sorted(allowed - _STDLIB_HEADERS)} (+ stdlib). App-source "
         "headers are not on the shim include path and break the build; the boundary "
         "patch owns caller-side wiring. Treating as a retryable misgeneration."
+    )
+
+
+def _lint_complex_antipattern(shim_body: str, cpp_scalar: str) -> str | None:
+    """Reject a shim that instantiates ``std``/``Kokkos::complex`` on an *extended*
+    scalar (Phase 2d, bucket (a) regression insurance).
+
+    ``Kokkos::complex<T>`` / ``std::complex<T>`` require a cv-unqualified built-in
+    floating-point ``T``; a two-limb class scalar (``ffloat`` / ``ddouble``) trips the
+    ``static_assert`` (``complex can only be instantiated for a cv-unqualified floating
+    point type``) or finds no ctor.  The vendored ``ffcomplex`` / ``ddcomplex`` standalone
+    types are the correct complex container (SPEC Rule 3).  A *native* ``float`` is
+    exempt — ``Kokkos::complex<float>`` is a legal instantiation and is in fact the
+    float rung's own complex spelling — so the guard fires only for the extended
+    two-limb scalars.  Returns ``None`` when the shim is clean.  This class was 0/30 in
+    the Phase-2c runs (the LLM is Rule-3 compliant); the lint keeps it that way.
+    """
+    core = cpp_scalar.rsplit("::", 1)[-1]
+    if core not in ("ffloat", "ddouble"):
+        return None
+    pat = re.compile(r"\bcomplex\s*<\s*[^>]*\b" + re.escape(core) + r"\b")
+    hits = [m.group(0) for m in pat.finditer(shim_body)]
+    if not hits:
+        return None
+    return (
+        f"Rule 3 complex anti-pattern: shim instantiates a std/Kokkos complex on the "
+        f"extended scalar {hits} — such a complex requires a cv-unqualified built-in "
+        f"floating-point element and rejects the two-limb class scalar ``{core}`` "
+        f"(static_assert / no ctor). Use the vendored complex container instead of "
+        f"``complex<{core}>``. Treating as a retryable misgeneration."
     )
 
 

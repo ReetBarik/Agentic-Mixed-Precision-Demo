@@ -498,15 +498,35 @@ def render_shim(ir: ShimIR) -> str:
     return "\n".join(parts) + "\n"
 
 
+def dedup_inline(text: str) -> str:
+    """Collapse a redundant ``inline`` specifier adjacent to ``KOKKOS_INLINE_FUNCTION``.
+
+    ``KOKKOS_INLINE_FUNCTION`` already expands to ``inline`` (host) / ``__device__
+    __host__ inline`` (CUDA), so an LLM shim that writes ``KOKKOS_INLINE_FUNCTION
+    inline T f(...)`` (the Phase-2c kokkosUtils.h:703 artifact) yields ``inline inline``
+    after macro expansion → ``duplicate 'inline'`` (a hard build failure).  This
+    deterministic sanitizer drops the redundant specifier (either order) and collapses
+    a plain ``inline inline`` run, so the otherwise-correct shim builds."""
+    text = re.sub(r"\bKOKKOS_INLINE_FUNCTION\s+inline\b", "KOKKOS_INLINE_FUNCTION", text)
+    text = re.sub(r"\binline\s+KOKKOS_INLINE_FUNCTION\b", "KOKKOS_INLINE_FUNCTION", text)
+    prev = None
+    while prev != text:
+        prev = text
+        text = re.sub(r"\binline\s+inline\b", "inline", text)
+    return text
+
+
 def merge_into_canonical(existing_text: str | None, new_shim_body: str) -> str:
     """Merge ``new_shim_body`` into the canonical shim ``existing_text``.
 
     ``existing_text`` is the current canonical shim (``None`` / empty for the first
-    lander).  Returns the rendered merged canonical shim text.
+    lander).  Returns the rendered merged canonical shim text.  Both inputs are passed
+    through :func:`dedup_inline` first so a redundant ``inline`` specifier never
+    survives into the merged TU (Phase 2d d2 fix).
     """
-    new_ir = parse_shim(new_shim_body)
+    new_ir = parse_shim(dedup_inline(new_shim_body))
     if existing_text and existing_text.strip():
-        base = parse_shim(existing_text)
+        base = parse_shim(dedup_inline(existing_text))
     else:
         base = ShimIR()
     merged = merge_ir(base, new_ir)

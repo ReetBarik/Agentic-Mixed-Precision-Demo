@@ -152,6 +152,12 @@ def region_reads_from_function(func_source: str, func_line_start: int,
     rs = region_start - func_line_start + 1
     re_ = region_end - func_line_start + 1
 
+    # Phase 2d (d1): names used as an array subscript BASE anywhere in the region
+    # (``name[``) are aggregates/pointers, not promotable scalars — promoting one
+    # yields ``ffloat[int]`` / ``operator[](ffloat,int)`` build failures (the
+    # xpi_in-style Kokkos::Array reads).  Exclude them from the derived reads.
+    subscripted = _subscripted_names(toks, rs, re_)
+
     reads: list[str] = []
     seen: set[str] = set()
     n = len(toks)
@@ -159,6 +165,8 @@ def region_reads_from_function(func_source: str, func_line_start: int,
         if not (rs <= t.line <= re_):
             continue
         if not _is_ident_tok(t.text) or t.text not in universe or t.text in seen:
+            continue
+        if t.text in subscripted:
             continue
         # A bare ``name =`` at this position is a pure (non-compound) write target,
         # not a read; ``_compute_promotion`` seeds it from Fix-C's write set.  A
@@ -170,6 +178,133 @@ def region_reads_from_function(func_source: str, func_line_start: int,
         seen.add(t.text)
         reads.append(t.text)
     return reads
+
+
+def _subscripted_names(toks: list["_Tok"], rs: int, re_: int) -> set[str]:
+    """Identifiers used as an array-subscript base (``name [``) within the region."""
+    out: set[str] = set()
+    n = len(toks)
+    for i in range(n - 1):
+        t = toks[i]
+        if rs <= t.line <= re_ and _is_ident_tok(t.text) and toks[i + 1].text == "[":
+            out.add(t.text)
+    return out
+
+
+def region_complex_read_names(func_source: str, complex_tokens) -> set[str]:
+    """Names (params or body locals) declared with a complex-container type.
+
+    Phase 2d: the boundary transform promotes a complex-typed read to the extended
+    *complex* container (``ffcomplex`` / ``ddcomplex``) rather than the scalar.  A read
+    is complex when its core declared type token is in ``complex_tokens`` — the
+    complex-bound template-parameter names (``TOutput``) plus the literal ``complex``
+    (from :func:`agents.shared.type_resolve.complex_type_tokens`).  Pure token scan
+    over the enclosing function, consistent with :func:`region_reads_from_function`.
+    """
+    complex_tokens = set(complex_tokens)
+    return {n for n, core in name_core_types(func_source).items()
+            if core in complex_tokens}
+
+
+def name_core_types(func_source: str) -> dict[str, str]:
+    """Map each param / body-local name to its *core* declared type token.
+
+    Core = the outermost type name (last ``::`` segment, before any ``<`` / ``&`` /
+    qualifier) — so ``const TOutput fac`` → ``fac: TOutput`` and
+    ``Kokkos::complex<double> z = …`` → ``z: complex``.  Mirrors the universe scan in
+    :func:`_scalar_name_universe`; used to classify a read as complex vs scalar."""
+    toks = _tokenize(func_source)
+    out: dict[str, str] = {}
+    out.update(_param_name_core_types(toks))
+    out.update(_local_name_core_types(toks))
+    return out
+
+
+def _param_name_core_types(toks: list["_Tok"]) -> dict[str, str]:
+    """{param name: core type token} for the function's parameter list."""
+    n = len(toks)
+    open_idx = next((k for k in range(n) if toks[k].text == "("), None)
+    if open_idx is None:
+        return {}
+    close_idx = _match_paren(toks, open_idx)
+    if close_idx is None:
+        return {}
+    out: dict[str, str] = {}
+    depth = angle = 0
+    clause: list[_Tok] = []
+
+    def flush(cl: list["_Tok"]) -> None:
+        nm = _param_name(cl)
+        if nm:
+            core = _core_type_name([t.text for t in cl if t.text != nm])
+            if core:
+                out[nm] = core
+
+    for k in range(open_idx + 1, close_idx):
+        tx = toks[k].text
+        if tx in "([{":
+            depth += 1; clause.append(toks[k]); continue
+        if tx in ")]}":
+            depth -= 1; clause.append(toks[k]); continue
+        if tx == "<":
+            angle += 1; clause.append(toks[k]); continue
+        if tx == ">":
+            angle = max(0, angle - 1); clause.append(toks[k]); continue
+        if tx == ">>":
+            angle = max(0, angle - 2); clause.append(toks[k]); continue
+        if tx == "," and depth == 0 and angle == 0:
+            flush(clause); clause = []; continue
+        clause.append(toks[k])
+    flush(clause)
+    return out
+
+
+def _local_name_core_types(toks: list["_Tok"]) -> dict[str, str]:
+    """{local name: core type token} for ``<type> <name> = <init>`` body decls."""
+    out: dict[str, str] = {}
+    n = len(toks)
+    for i in range(n - 2):
+        type_tok, name_tok, eq_tok = toks[i], toks[i + 1], toks[i + 2]
+        if not (_is_ident_tok(type_tok.text) and _is_ident_tok(name_tok.text)
+                and eq_tok.text == "="):
+            continue
+        prev = toks[i - 1].text if i >= 1 else ""
+        if prev in (".", "::", "->"):
+            continue
+        core = _core_type_name([type_tok.text])
+        if core:
+            out.setdefault(name_tok.text, core)
+    return out
+
+
+def _core_type_name(type_toks: list[str]) -> str:
+    """Core (outermost) type name of a declaration's type tokens, or ``""``.
+
+    The leading ``ident(::ident)*`` run after skipping qualifiers, taken up to the
+    first ``<`` / ``&`` / trailing qualifier, reduced to its last ``::`` segment —
+    ``Kokkos::complex<double>`` → ``complex``, ``const TOutput`` → ``TOutput``.  A
+    pointer/C-array type yields ``""`` (never a scalar/complex operand)."""
+    if any(tx in ("*", "[", "]") for tx in type_toks):
+        return ""
+    name_parts: list[str] = []
+    started = False
+    for tx in type_toks:
+        if tx in _TYPE_QUALIFIERS:
+            if started:
+                break
+            continue
+        if tx == "::":
+            if started:
+                name_parts.append(tx)
+            continue
+        if _is_ident_tok(tx):
+            name_parts.append(tx)
+            started = True
+            continue
+        break
+    if not name_parts:
+        return ""
+    return "".join(name_parts).rsplit("::", 1)[-1]
 
 
 def _scalar_name_universe(toks: list["_Tok"]) -> set[str]:

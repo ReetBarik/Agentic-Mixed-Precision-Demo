@@ -288,7 +288,7 @@ def _apply_spans(text: str, edits: list[tuple[int, int, str]]) -> str:
 
 
 def _demote_expr(name: str, caller_type: str, two_limb: bool = True) -> str:
-    """Demote a promoted region write back to the caller precision.
+    """Demote a promoted *scalar* region write back to the caller precision.
 
     For a two-limb extended scalar (``ffloat`` / ``ddouble``) this is two-limb
     reconstruction — ``static_cast<T>(w.hi) + static_cast<T>(w.lo)`` — the extended
@@ -303,6 +303,88 @@ def _demote_expr(name: str, caller_type: str, two_limb: bool = True) -> str:
             f"static_cast<{caller_type}>({ext}.lo)")
 
 
+def _demote_complex_expr(name: str, target_type: str, caller_type: str,
+                         two_limb: bool = True) -> str:
+    """Demote a promoted *complex-container* write back to the caller complex type.
+
+    Phase 2d: a region operand whose type is a complex container
+    (``Kokkos::complex<double>``, aliased ``TOutput``) promotes to the extended
+    *container* (``ffcomplex`` / ``ddcomplex`` / ``std::complex<float>``), not the
+    scalar.  On exit each component is reconstructed to the caller real precision and
+    the caller complex value is rebuilt via ``target_type(re, im)``:
+
+    * two-limb container (``ffcomplex`` / ``ddcomplex``, components carry ``.hi``/``.lo``)
+      → ``T(static_cast<C>(w.re.hi)+static_cast<C>(w.re.lo),
+             static_cast<C>(w.im.hi)+static_cast<C>(w.im.lo))``;
+    * native container (``std::complex<float>``, components are plain ``float``) →
+      ``T(static_cast<C>(w.real()), static_cast<C>(w.imag()))``.
+
+    ``target_type`` is the write's own declared complex spelling (e.g. ``TOutput`` or
+    ``Kokkos::complex<double>``) — assignable from the reconstructed value.
+    """
+    ext = name + _WRITE_SUFFIX
+    if not two_limb:
+        return (f"{target_type}(static_cast<{caller_type}>({ext}.real()), "
+                f"static_cast<{caller_type}>({ext}.imag()))")
+    re_ = (f"static_cast<{caller_type}>({ext}.re.hi) + "
+           f"static_cast<{caller_type}>({ext}.re.lo)")
+    im_ = (f"static_cast<{caller_type}>({ext}.im.hi) + "
+           f"static_cast<{caller_type}>({ext}.im.lo)")
+    return f"{target_type}({re_}, {im_})"
+
+
+def _promote_complex_entry(name: str, src_expr: str, complex_type: str,
+                           scalar_type: str) -> str:
+    """Entry cast promoting a complex read/write ``src_expr`` to ``complex_type``.
+
+    Each component is wrapped in the extended *scalar* first
+    (``ffcomplex(ffloat(z.real()), ffloat(z.imag()))``) so the value keeps full caller
+    precision: a bare ``ffcomplex(double, double)`` would bind ``ffcomplex(float,
+    float)`` and silently narrow the entry to single precision.  ``.real()``/``.imag()``
+    are defined on every complex spelling in play (Kokkos/std/vendored).
+    """
+    return (f"{complex_type}({scalar_type}({src_expr}.real()), "
+            f"{scalar_type}({src_expr}.imag()))")
+
+
+def _complex_cast_indices(toks: list["_Tok"], complex_tokens: frozenset[str],
+                          promoted_names: set[str]) -> set[int]:
+    """Token indices of a functional cast ``T(<...promoted...>)`` to rewrite to the
+    extended complex type (Phase 2d).
+
+    A cast whose type name ``T`` is a complex spelling (``T`` in ``complex_tokens``)
+    and whose balanced ``(...)`` argument references a promoted (extended-typed) name
+    must build the extended *container*, not the caller's complex — ``TOutput(si*ta)``
+    → ``ffcomplex(si__ff*ta__ff)`` (``ffcomplex`` has a ctor from ``ffloat``; the
+    caller's ``Kokkos::complex<double>`` does not).  A cast with no promoted operand is
+    left alone (still a plain caller-precision value).  A ``T`` in template-argument
+    position (``Constants<T>``) is followed by ``>`` / ``::``, never ``(``, so it is
+    never matched here.
+    """
+    idx: set[int] = set()
+    n = len(toks)
+    for i in range(n - 1):
+        if toks[i].text not in complex_tokens or toks[i + 1].text != "(":
+            continue
+        depth = 0
+        j = i + 1
+        has_promoted = False
+        while j < n:
+            tj = toks[j].text
+            if tj == "(":
+                depth += 1
+            elif tj == ")":
+                depth -= 1
+                if depth == 0:
+                    break
+            elif tj in promoted_names:
+                has_promoted = True
+            j += 1
+        if has_promoted:
+            idx.add(i)
+    return idx
+
+
 def promote_region_block(
     region_text: str,
     reads: list[str],
@@ -310,6 +392,11 @@ def promote_region_block(
     scalar_type: str,
     caller_type: str = "double",
     two_limb: bool = True,
+    *,
+    complex_type: str | None = None,
+    complex_tokens=frozenset(),
+    complex_names=frozenset(),
+    caller_complex: str | None = None,
 ) -> tuple[list[str], bool]:
     """Promote a region's source to ``scalar_type``; return ``(block_lines, promoted)``.
 
@@ -319,6 +406,22 @@ def promote_region_block(
     original region.  ``promoted`` is ``False`` when nothing in the region promotes
     (no reads, no pre-declared writes, no dataflow-reached local decls) — in that
     case ``block_lines`` is the region verbatim.
+
+    Phase 2d — **complex-container promotion.**  A promoted operand whose type is a
+    complex container promotes to the extended *complex* type ``complex_type``
+    (``ffcomplex`` / ``ddcomplex`` / ``std::complex<float>``) instead of the scalar,
+    fixing the dominant Phase-2c ``llm_gen_failed`` class (``ffloat(complex)`` /
+    ``complex(ffloat)`` etc.).  An operand is treated as complex when the caller flags
+    its name in ``complex_names`` (reads / pre-declared writes, classified from the
+    enclosing function's decls + the app's template-parameter binding) or when a
+    region-local decl's declared type token is in ``complex_tokens`` (e.g. ``TOutput``,
+    the literal ``complex``).  Complex reads promote via
+    :func:`_promote_complex_entry`, complex writes demote via
+    :func:`_demote_complex_expr` (component-wise reconstruction), and a functional cast
+    ``TOutput(<promoted>)`` in the body is rewritten to the extended container ctor
+    (:func:`_complex_cast_indices`).  ``caller_complex`` is the concrete caller complex
+    spelling (``Kokkos::complex<double>``) a pre-declared complex write demotes back to.
+    When ``complex_type`` is ``None`` this is exactly the pre-2d scalar-only transform.
 
     This is the single definition of the regional promotion transform: both the
     *diff-producing* :func:`synthesize_boundary_patch` (Phase-1 include-site
@@ -332,18 +435,61 @@ def promote_region_block(
     caseB = prom.caseB
     decl_writes = prom.decl_writes
 
-    if not pure_reads and not decl_writes and not caseB:
+    # No promotable *local write* (region-local decl or pre-declared write) means the
+    # promotion has nowhere to land in the region body: entry-promoted reads flow
+    # straight into a sink the transform does not retype — a subscripted aggregate
+    # store (``res(i,k) = …`` / ``res(i,k) /= …``), a call, or a bare expression.
+    #
+    # For an UPCAST (ff/dd, ``two_limb``) that shape is inert or unconvertible: the
+    # widened value either fails to convert (``complex<double> /= ffloat``) or is
+    # silently truncated back to the caller precision on store — no observable effect.
+    # Report it honestly as a no-op (→ Patcher ``promotion_no_op``), Phase 2d.
+    #
+    # For a DOWNCAST (native ``float``, ``two_limb`` false) the same shape is NOT a
+    # no-op *when there is a read to demote*: demoting a read to ``float`` and feeding
+    # it into the (double) sink loses precision that propagates into the stored value —
+    # a genuine, discriminating measurement (boxGPU.h:140-142 ``res(i,k) /= scalefac2``,
+    # de≈5.8e-8 ≫ baseline; regressed to promotion_no_op in the first 2d-A cut, restored
+    # here).  A downcast with *no* promotable read (``T c = T(k);`` — the sole operand is
+    # an int index) is still an empty payload and no-ops.
+    #
+    # So the guard fires when the promotion cannot land AND either the rung is an upcast
+    # or there is nothing to promote; only a downcast-with-reads falls through.
+    if not decl_writes and not caseB and (two_limb or not pure_reads):
         return region_text.split("\n"), False
+
+    complex_tokens = frozenset(complex_tokens)
+    complex_names = frozenset(complex_names)
+    use_complex = complex_type is not None
+
+    # Which promoted operands are complex containers (else real scalars).
+    complex_set: set[str] = set()
+    if use_complex:
+        complex_set |= {r for r in pure_reads if r in complex_names}
+        complex_set |= {w for w in caseB if w in complex_names}
+        complex_set |= {d.name for d in decl_writes if d.type_text in complex_tokens}
 
     rename_map = {r: r + _READ_SUFFIX for r in pure_reads}
     rename_map.update({w: w + _WRITE_SUFFIX for w in caseB})
     rename_map.update({d.name: d.name + _WRITE_SUFFIX for d in decl_writes})
-    retype_idx = {d.type_idx for d in decl_writes}
+
+    # Per-decl retype target: the complex container for a complex-typed local, else
+    # the extended scalar.
+    retype_target: dict[int, str] = {}
+    for d in decl_writes:
+        retype_target[d.type_idx] = (complex_type if (use_complex and
+                                     d.type_text in complex_tokens) else scalar_type)
+
+    cast_idx: set[int] = set()
+    if use_complex and complex_tokens:
+        cast_idx = _complex_cast_indices(toks, complex_tokens, set(rename_map))
 
     edits: list[tuple[int, int, str]] = []
     for i, t in enumerate(toks):
-        if i in retype_idx:
-            edits.append((t.start, t.end, scalar_type))
+        if i in retype_target:
+            edits.append((t.start, t.end, retype_target[i]))
+        elif i in cast_idx:
+            edits.append((t.start, t.end, complex_type))
         elif t.text in rename_map:
             edits.append((t.start, t.end, rename_map[t.text]))
     new_region_text = _apply_spans(region_text, edits)
@@ -352,20 +498,40 @@ def promote_region_block(
     indent = _leading_ws(region_lines[0]) if region_lines else ""
     entry: list[str] = []
     for r in pure_reads:
-        entry.append(f"{indent}{scalar_type} {r}{_READ_SUFFIX} = {scalar_type}({r});"
-                     f"  // Rule R1: promote region read to {scalar_type}")
+        if r in complex_set:
+            rhs = _promote_complex_entry(r, r, complex_type, scalar_type)
+            entry.append(f"{indent}{complex_type} {r}{_READ_SUFFIX} = {rhs};"
+                         f"  // Rule R1: promote complex region read to {complex_type}")
+        else:
+            entry.append(f"{indent}{scalar_type} {r}{_READ_SUFFIX} = {scalar_type}({r});"
+                         f"  // Rule R1: promote region read to {scalar_type}")
     for w in caseB:
-        entry.append(f"{indent}{scalar_type} {w}{_WRITE_SUFFIX} = {scalar_type}({w});"
-                     f"  // Rule R1: seed pre-declared write in {scalar_type}")
+        if w in complex_set:
+            rhs = _promote_complex_entry(w, w, complex_type, scalar_type)
+            entry.append(f"{indent}{complex_type} {w}{_WRITE_SUFFIX} = {rhs};"
+                         f"  // Rule R1: seed pre-declared complex write in {complex_type}")
+        else:
+            entry.append(f"{indent}{scalar_type} {w}{_WRITE_SUFFIX} = {scalar_type}({w});"
+                         f"  // Rule R1: seed pre-declared write in {scalar_type}")
 
     exit_lines: list[str] = []
     for d in decl_writes:   # region-local decl → declare the alias at its own type
+        if d.name in complex_set:
+            expr = _demote_complex_expr(d.name, d.type_text, caller_type, two_limb)
+        else:
+            expr = _demote_expr(d.name, d.type_text, two_limb)
         exit_lines.append(
-            f"{indent}{d.type_text} {d.name} = {_demote_expr(d.name, d.type_text, two_limb)};"
+            f"{indent}{d.type_text} {d.name} = {expr};"
             f"  // Rule R1: demote region write to {d.type_text}")
-    for w in caseB:         # pre-declared write → assign back at the caller type
-        exit_lines.append(f"{indent}{w} = {_demote_expr(w, caller_type, two_limb)};"
-                          f"  // Rule R1: demote region write to {caller_type}")
+    for w in caseB:         # pre-declared write → assign back at the caller precision
+        if w in complex_set:
+            tgt = caller_complex or caller_type
+            expr = _demote_complex_expr(w, tgt, caller_type, two_limb)
+            exit_lines.append(f"{indent}{w} = {expr};"
+                              f"  // Rule R1: demote complex region write to {tgt}")
+        else:
+            exit_lines.append(f"{indent}{w} = {_demote_expr(w, caller_type, two_limb)};"
+                              f"  // Rule R1: demote region write to {caller_type}")
 
     return entry + new_region_text.split("\n") + exit_lines, True
 

@@ -213,16 +213,18 @@ def _gen_regional(intent: RemediationIntent, deps: PatchDeps, attempt: int) -> G
 # 1b. regional-integrator via call-graph fan-out (Phase 2a)
 # ---------------------------------------------------------------------------
 
-def _precision_cpp(which: str) -> tuple[str, bool]:
-    """Concrete C++ scalar spelling + two-limb flag for ``which`` (ff/dd/float).
+def _precision_cpp(which: str) -> tuple[str, bool, str]:
+    """Concrete C++ scalar spelling + two-limb flag + complex spelling for ``which``.
 
     Read from the integrator ``SPEC`` objects so type spellings have one source of
-    truth (no duplication of ``quad::ffun::ffloat`` etc. in the Patcher)."""
+    truth (no duplication of ``quad::ffun::ffloat`` etc. in the Patcher).  The complex
+    spelling (``quad::ffun::ffcomplex`` / ``quad::ddfun::ddcomplex`` /
+    ``Kokkos::complex<float>``) drives the Phase-2d complex-container promotion."""
     from agents.dd_integrator.agent import SPEC as _DD
     from agents.ff_integrator.agent import SPEC as _FF
     from agents.float_integrator.agent import SPEC as _FL
     spec = {"dd": _DD, "ff": _FF, "float": _FL}[which]
-    return spec.cpp_scalar, spec.two_limb
+    return spec.cpp_scalar, spec.two_limb, spec.cpp_complex
 
 
 def _gen_regional_fanout(intent: RemediationIntent, deps: PatchDeps, attempt: int) -> Gen:
@@ -286,7 +288,11 @@ def _gen_regional_fanout(intent: RemediationIntent, deps: PatchDeps, attempt: in
         return Gen(False, R.LLM_GEN_FAILED, R.ERR_INTEGRATOR, detail, llm_tokens=toks)
 
     shim_include = f"ql_shim_{which}.h"          # regional.canonical_shim_name
-    scalar_cpp, two_limb = _precision_cpp(which)
+    scalar_cpp, two_limb, complex_cpp = _precision_cpp(which)
+    # Phase 2d: app source roots for template-parameter → concrete-type resolution
+    # (which reads are complex containers).  Empty → complex promotion disabled
+    # (degrades to the pre-2d scalar-only transform).
+    app_roots = list(getattr(deps.fanout, "app_source_roots", []) or [])
 
     # 2. Region writes (Fix C) for the promotion; non-fatal on scan error.
     try:
@@ -307,7 +313,8 @@ def _gen_regional_fanout(intent: RemediationIntent, deps: PatchDeps, attempt: in
             writes=list(writes), integral=deps.fanout.integral, graph=graph,
             tree_root=str(deps.repo_root), scalar_type=scalar_cpp, two_limb=two_limb,
             shim_include=shim_include, caller_type=caller_type,
-            max_paths=deps.fanout.max_paths)
+            max_paths=deps.fanout.max_paths,
+            complex_type=complex_cpp, app_source_roots=app_roots)
     except VariantNameError as exc:
         # A collision is a fan-out bug, not a chain rep — surface it terminally
         # (deterministic; retrying cannot help) as the new manifest failure mode.

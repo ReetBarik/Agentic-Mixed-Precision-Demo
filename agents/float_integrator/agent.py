@@ -70,7 +70,12 @@ _SYSTEM_PROMPT = (Path(__file__).parent / "system_prompt.txt").read_text(encodin
 _SPEC = regional.RegionalSpec(
     system_prompt=_SYSTEM_PROMPT,
     cpp_scalar="float",
-    cpp_complex="std::complex<float>",
+    # ``Kokkos::complex<float>`` (not ``std::complex<float>``): float is a
+    # cv-unqualified builtin so ``Kokkos::complex<float>`` is a legal instantiation,
+    # and Kokkos is already included at every region site (the app's own complex type
+    # is ``Kokkos::complex<double>``) — so the float-complex container needs no extra
+    # ``<complex>`` include and interconverts with the caller's Kokkos complex.
+    cpp_complex="Kokkos::complex<float>",
     vendored_headers=[],            # float is a builtin — no vendored header
     shim_prefix="float",
     # float is a NATIVE single-limb type — see the module docstring.

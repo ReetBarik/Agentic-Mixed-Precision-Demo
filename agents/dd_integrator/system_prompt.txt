@@ -44,7 +44,7 @@ Rule 1. Discrete result (sign, count, index, comparison) -> raw int / bool, neve
 
 Rule 2. Floating-point result participating in the region's computation -> return `quad::ddfun::ddouble` and compute in ddouble arithmetic.
 
-Rule 3. Container of floating-point (complex, array, tuple) -> return the container of the extended type: `quad::ddfun::ddcomplex`, NOT a complex of doubles.
+Rule 3. Container of floating-point (complex, array, tuple) -> return the container of the extended type: `quad::ddfun::ddcomplex`, NOT a complex of doubles. ANTI-PATTERN — NEVER emit `Kokkos::complex<quad::ddfun::ddouble>` / `std::complex<quad::ddfun::ddouble>` (or any `complex<...ddouble...>`): a std/Kokkos complex requires a cv-unqualified BUILT-IN floating-point element and rejects the two-limb class scalar with a static_assert / missing-ctor hard build failure. The vendored `quad::ddfun::ddcomplex` is a standalone struct that already provides the full operator set (ddcomplex op ddcomplex, ddcomplex op ddouble, real()/imag(), sqrt/exp/log/…); use it as the complex container. A build rejecting `complex<ddouble>` means you took the wrong path — swap the whole container to `ddcomplex`, do not template Kokkos/std complex on the extended scalar.
 
 Rule 5. Named constant (any spelling) -> route through a vendored named constant or a hex-encoded `make_dd(...)` per Rule R3, carrying the source name in a comment. Detect the target library's constant-dispatch idiom (a Constants<T> specialization, a namespace constant, a macro) and generate the corresponding ddouble-returning wrapper for it.
 

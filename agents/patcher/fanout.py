@@ -88,6 +88,11 @@ class FanoutSettings:
     extra_args: list[str] = field(default_factory=list)
     max_paths: int = 1024
     enabled: bool = True
+    # Phase 2d: app source roots (tree headers ∪ the driver that instantiates the
+    # entry template) scanned to resolve which region operands are complex containers
+    # vs real scalars (agents.shared.type_resolve).  Empty → complex-container
+    # promotion is disabled and the transform degrades to the pre-2d scalar-only path.
+    app_source_roots: list[str] = field(default_factory=list)
 
 
 # One call graph per (tree, entry point) — built once and reused for the pass's
@@ -133,6 +138,12 @@ class Promote:
     scalar_type: str
     two_limb: bool
     caller_type: str = "double"
+    # Phase 2d complex-container promotion (all default to the pre-2d scalar-only
+    # behavior so an old manifest re-renders identically).
+    complex_type: str | None = None
+    complex_tokens: list[str] = field(default_factory=list)
+    complex_names: list[str] = field(default_factory=list)
+    caller_complex: str | None = None
 
 
 @dataclass
@@ -222,6 +233,8 @@ def fan_out_region(
     shim_include: str | None,
     caller_type: str = "double",
     max_paths: int = 1024,
+    complex_type: str | None = None,
+    app_source_roots=(),
 ) -> FanoutResult:
     """Realize a region intent as per-caller-path function variants.
 
@@ -229,9 +242,13 @@ def fan_out_region(
     basename — resolved against the tree); ``reads`` are the region's promoted reads
     (characterizer ``region_local_vars``), ``writes`` the Fix-C write set.
     ``scalar_type`` / ``two_limb`` / ``shim_include`` describe the target precision
-    (from the ff/dd/float integrator).  Mutates the tree under ``tree_root`` in place
-    and returns a :class:`FanoutResult`.  Raises :class:`FanoutError` when the region
-    is not inside a known function or its function is unreachable from the entry point.
+    (from the ff/dd/float integrator).  ``complex_type`` (+ ``app_source_roots`` for
+    the template-parameter binding) enables the Phase-2d complex-container promotion —
+    a region operand whose type resolves to a complex container promotes to
+    ``complex_type`` (``ffcomplex`` / ``ddcomplex`` / ``Kokkos::complex<float>``)
+    instead of the scalar.  Mutates the tree under ``tree_root`` in place and returns a
+    :class:`FanoutResult`.  Raises :class:`FanoutError` when the region is not inside a
+    known function or its function is unreachable from the entry point.
     """
     tree = Path(tree_root).resolve()
     fd = graph.enclosing_function(file, line_start)
@@ -240,27 +257,39 @@ def fan_out_region(
             f"region {file}:{line_start}-{line_end} is not inside any known function "
             f"(call graph rooted at {graph.root!r}); cannot fan out")
 
+    # Enclosing-function source: used to source-derive the promotion reads (Phase 2c)
+    # and to classify which of them are complex containers (Phase 2d).
+    func_src = "\n".join(_original_text(fd.file, fd.line_start, fd.line_end))
+
     # Phase 2c: source-derive the promotion reads when the intent carried none
-    # (qcdloop's template regions report ``region_local_vars=[]``).  Derived from the
-    # enclosing function's own source (the same original text the variant is copied
-    # from), so the reads are consistent with the body that gets promoted.
+    # (qcdloop's template regions report ``region_local_vars=[]``).
     reads = list(reads)
     if not reads:
-        func_src = "\n".join(_original_text(fd.file, fd.line_start, fd.line_end))
         reads = region_scan.region_reads_from_function(
             func_src, fd.line_start, line_start, line_end)
+
+    # Phase 2d: resolve the app's template-parameter binding (TOutput → complex, …)
+    # and classify which reads are complex containers.
+    complex_tokens, caller_complex = _resolve_complex_binding(
+        app_source_roots, caller_type, complex_type)
+    complex_names = _complex_reads(func_src, reads, complex_tokens) if complex_type else []
+    ckw = dict(complex_type=complex_type, complex_tokens=list(complex_tokens),
+               complex_names=complex_names, caller_complex=caller_complex)
 
     # Compute the promotion payload up front (independent of the variant/in-place
     # rendering path): ``promoted`` is False when the region retypes nothing — an
     # empty payload the caller turns into a terminal ``promotion_no_op``.
     region_text = "\n".join(_original_text(fd.file, line_start, line_end))
     _, promotion_applied = boundary.promote_region_block(
-        region_text, reads, writes, scalar_type, caller_type, two_limb)
+        region_text, reads, writes, scalar_type, caller_type, two_limb,
+        complex_type=complex_type, complex_tokens=frozenset(complex_tokens),
+        complex_names=frozenset(complex_names), caller_complex=caller_complex)
 
     # --- degenerate: region is IN the entry point -> promote in place ---------
     if fd.name == graph.root:
         touched = _promote_in_place(tree, fd, line_start, line_end, reads, writes,
-                                    scalar_type, two_limb, caller_type, shim_include)
+                                    scalar_type, two_limb, caller_type, shim_include,
+                                    ckw)
         return FanoutResult(declared_variants=[], files_touched=touched,
                             root_edited=True, in_place_region=True,
                             paths_enumerated=1, promotion_applied=promotion_applied,
@@ -301,7 +330,9 @@ def fan_out_region(
                 spec.promotes.append(Promote(
                     region_start=line_start, region_end=line_end,
                     reads=list(reads), writes=list(writes),
-                    scalar_type=scalar_type, two_limb=two_limb, caller_type=caller_type))
+                    scalar_type=scalar_type, two_limb=two_limb, caller_type=caller_type,
+                    complex_type=complex_type, complex_tokens=list(complex_tokens),
+                    complex_names=list(complex_names), caller_complex=caller_complex))
                 if shim_include and shim_include not in spec.shim_includes:
                     spec.shim_includes.append(shim_include)
 
@@ -359,7 +390,9 @@ def render_variant(spec: VariantSpec) -> str:
                 f"{spec.orig_name} [{spec.orig_start}-{spec.orig_end}]")
         region_text = "\n".join(lines[local_s:local_e + 1])
         block, _ = boundary.promote_region_block(
-            region_text, p.reads, p.writes, p.scalar_type, p.caller_type, p.two_limb)
+            region_text, p.reads, p.writes, p.scalar_type, p.caller_type, p.two_limb,
+            complex_type=p.complex_type, complex_tokens=frozenset(p.complex_tokens),
+            complex_names=frozenset(p.complex_names), caller_complex=p.caller_complex)
         lines = lines[:local_s] + block + lines[local_e + 1:]
 
     text = "\n".join(lines)
@@ -501,13 +534,18 @@ def _namespace_close_index(lines: list[str]) -> int:
 def _promote_in_place(tree: Path, fd: FuncDef, line_start: int, line_end: int,
                       reads: list[str], writes: list[str], scalar_type: str,
                       two_limb: bool, caller_type: str,
-                      shim_include: str | None) -> list[str]:
+                      shim_include: str | None, ckw: dict | None = None) -> list[str]:
     """Promote a region that lives *in the entry point* in place (no rename)."""
     path = Path(fd.file)
     lines = path.read_text(encoding="utf-8", errors="replace").split("\n")
     region_text = "\n".join(lines[line_start - 1:line_end])
+    ckw = ckw or {}
     block, promoted = boundary.promote_region_block(
-        region_text, reads, writes, scalar_type, caller_type, two_limb)
+        region_text, reads, writes, scalar_type, caller_type, two_limb,
+        complex_type=ckw.get("complex_type"),
+        complex_tokens=frozenset(ckw.get("complex_tokens", [])),
+        complex_names=frozenset(ckw.get("complex_names", [])),
+        caller_complex=ckw.get("caller_complex"))
     if promoted:
         lines = lines[:line_start - 1] + block + lines[line_end:]
     if shim_include:
@@ -685,6 +723,37 @@ def _idents_with_follow(text: str):
             else:
                 i += 1
     return pairs
+
+
+def _resolve_complex_binding(app_source_roots, caller_type: str,
+                             complex_type: str | None):
+    """Return ``(complex_tokens, caller_complex)`` for the app (Phase 2d).
+
+    ``complex_tokens`` are the type-name tokens that denote a complex container in a
+    region's scope (the complex-bound template-parameter names ∪ the literal
+    ``complex``); ``caller_complex`` is the concrete caller complex spelling
+    (``Kokkos::complex<double>``) a pre-declared complex write demotes back to.
+    Returns ``(frozenset(), None)`` when complex promotion is disabled (no
+    ``complex_type``) or the binding cannot be resolved (no ``app_source_roots``), so
+    the transform degrades to the pre-2d scalar-only path.
+    """
+    if not complex_type or not app_source_roots:
+        return frozenset(), None
+    from agents.shared import type_resolve as tr
+    bindings = tr.resolve_bindings(app_source_roots, caller_type)
+    tokens = tr.complex_type_tokens(bindings)
+    caller_complex = next(
+        (c for c in bindings.values() if tr.classify_concrete_type(c) == "complex"),
+        None)
+    return tokens, caller_complex
+
+
+def _complex_reads(func_src: str, reads: list[str], complex_tokens) -> list[str]:
+    """Subset of ``reads`` whose declared type (in ``func_src``) is a complex container."""
+    if not complex_tokens:
+        return []
+    complex_names = region_scan.region_complex_read_names(func_src, complex_tokens)
+    return [r for r in reads if r in complex_names]
 
 
 def _resolve_root_file(graph: CallGraph) -> str:
