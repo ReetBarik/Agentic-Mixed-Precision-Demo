@@ -61,6 +61,13 @@ from agents.validator.validate import DEFAULT_MAX_REGRESSION
 DEFAULT_MARGIN = DEFAULT_MAX_REGRESSION
 BASELINE_PRECISION = "double"
 
+# Phase 2f — chain_dd positive-lift gate (Reet 2026-07-24).  A chain-scoped dd
+# promotion must EARN its cost: accept iff it lifts the whole-app p100 by at least
+# this many digits vs the accumulated-min BEFORE this candidate (not the fixed
+# baseline — a later chain riding a prior chain's lift would otherwise pass for free).
+# Symmetric with the 0.5-digit regression margin; rejects FP-noise "improvements".
+LIFT_MARGIN = 0.5
+
 
 # ---------------------------------------------------------------------------
 # Injected-callable return shapes
@@ -110,6 +117,9 @@ class CandidateOutcome:
     validator_verdict: Optional[str] = None
     combined_min_after: Optional[float] = None
     wall_sec: float = 0.0
+    # Phase 2f: chain_dd rejection sub-classification ("chain_no_lift" |
+    # "chain_regression"), None for single-region candidates + all accepts.
+    reason_tag: Optional[str] = None
 
 
 @dataclass
@@ -228,17 +238,31 @@ def solve(queue: list[Candidate], *,
                     wall_sec=ar.wall_sec + vr.wall_sec))
                 break
 
-        threshold = result.accept_threshold   # baseline_min - margin (fixed for the run)
         min_before = accumulated_min
-        if _scoreable(vr.cand_min) and vr.cand_min >= threshold:
+        # Phase 2f: chain_dd uses a POSITIVE-lift gate vs the accumulated-min BEFORE
+        # this candidate (each chain must earn its own dd cost); every other rung uses
+        # the regression-relative gate vs the fixed baseline (unchanged, byte-for-byte).
+        if cand.is_chain:
+            lift_bar = (min_before if min_before is not None
+                        else result.baseline_min) + LIFT_MARGIN
+            accept = _scoreable(vr.cand_min) and vr.cand_min >= lift_bar
+            accept_reason = (f"chain lift: p100 {vr.cand_min:.4f} >= accumulated "
+                             f"{min_before:.4f} + lift {LIFT_MARGIN} = {lift_bar:.4f}")
+        else:
+            threshold = result.accept_threshold   # baseline_min - margin (fixed)
+            accept = _scoreable(vr.cand_min) and vr.cand_min >= threshold
+            accept_reason = (f"p100 {vr.cand_min:.4f} >= baseline "
+                             f"{result.baseline_min:.4f} - margin {margin} = {threshold:.4f}"
+                             if _scoreable(vr.cand_min) else "")
+
+        if accept:
             resolved.add(cand.region_id)
             result.region_final[cand.region_id] = cand.rung
             accumulated_min = vr.cand_min
             emit(CandidateOutcome(
                 candidate=cand, outcome=ACCEPTED,
                 min_before=min_before, min_after=vr.cand_min,
-                reason=f"p100 {vr.cand_min:.4f} >= baseline {result.baseline_min:.4f} "
-                       f"- margin {margin} = {threshold:.4f}",
+                reason=accept_reason,
                 candidate_sha=ar.candidate_sha,
                 patcher_status=ar.patcher_status, validator_verdict=vr.verdict,
                 combined_min_after=vr.combined_cand_min,
@@ -246,11 +270,23 @@ def solve(queue: list[Candidate], *,
         else:
             revert_fn(parent)  # drop this one patch; HEAD stays at `parent`
             shown = f"{vr.cand_min:.4f}" if _scoreable(vr.cand_min) else repr(vr.cand_min)
+            reason_tag = None
+            if cand.is_chain:
+                # regression vs baseline -> chain_regression; otherwise merely no lift.
+                reason_tag = ("chain_regression"
+                              if _scoreable(vr.cand_min)
+                              and vr.cand_min < result.baseline_min - margin
+                              else "chain_no_lift")
+                reason = (f"chain {reason_tag}: p100 {shown} < accumulated "
+                          f"{min_before:.4f} + lift {LIFT_MARGIN} = {lift_bar:.4f}")
+            else:
+                threshold = result.accept_threshold
+                reason = (f"p100 {shown} < baseline {result.baseline_min:.4f} "
+                          f"- margin {margin} = {threshold:.4f}")
             emit(CandidateOutcome(
                 candidate=cand, outcome=REJECTED,
                 min_before=min_before, min_after=vr.cand_min,
-                reason=f"p100 {shown} < baseline {result.baseline_min:.4f} "
-                       f"- margin {margin} = {threshold:.4f}",
+                reason=reason, reason_tag=reason_tag,
                 candidate_sha=ar.candidate_sha, patcher_status=ar.patcher_status,
                 validator_verdict=vr.verdict,
                 combined_min_after=vr.combined_cand_min,

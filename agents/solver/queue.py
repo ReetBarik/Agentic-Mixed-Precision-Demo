@@ -33,7 +33,13 @@ from dataclasses import dataclass
 # a candidate rung, so it is not ranked here.  ff and double are precision peers
 # (see models.LADDER); the solver only ever demotes double→{float,ff} or promotes
 # double→dd, so the three candidate rungs are float/ff/dd.
-RUNG_RANK: dict[str, int] = {"float": 0, "ff": 1, "dd": 2}
+# Phase 2f: ``chain_dd`` is the whole-cascade-chain double-double promotion — a
+# correctness-tier candidate keyed by chain_id (not file:line).  It is ranked in its
+# own Tier-1 (by predicted lift), not by this cost table, but it is listed here so
+# _candidate_from_row admits the rung.
+RUNG_RANK: dict[str, int] = {"float": 0, "ff": 1, "dd": 2, "chain_dd": 3}
+
+RUNG_CHAIN_DD = "chain_dd"
 
 _INERT_EPS = 1e-18  # delta equality tolerance (deltas are p100 max rel-errs ~1e-4..1e-13)
 
@@ -44,18 +50,27 @@ STATUS_MEASURED = "measured"
 class Candidate:
     """One ``(region_id, rung)`` competitor for the greedy walk."""
 
-    region_id: str            # "file:line" or "file:start-end"
-    rung: str                 # "float" | "ff" | "dd"
+    region_id: str            # "file:line" / "file:start-end" — or chain_id for chain_dd
+    rung: str                 # "float" | "ff" | "dd" | "chain_dd"
     kind: str                 # e.g. "double-to-float" (from patcher_metadata)
     intent: str               # "speedup" | "correctness"
-    via: str                  # "regional" | "plain"
+    via: str                  # "regional" | "plain" | "chain"
     delta_effective: float
     baseline_delta_effective: float
     intent_id: object = None
+    # Phase 2f (chain_dd only): the whole chain's (file, line_start, line_end) regions
+    # and the bound-decomposition predicted dd floor lift (ranks the Tier-1 chain queue).
+    chain_lines: tuple = ()
+    predicted_lift: float | None = None
 
     @property
     def rank(self) -> int:
         return RUNG_RANK.get(self.rung, 99)
+
+    @property
+    def is_chain(self) -> bool:
+        """True iff this is a chain-scoped dd promotion (Phase 2f)."""
+        return self.rung == RUNG_CHAIN_DD
 
     @property
     def is_discrim(self) -> bool:
@@ -77,15 +92,19 @@ def _candidate_from_row(row: dict) -> Candidate | None:
     if rung not in RUNG_RANK:
         return None
     meta = row.get("patcher_metadata") or {}
+    is_chain = rung == RUNG_CHAIN_DD
+    chain_lines = tuple(tuple(t) for t in (row.get("chain_lines") or []))
     return Candidate(
         region_id=row["region_id"],
         rung=rung,
-        kind=meta.get("kind", f"double-to-{rung}"),
-        intent=meta.get("intent", "speedup"),
-        via=meta.get("via", "regional"),
+        kind=meta.get("kind", "double-to-dd" if is_chain else f"double-to-{rung}"),
+        intent=meta.get("intent", "correctness" if is_chain else "speedup"),
+        via=meta.get("via", "chain" if is_chain else "regional"),
         delta_effective=row.get("delta_effective"),
         baseline_delta_effective=row.get("baseline_delta_effective"),
         intent_id=row.get("intent_id"),
+        chain_lines=chain_lines,
+        predicted_lift=row.get("predicted_lift"),
     )
 
 
@@ -103,11 +122,15 @@ class QueueBuild:
 
 
 def _sort_key(c: Candidate) -> tuple:
-    # Primary: cost rank (float < ff < dd).  Tiebreak within a rung: region_id
-    # ascending (stable, deterministic — a documented judgment call, since the
-    # measurement layer gives no principled intra-rung ordering across regions;
-    # flop-weighting is a v2 refinement, see the Stage-1 report handoff).
-    return (c.rank, c.region_id)
+    # Tiered (Phase 2f).  Tier-1 = chain_dd correctness candidates, ranked by predicted
+    # dd floor lift DESCENDING (biggest wins first — highest accept confidence, so a
+    # tight wall/budget locks the largest lifts first); chain_id breaks ties.  Tier-2 =
+    # single-region candidates by cost rank (float < ff < dd), region_id tiebreak (a
+    # documented judgment call — the measurement layer gives no principled intra-rung
+    # order; flop-weighting is a v2 refinement).
+    if c.is_chain:
+        return (0, -(c.predicted_lift or 0.0), c.region_id)
+    return (1, c.rank, c.region_id)
 
 
 def build_queue(rows: list[dict]) -> QueueBuild:

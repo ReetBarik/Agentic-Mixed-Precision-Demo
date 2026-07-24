@@ -28,6 +28,13 @@ def _cand(region_id, rung, de=1e-7, bde=1e-13):
                      delta_effective=de, baseline_delta_effective=bde)
 
 
+def _chain_cand(chain_id, predicted_lift=10.0, de=1e-30, bde=1e-4):
+    return Candidate(region_id=chain_id, rung="chain_dd", kind="double-to-dd",
+                     intent="correctness", via="chain",
+                     delta_effective=de, baseline_delta_effective=bde,
+                     chain_lines=(("f.h", 10, 10),), predicted_lift=predicted_lift)
+
+
 class FakeHarness:
     """Scriptable apply/validate/revert/head with a commit-counter 'git'."""
 
@@ -224,3 +231,67 @@ def test_all_regions_seeded_at_double():
                 head_fn=h.head, margin=MARGIN, all_region_ids={"A.h:10", "C.h:99"})
     assert res.region_final["C.h:99"] == "double"   # region with no candidate
     assert res.region_final["A.h:10"] == "float"
+
+
+# --- Phase 2f: chain_dd positive-lift gate ------------------------------------
+def test_chain_accepts_on_own_lift():
+    # First candidate: accumulated == baseline; a chain lifting >= baseline + 0.5 accepts.
+    q = [_chain_cand("cascade1")]
+    h = FakeHarness({("cascade1", "chain_dd"): BASELINE + 1.0})
+    res = h.run(q)
+    assert len(res.accepted) == 1
+    assert res.region_final["cascade1"] == "chain_dd"
+    assert res.final_min == BASELINE + 1.0
+    assert "chain lift" in res.accepted[0].reason
+
+
+def test_chain_no_lift_rejected():
+    # cand_min within [baseline-0.5, baseline+0.5): not a regression, but no real lift.
+    q = [_chain_cand("cascade1")]
+    h = FakeHarness({("cascade1", "chain_dd"): BASELINE + 0.2})
+    res = h.run(q)
+    assert len(res.rejected) == 1
+    assert res.rejected[0].reason_tag == "chain_no_lift"
+    assert h.reverted == ["sha0"]                 # patch reverted to parent
+
+
+def test_chain_regression_rejected():
+    q = [_chain_cand("cascade1")]
+    h = FakeHarness({("cascade1", "chain_dd"): BASELINE - 2.0})   # < baseline - margin
+    res = h.run(q)
+    assert res.rejected[0].reason_tag == "chain_regression"
+
+
+def test_chain_ride_along_is_closed():
+    # chain1 lifts baseline -> baseline+1 (accepted); chain2 adds NOTHING beyond that,
+    # so its cand_min == accumulated -> bar = accumulated + 0.5 -> rejected (no_lift).
+    # This is the fix for the literal-fixed-baseline hole (a free ride on chain1's lift).
+    q = [_chain_cand("cascade1"), _chain_cand("cascade2")]
+    h = FakeHarness({("cascade1", "chain_dd"): BASELINE + 1.0,
+                     ("cascade2", "chain_dd"): BASELINE + 1.0})
+    res = h.run(q)
+    assert res.region_final["cascade1"] == "chain_dd"      # accepted
+    assert "cascade2" not in {o.candidate.region_id for o in res.accepted}
+    c2 = [o for o in res.rejected if o.candidate.region_id == "cascade2"][0]
+    assert c2.reason_tag == "chain_no_lift"
+
+
+def test_chain_second_stacks_when_it_adds_lift():
+    # chain2 DOES add >= 0.5 beyond chain1's accumulated -> both accepted (stacking).
+    q = [_chain_cand("cascade1"), _chain_cand("cascade2")]
+    h = FakeHarness({("cascade1", "chain_dd"): BASELINE + 1.0,
+                     ("cascade2", "chain_dd"): BASELINE + 1.6})   # +0.6 over accumulated
+    res = h.run(q)
+    assert {o.candidate.region_id for o in res.accepted} == {"cascade1", "cascade2"}
+    assert res.final_min == BASELINE + 1.6
+
+
+def test_single_region_gate_unchanged_by_chain_addition():
+    # A plain single-region candidate still uses the regression-relative baseline gate
+    # and its reason string is unchanged (byte-for-byte "baseline ... - margin").
+    q = [_cand("A.h:10", "float")]
+    h = FakeHarness({("A.h:10", "float"): 8.5})   # >= THRESHOLD 8.34
+    res = h.run(q)
+    assert len(res.accepted) == 1
+    assert res.accepted[0].reason_tag is None
+    assert "baseline" in res.accepted[0].reason and "margin" in res.accepted[0].reason
