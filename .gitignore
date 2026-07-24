@@ -27,3 +27,4 @@ runs/qcdloop/per_integral_out/
 # Local virtual environments
 .venv/
 venv/
+runs/qcdloop/.merged_all_21.cache.json

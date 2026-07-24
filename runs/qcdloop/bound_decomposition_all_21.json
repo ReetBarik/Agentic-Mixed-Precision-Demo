@@ -1,0 +1,3203 @@
+{
+  "meta": {
+    "item": "Phase 2e Item 7 \u2014 bound decomposition across all 21 integrals",
+    "shard_dir": "/vast/projects/pepper_hep/qcdloop_shards_5k",
+    "n_shards": 10,
+    "samples_seen": {
+      "B1": 5000,
+      "B10": 5000,
+      "B11": 5000,
+      "B12": 5000,
+      "B13": 5000,
+      "B14": 5000,
+      "B15": 5000,
+      "B16": 5000,
+      "B2": 5000,
+      "B3": 5000,
+      "B4": 5000,
+      "B5": 5000,
+      "B6": 5000,
+      "B7": 5000,
+      "B8": 5000,
+      "B9": 5000,
+      "BIN0": 5000,
+      "BIN1": 5000,
+      "BIN2": 5000,
+      "BIN3": 5000,
+      "BIN4": 5000
+    },
+    "U": {
+      "float": 5.960464477539063e-08,
+      "ff": 1.4210854715202004e-14,
+      "double": 1.1102230246251565e-16,
+      "dd": 1.232595164407831e-32
+    },
+    "double_digits": 15.95,
+    "dd_digits": 31.9,
+    "dd_lift_orders": 15.95,
+    "measured_floors": {
+      "B1": {
+        "digits": 12.158,
+        "rel_err": 6.942e-13,
+        "source": "per-integral scorer (Phase 2b): B0m.h:118/124/125 baseline delta"
+      },
+      "B8": {
+        "digits": 10.139,
+        "rel_err": 7.266e-11,
+        "source": "per-integral scorer: kokkosUtils.h dilog branches (DD_TRIAGE benign_no_op)"
+      },
+      "B9": {
+        "digits": 11.53,
+        "rel_err": 2.95e-12,
+        "source": "per-integral scorer: kokkosUtils.h:212 (DD_TRIAGE benign_no_op)"
+      },
+      "B10": {
+        "digits": 9.878,
+        "rel_err": 1.324e-10,
+        "source": "per-integral scorer: kokkosUtils.h:212 (DD_TRIAGE physics_ceiling)"
+      },
+      "B12": {
+        "digits": 3.691,
+        "rel_err": 0.0002039,
+        "source": "solver Stage-1 / whole-app min (sample 3868, coeff0.imag)"
+      }
+    },
+    "verdict_thresholds": {
+      "stable_floor": 12.0,
+      "benign_floor": 10.0,
+      "tight_lo": 0.001,
+      "tight_hi": 10.0
+    }
+  },
+  "per_integral": {
+    "B1": {
+      "present": true,
+      "samples": 5000,
+      "n_regions": 35,
+      "n_cascade_chains": 0,
+      "n_cancellation_cascade_chains": 0,
+      "max_region_rel_err": 1.7658843168501762e-09,
+      "floor_digits": 12.158,
+      "floor_source": "measured",
+      "floor_confidence": "measured",
+      "floor_note": "per-integral scorer (Phase 2b): B0m.h:118/124/125 baseline delta",
+      "dominant_chain": null,
+      "dominant_chain_tightness": null,
+      "cancellation_loss_digits": 3.79,
+      "predicted_dd_floor_digits": 28.11,
+      "dd_sufficient": true,
+      "predicted_dd_floor_lift": 15.95,
+      "verdict": "STABLE_ALREADY",
+      "verdict_reason": "no cascade chains; well-conditioned (floor ~12.2 digits, no cancellation lever)",
+      "top5_chains_by_measured_rel_err": []
+    },
+    "B2": {
+      "present": true,
+      "samples": 5000,
+      "n_regions": 52,
+      "n_cascade_chains": 20,
+      "n_cancellation_cascade_chains": 20,
+      "max_region_rel_err": 7.405943672686605e-05,
+      "floor_digits": 11.5,
+      "floor_source": "derived",
+      "floor_confidence": "derived_in_calibration_range",
+      "floor_note": "model on dominant-chain rel-err (coarse; calibrated on 5 measured pts)",
+      "dominant_chain": {
+        "chain_id": "cascade_B2_ec3a9f57_308e9522",
+        "signal_class": "cancellation_cascade",
+        "n_contributors": 4,
+        "chain_lines": [
+          "B0m.h:161",
+          "kokkosUtils.h:212",
+          "kokkosUtils.h:621"
+        ],
+        "ops": {
+          "add": 1,
+          "sub": 3
+        },
+        "max_cond": 463.3470519161713,
+        "max_sensitivity": 73151425611.09393,
+        "measured_max_rel_err": 7.405943672686605e-05,
+        "predicted_rel_err_if_float": 4360.164738362666,
+        "predicted_rel_err_if_ff": 0.0010395442815691628,
+        "predicted_rel_err_if_double": 8.121439699759085e-06,
+        "predicted_rel_err_if_dd": 9.016609347777354e-22,
+        "tightness_double_over_measured": 0.10966110544036753
+      },
+      "dominant_chain_tightness": 0.10966110544036753,
+      "cancellation_loss_digits": 4.45,
+      "predicted_dd_floor_digits": 27.45,
+      "dd_sufficient": true,
+      "predicted_dd_floor_lift": 15.95,
+      "verdict": "STABLE_ALREADY",
+      "verdict_reason": "floor 11.5 >= 10 digits (benign cancellation; DD_TRIAGE-class dd-inert), no lift warranted",
+      "top5_chains_by_measured_rel_err": [
+        {
+          "chain_id": "cascade_B2_ec3a9f57_308e9522",
+          "signal_class": "cancellation_cascade",
+          "n_contributors": 4,
+          "chain_lines": [
+            "B0m.h:161",
+            "kokkosUtils.h:212",
+            "kokkosUtils.h:621"
+          ],
+          "ops": {
+            "add": 1,
+            "sub": 3
+          },
+          "max_cond": 463.3470519161713,
+          "max_sensitivity": 73151425611.09393,
+          "measured_max_rel_err": 7.405943672686605e-05,
+          "predicted_rel_err_if_float": 4360.164738362666,
+          "predicted_rel_err_if_ff": 0.0010395442815691628,
+          "predicted_rel_err_if_double": 8.121439699759085e-06,
+          "predicted_rel_err_if_dd": 9.016609347777354e-22,
+          "tightness_double_over_measured": 0.10966110544036753
+        },
+        {
+          "chain_id": "cascade_B2_ec3a9f57_8059e091",
+          "signal_class": "cancellation_cascade",
+          "n_contributors": 4,
+          "chain_lines": [
+            "B0m.h:161",
+            "kokkosUtils.h:212",
+            "kokkosUtils.h:621"
+          ],
+          "ops": {
+            "add": 1,
+            "sub": 3
+          },
+          "max_cond": 463.3470519161713,
+          "max_sensitivity": 73151425611.09393,
+          "measured_max_rel_err": 7.405943672686605e-05,
+          "predicted_rel_err_if_float": 4360.164738362666,
+          "predicted_rel_err_if_ff": 0.0010395442815691628,
+          "predicted_rel_err_if_double": 8.121439699759085e-06,
+          "predicted_rel_err_if_dd": 9.016609347777354e-22,
+          "tightness_double_over_measured": 0.10966110544036753
+        },
+        {
+          "chain_id": "cascade_B2_263f304c_09dda116",
+          "signal_class": "cancellation_cascade",
+          "n_contributors": 5,
+          "chain_lines": [
+            "B0m.h:161"
+          ],
+          "ops": {
+            "add": 4,
+            "sub": 1
+          },
+          "max_cond": 29.19695720272446,
+          "max_sensitivity": 44763.343379110316,
+          "measured_max_rel_err": 4.9928194822586e-06,
+          "predicted_rel_err_if_float": 0.0026681031810707042,
+          "predicted_rel_err_if_ff": 6.361253693272362e-10,
+          "predicted_rel_err_if_double": 4.969729447869033e-12,
+          "predicted_rel_err_if_dd": 5.517508059181867e-28,
+          "tightness_double_over_measured": 9.95375351648179e-07
+        },
+        {
+          "chain_id": "cascade_B2_263f304c_3efb20f9",
+          "signal_class": "cancellation_cascade",
+          "n_contributors": 5,
+          "chain_lines": [
+            "B0m.h:161"
+          ],
+          "ops": {
+            "add": 4,
+            "sub": 1
+          },
+          "max_cond": 29.19695720272446,
+          "max_sensitivity": 44763.343379110316,
+          "measured_max_rel_err": 4.9928194822586e-06,
+          "predicted_rel_err_if_float": 0.0026681031810707042,
+          "predicted_rel_err_if_ff": 6.361253693272362e-10,
+          "predicted_rel_err_if_double": 4.969729447869033e-12,
+          "predicted_rel_err_if_dd": 5.517508059181867e-28,
+          "tightness_double_over_measured": 9.95375351648179e-07
+        },
+        {
+          "chain_id": "cascade_B2_def91ea7_24702052",
+          "signal_class": "cancellation_cascade",
+          "n_contributors": 7,
+          "chain_lines": [
+            "B0m.h:161",
+            "kokkosUtils.h:174",
+            "kokkosUtils.h:177",
+            "kokkosUtils.h:206",
+            "kokkosUtils.h:212"
+          ],
+          "ops": {
+            "add": 3,
+            "sub": 4
+          },
+          "max_cond": 1460.7413420511214,
+          "max_sensitivity": 2724020535.726078,
+          "measured_max_rel_err": 3.344129739712148e-06,
+          "predicted_rel_err_if_float": 162.36427639282215,
+          "predicted_rel_err_if_ff": 3.8710660074430024e-05,
+          "predicted_rel_err_if_double": 3.0242703183148456e-07,
+          "predicted_rel_err_if_dd": 3.357614540083593e-23,
+          "tightness_double_over_measured": 0.09043519700809112
+        }
+      ]
+    },
+    "B3": {
+      "present": true,
+      "samples": 5000,
+      "n_regions": 66,
+      "n_cascade_chains": 120,
+      "n_cancellation_cascade_chains": 120,
+      "max_region_rel_err": 1.605534120155074,
+      "floor_digits": 10.318,
+      "floor_source": "derived",
+      "floor_confidence": "derived_in_calibration_range",
+      "floor_note": "model on dominant-chain rel-err (coarse; calibrated on 5 measured pts)",
+      "dominant_chain": {
+        "chain_id": "cascade_B3_69526f42_503adfc1",
+        "signal_class": "cancellation_cascade",
+        "n_contributors": 11,
+        "chain_lines": [
+          "B0m.h:216",
+          "B0m.h:230",
+          "kokkosUtils.h:174",
+          "kokkosUtils.h:177",
+          "kokkosUtils.h:206",
+          "kokkosUtils.h:212",
+          "kokkosUtils.h:702",
+          "kokkosUtils.h:703",
+          "kokkosUtils.h:704"
+        ],
+        "ops": {
+          "add": 5,
+          "sub": 6
+        },
+        "max_cond": 4661.154905854523,
+        "max_sensitivity": 1311789120971336.5,
+        "measured_max_rel_err": 1.605534120155074,
+        "predicted_rel_err_if_float": 78188724.57571843,
+        "predicted_rel_err_if_ff": 18.64164461510621,
+        "predicted_rel_err_if_double": 0.14563784855551726,
+        "predicted_rel_err_if_dd": 1.6169049272320686e-17,
+        "tightness_double_over_measured": 0.09070990564900017
+      },
+      "dominant_chain_tightness": 0.09070990564900017,
+      "cancellation_loss_digits": 5.63,
+      "predicted_dd_floor_digits": 26.27,
+      "dd_sufficient": true,
+      "predicted_dd_floor_lift": 15.95,
+      "verdict": "STABLE_ALREADY",
+      "verdict_reason": "floor 10.3 >= 10 digits (benign cancellation; DD_TRIAGE-class dd-inert), no lift warranted",
+      "top5_chains_by_measured_rel_err": [
+        {
+          "chain_id": "cascade_B3_69526f42_503adfc1",
+          "signal_class": "cancellation_cascade",
+          "n_contributors": 11,
+          "chain_lines": [
+            "B0m.h:216",
+            "B0m.h:230",
+            "kokkosUtils.h:174",
+            "kokkosUtils.h:177",
+            "kokkosUtils.h:206",
+            "kokkosUtils.h:212",
+            "kokkosUtils.h:702",
+            "kokkosUtils.h:703",
+            "kokkosUtils.h:704"
+          ],
+          "ops": {
+            "add": 5,
+            "sub": 6
+          },
+          "max_cond": 4661.154905854523,
+          "max_sensitivity": 1311789120971336.5,
+          "measured_max_rel_err": 1.605534120155074,
+          "predicted_rel_err_if_float": 78188724.57571843,
+          "predicted_rel_err_if_ff": 18.64164461510621,
+          "predicted_rel_err_if_double": 0.14563784855551726,
+          "predicted_rel_err_if_dd": 1.6169049272320686e-17,
+          "tightness_double_over_measured": 0.09070990564900017
+        },
+        {
+          "chain_id": "cascade_B3_69526f42_a97dc809",
+          "signal_class": "cancellation_cascade",
+          "n_contributors": 11,
+          "chain_lines": [
+            "B0m.h:216",
+            "B0m.h:230",
+            "kokkosUtils.h:174",
+            "kokkosUtils.h:177",
+            "kokkosUtils.h:206",
+            "kokkosUtils.h:212",
+            "kokkosUtils.h:702",
+            "kokkosUtils.h:703",
+            "kokkosUtils.h:704"
+          ],
+          "ops": {
+            "add": 5,
+            "sub": 6
+          },
+          "max_cond": 4661.154905854523,
+          "max_sensitivity": 1311789120971336.5,
+          "measured_max_rel_err": 1.605534120155074,
+          "predicted_rel_err_if_float": 78188724.57571843,
+          "predicted_rel_err_if_ff": 18.64164461510621,
+          "predicted_rel_err_if_double": 0.14563784855551726,
+          "predicted_rel_err_if_dd": 1.6169049272320686e-17,
+          "tightness_double_over_measured": 0.09070990564900017
+        },
+        {
+          "chain_id": "cascade_B3_1ab547ab_9bbd075a",
+          "signal_class": "cancellation_cascade",
+          "n_contributors": 10,
+          "chain_lines": [
+            "B0m.h:216",
+            "B0m.h:222",
+            "B0m.h:230",
+            "kokkosUtils.h:174",
+            "kokkosUtils.h:177",
+            "kokkosUtils.h:212",
+            "kokkosUtils.h:702",
+            "kokkosUtils.h:703",
+            "kokkosUtils.h:704"
+          ],
+          "ops": {
+            "add": 3,
+            "sub": 7
+          },
+          "max_cond": 3739.1502114279833,
+          "max_sensitivity": 114610382120754.83,
+          "measured_max_rel_err": 0.14053045828396338,
+          "predicted_rel_err_if_float": 6831311.113879372,
+          "predicted_rel_err_if_ff": 1.6287114891718322,
+          "predicted_rel_err_if_double": 0.012724308509154939,
+          "predicted_rel_err_if_dd": 1.4126820279297613e-18,
+          "tightness_double_over_measured": 0.09054484461612955
+        },
+        {
+          "chain_id": "cascade_B3_1ab547ab_f918be66",
+          "signal_class": "cancellation_cascade",
+          "n_contributors": 10,
+          "chain_lines": [
+            "B0m.h:216",
+            "B0m.h:222",
+            "B0m.h:230",
+            "kokkosUtils.h:174",
+            "kokkosUtils.h:177",
+            "kokkosUtils.h:212",
+            "kokkosUtils.h:702",
+            "kokkosUtils.h:703",
+            "kokkosUtils.h:704"
+          ],
+          "ops": {
+            "add": 3,
+            "sub": 7
+          },
+          "max_cond": 3739.1502114279833,
+          "max_sensitivity": 114610382120754.83,
+          "measured_max_rel_err": 0.14053045828396338,
+          "predicted_rel_err_if_float": 6831311.113879372,
+          "predicted_rel_err_if_ff": 1.6287114891718322,
+          "predicted_rel_err_if_double": 0.012724308509154939,
+          "predicted_rel_err_if_dd": 1.4126820279297613e-18,
+          "tightness_double_over_measured": 0.09054484461612955
+        },
+        {
+          "chain_id": "cascade_B3_3ecb124f_53fdd5f2",
+          "signal_class": "cancellation_cascade",
+          "n_contributors": 14,
+          "chain_lines": [
+            "B0m.h:216",
+            "B0m.h:226",
+            "B0m.h:230",
+            "kokkosUtils.h:174",
+            "kokkosUtils.h:177",
+            "kokkosUtils.h:199",
+            "kokkosUtils.h:212",
+            "kokkosUtils.h:690",
+            "kokkosUtils.h:698"
+          ],
+          "ops": {
+            "add": 3,
+            "sub": 11
+          },
+          "max_cond": 4689.477231614896,
+          "max_sensitivity": 21507213059411.4,
+          "measured_max_rel_err": 0.02635048017406657,
+          "predicted_rel_err_if_float": 1281929.7945148586,
+          "predicted_rel_err_if_ff": 0.3056358801161906,
+          "predicted_rel_err_if_double": 0.002387780313407739,
+          "predicted_rel_err_if_dd": 2.650968681691944e-19,
+          "tightness_double_over_measured": 0.09061619741403149
+        }
+      ]
+    },
+    "B4": {
+      "present": true,
+      "samples": 5000,
+      "n_regions": 52,
+      "n_cascade_chains": 6,
+      "n_cancellation_cascade_chains": 6,
+      "max_region_rel_err": 4.700697820323259e-06,
+      "floor_digits": 11.5,
+      "floor_source": "derived",
+      "floor_confidence": "derived_in_calibration_range",
+      "floor_note": "model on dominant-chain rel-err (coarse; calibrated on 5 measured pts)",
+      "dominant_chain": {
+        "chain_id": "cascade_B4_a2bd4bc6_9b44ace4",
+        "signal_class": "cancellation_cascade",
+        "n_contributors": 2,
+        "chain_lines": [
+          "B0m.h:272"
+        ],
+        "ops": {
+          "add": 2
+        },
+        "max_cond": 244096.467597387,
+        "max_sensitivity": 244096.467597387,
+        "measured_max_rel_err": 4.700697820323259e-06,
+        "predicted_rel_err_if_float": 0.0145492832420699,
+        "predicted_rel_err_if_ff": 3.4688194375204802e-09,
+        "predicted_rel_err_if_double": 2.7100151855628752e-11,
+        "predicted_rel_err_if_dd": 3.00872125609572e-27,
+        "tightness_double_over_measured": 5.765133793213093e-06
+      },
+      "dominant_chain_tightness": 5.765133793213093e-06,
+      "cancellation_loss_digits": 4.45,
+      "predicted_dd_floor_digits": 27.45,
+      "dd_sufficient": true,
+      "predicted_dd_floor_lift": 15.95,
+      "verdict": "STABLE_ALREADY",
+      "verdict_reason": "floor 11.5 >= 10 digits (benign cancellation; DD_TRIAGE-class dd-inert), no lift warranted",
+      "top5_chains_by_measured_rel_err": [
+        {
+          "chain_id": "cascade_B4_a2bd4bc6_9b44ace4",
+          "signal_class": "cancellation_cascade",
+          "n_contributors": 2,
+          "chain_lines": [
+            "B0m.h:272"
+          ],
+          "ops": {
+            "add": 2
+          },
+          "max_cond": 244096.467597387,
+          "max_sensitivity": 244096.467597387,
+          "measured_max_rel_err": 4.700697820323259e-06,
+          "predicted_rel_err_if_float": 0.0145492832420699,
+          "predicted_rel_err_if_ff": 3.4688194375204802e-09,
+          "predicted_rel_err_if_double": 2.7100151855628752e-11,
+          "predicted_rel_err_if_dd": 3.00872125609572e-27,
+          "tightness_double_over_measured": 5.765133793213093e-06
+        },
+        {
+          "chain_id": "cascade_B4_a2bd4bc6_bbaf1754",
+          "signal_class": "cancellation_cascade",
+          "n_contributors": 2,
+          "chain_lines": [
+            "B0m.h:272"
+          ],
+          "ops": {
+            "add": 2
+          },
+          "max_cond": 244096.467597387,
+          "max_sensitivity": 244096.467597387,
+          "measured_max_rel_err": 4.700697820323259e-06,
+          "predicted_rel_err_if_float": 0.0145492832420699,
+          "predicted_rel_err_if_ff": 3.4688194375204802e-09,
+          "predicted_rel_err_if_double": 2.7100151855628752e-11,
+          "predicted_rel_err_if_dd": 3.00872125609572e-27,
+          "tightness_double_over_measured": 5.765133793213093e-06
+        },
+        {
+          "chain_id": "cascade_B4_3f7dfa03_1f88f542",
+          "signal_class": "cancellation_cascade",
+          "n_contributors": 5,
+          "chain_lines": [
+            "B0m.h:272",
+            "kokkosUtils.h:206"
+          ],
+          "ops": {
+            "add": 3,
+            "sub": 2
+          },
+          "max_cond": 1434.8376767107811,
+          "max_sensitivity": 21234745.132177595,
+          "measured_max_rel_err": 2.421670686059998e-06,
+          "predicted_rel_err_if_float": 1.2656894404994008,
+          "predicted_rel_err_if_ff": 3.0176387798771877e-07,
+          "predicted_rel_err_if_double": 2.357530296779053e-09,
+          "predicted_rel_err_if_dd": 2.617384416735483e-25,
+          "tightness_double_over_measured": 0.0009735139919518536
+        },
+        {
+          "chain_id": "cascade_B4_3f7dfa03_e6a0eb62",
+          "signal_class": "cancellation_cascade",
+          "n_contributors": 5,
+          "chain_lines": [
+            "B0m.h:272",
+            "kokkosUtils.h:206"
+          ],
+          "ops": {
+            "add": 3,
+            "sub": 2
+          },
+          "max_cond": 1434.8376767107811,
+          "max_sensitivity": 21234745.132177595,
+          "measured_max_rel_err": 2.421670686059998e-06,
+          "predicted_rel_err_if_float": 1.2656894404994008,
+          "predicted_rel_err_if_ff": 3.0176387798771877e-07,
+          "predicted_rel_err_if_double": 2.357530296779053e-09,
+          "predicted_rel_err_if_dd": 2.617384416735483e-25,
+          "tightness_double_over_measured": 0.0009735139919518536
+        },
+        {
+          "chain_id": "cascade_B4_c2674303_7bdb0cc4",
+          "signal_class": "cancellation_cascade",
+          "n_contributors": 3,
+          "chain_lines": [
+            "B0m.h:272",
+            "kokkosUtils.h:199"
+          ],
+          "ops": {
+            "add": 1,
+            "sub": 2
+          },
+          "max_cond": 8796.929793656756,
+          "max_sensitivity": 588381.0469678289,
+          "measured_max_rel_err": 1.014195439610901e-06,
+          "predicted_rel_err_if_float": 0.03507024329708987,
+          "predicted_rel_err_if_ff": 8.361397575638263e-09,
+          "predicted_rel_err_if_double": 6.532341855967393e-11,
+          "predicted_rel_err_if_dd": 7.252356333217627e-27,
+          "tightness_double_over_measured": 6.440910302725818e-05
+        }
+      ]
+    },
+    "B5": {
+      "present": true,
+      "samples": 5000,
+      "n_regions": 67,
+      "n_cascade_chains": 86,
+      "n_cancellation_cascade_chains": 86,
+      "max_region_rel_err": 1.0455219738230421,
+      "floor_digits": 10.392,
+      "floor_source": "derived",
+      "floor_confidence": "derived_in_calibration_range",
+      "floor_note": "model on dominant-chain rel-err (coarse; calibrated on 5 measured pts)",
+      "dominant_chain": {
+        "chain_id": "cascade_B5_17cdfa93_b9fb7d65",
+        "signal_class": "cancellation_cascade",
+        "n_contributors": 13,
+        "chain_lines": [
+          "B0m.h:329",
+          "B0m.h:339",
+          "kokkosUtils.h:174",
+          "kokkosUtils.h:177",
+          "kokkosUtils.h:199",
+          "kokkosUtils.h:212",
+          "kokkosUtils.h:702",
+          "kokkosUtils.h:703",
+          "kokkosUtils.h:704"
+        ],
+        "ops": {
+          "add": 3,
+          "sub": 10
+        },
+        "max_cond": 1736.1057545974375,
+        "max_sensitivity": 853955381944931.6,
+        "measured_max_rel_err": 1.0455219738230421,
+        "predicted_rel_err_if_float": 50899707.194860674,
+        "predicted_rel_err_if_ff": 12.13543586608426,
+        "predicted_rel_err_if_double": 0.09480809270378328,
+        "predicted_rel_err_if_dd": 1.052581274405365e-17,
+        "tightness_double_over_measured": 0.09068015314600154
+      },
+      "dominant_chain_tightness": 0.09068015314600154,
+      "cancellation_loss_digits": 5.56,
+      "predicted_dd_floor_digits": 26.34,
+      "dd_sufficient": true,
+      "predicted_dd_floor_lift": 15.95,
+      "verdict": "STABLE_ALREADY",
+      "verdict_reason": "floor 10.4 >= 10 digits (benign cancellation; DD_TRIAGE-class dd-inert), no lift warranted",
+      "top5_chains_by_measured_rel_err": [
+        {
+          "chain_id": "cascade_B5_17cdfa93_b9fb7d65",
+          "signal_class": "cancellation_cascade",
+          "n_contributors": 13,
+          "chain_lines": [
+            "B0m.h:329",
+            "B0m.h:339",
+            "kokkosUtils.h:174",
+            "kokkosUtils.h:177",
+            "kokkosUtils.h:199",
+            "kokkosUtils.h:212",
+            "kokkosUtils.h:702",
+            "kokkosUtils.h:703",
+            "kokkosUtils.h:704"
+          ],
+          "ops": {
+            "add": 3,
+            "sub": 10
+          },
+          "max_cond": 1736.1057545974375,
+          "max_sensitivity": 853955381944931.6,
+          "measured_max_rel_err": 1.0455219738230421,
+          "predicted_rel_err_if_float": 50899707.194860674,
+          "predicted_rel_err_if_ff": 12.13543586608426,
+          "predicted_rel_err_if_double": 0.09480809270378328,
+          "predicted_rel_err_if_dd": 1.052581274405365e-17,
+          "tightness_double_over_measured": 0.09068015314600154
+        },
+        {
+          "chain_id": "cascade_B5_17cdfa93_ec07c603",
+          "signal_class": "cancellation_cascade",
+          "n_contributors": 13,
+          "chain_lines": [
+            "B0m.h:329",
+            "B0m.h:339",
+            "kokkosUtils.h:174",
+            "kokkosUtils.h:177",
+            "kokkosUtils.h:199",
+            "kokkosUtils.h:212",
+            "kokkosUtils.h:702",
+            "kokkosUtils.h:703",
+            "kokkosUtils.h:704"
+          ],
+          "ops": {
+            "add": 3,
+            "sub": 10
+          },
+          "max_cond": 1736.1057545974375,
+          "max_sensitivity": 853955381944931.6,
+          "measured_max_rel_err": 1.0455219738230421,
+          "predicted_rel_err_if_float": 50899707.194860674,
+          "predicted_rel_err_if_ff": 12.13543586608426,
+          "predicted_rel_err_if_double": 0.09480809270378328,
+          "predicted_rel_err_if_dd": 1.052581274405365e-17,
+          "tightness_double_over_measured": 0.09068015314600154
+        },
+        {
+          "chain_id": "cascade_B5_a9f8238f_0f5d90d2",
+          "signal_class": "cancellation_cascade",
+          "n_contributors": 11,
+          "chain_lines": [
+            "B0m.h:329",
+            "B0m.h:339",
+            "kokkosUtils.h:174",
+            "kokkosUtils.h:177",
+            "kokkosUtils.h:212",
+            "kokkosUtils.h:702",
+            "kokkosUtils.h:703",
+            "kokkosUtils.h:704"
+          ],
+          "ops": {
+            "add": 4,
+            "sub": 7
+          },
+          "max_cond": 897.5394542280222,
+          "max_sensitivity": 1842249887719.0112,
+          "measured_max_rel_err": 0.0022784687742616622,
+          "predicted_rel_err_if_float": 109806.65014499493,
+          "predicted_rel_err_if_ff": 0.026179945503472073,
+          "predicted_rel_err_if_double": 0.00020453082424587557,
+          "predicted_rel_err_if_dd": 2.2707483032333227e-20,
+          "tightness_double_over_measured": 0.08976678836081647
+        },
+        {
+          "chain_id": "cascade_B5_a9f8238f_f1522aa1",
+          "signal_class": "cancellation_cascade",
+          "n_contributors": 11,
+          "chain_lines": [
+            "B0m.h:329",
+            "B0m.h:339",
+            "kokkosUtils.h:174",
+            "kokkosUtils.h:177",
+            "kokkosUtils.h:212",
+            "kokkosUtils.h:702",
+            "kokkosUtils.h:703",
+            "kokkosUtils.h:704"
+          ],
+          "ops": {
+            "add": 4,
+            "sub": 7
+          },
+          "max_cond": 897.5394542280222,
+          "max_sensitivity": 1842249887719.0112,
+          "measured_max_rel_err": 0.0022784687742616622,
+          "predicted_rel_err_if_float": 109806.65014499493,
+          "predicted_rel_err_if_ff": 0.026179945503472073,
+          "predicted_rel_err_if_double": 0.00020453082424587557,
+          "predicted_rel_err_if_dd": 2.2707483032333227e-20,
+          "tightness_double_over_measured": 0.08976678836081647
+        },
+        {
+          "chain_id": "cascade_B5_919e731c_4d76baf9",
+          "signal_class": "cancellation_cascade",
+          "n_contributors": 12,
+          "chain_lines": [
+            "B0m.h:329",
+            "B0m.h:332",
+            "B0m.h:339",
+            "kokkosUtils.h:174",
+            "kokkosUtils.h:177",
+            "kokkosUtils.h:212",
+            "kokkosUtils.h:690",
+            "kokkosUtils.h:698"
+          ],
+          "ops": {
+            "add": 3,
+            "sub": 9
+          },
+          "max_cond": 1066.999178500849,
+          "max_sensitivity": 1680055820057.1418,
+          "measured_max_rel_err": 0.0020671410657716323,
+          "predicted_rel_err_if_float": 100139.13035733353,
+          "predicted_rel_err_if_ff": 0.023875029172261603,
+          "predicted_rel_err_if_double": 0.00018652366540829378,
+          "predicted_rel_err_if_dd": 2.070828679737666e-20,
+          "tightness_double_over_measured": 0.0902326737622366
+        }
+      ]
+    },
+    "B6": {
+      "present": true,
+      "samples": 5000,
+      "n_regions": 35,
+      "n_cascade_chains": 0,
+      "n_cancellation_cascade_chains": 0,
+      "max_region_rel_err": 1.441106561520556e-10,
+      "floor_digits": 13.241,
+      "floor_source": "derived_nochain",
+      "floor_confidence": "derived_nochain",
+      "floor_note": "no cascade chains; -log10(max_region_rel_err)+3.4 lower est",
+      "dominant_chain": null,
+      "dominant_chain_tightness": null,
+      "cancellation_loss_digits": 0.0,
+      "predicted_dd_floor_digits": 31.9,
+      "dd_sufficient": true,
+      "predicted_dd_floor_lift": 18.66,
+      "verdict": "STABLE_ALREADY",
+      "verdict_reason": "no cascade chains; well-conditioned (floor ~13.2 digits, no cancellation lever)",
+      "top5_chains_by_measured_rel_err": []
+    },
+    "B7": {
+      "present": true,
+      "samples": 5000,
+      "n_regions": 53,
+      "n_cascade_chains": 0,
+      "n_cancellation_cascade_chains": 0,
+      "max_region_rel_err": 4.78145256779577e-07,
+      "floor_digits": 9.72,
+      "floor_source": "derived_nochain",
+      "floor_confidence": "derived_nochain",
+      "floor_note": "no cascade chains; -log10(max_region_rel_err)+3.4 lower est",
+      "dominant_chain": null,
+      "dominant_chain_tightness": null,
+      "cancellation_loss_digits": 0.0,
+      "predicted_dd_floor_digits": 31.9,
+      "dd_sufficient": true,
+      "predicted_dd_floor_lift": 22.18,
+      "verdict": "STABLE_ALREADY",
+      "verdict_reason": "no cascade chains; well-conditioned (floor ~9.7 digits, no cancellation lever)",
+      "top5_chains_by_measured_rel_err": []
+    },
+    "B8": {
+      "present": true,
+      "samples": 5000,
+      "n_regions": 62,
+      "n_cascade_chains": 4328,
+      "n_cancellation_cascade_chains": 4328,
+      "max_region_rel_err": 0.006072581921322168,
+      "floor_digits": 10.139,
+      "floor_source": "measured",
+      "floor_confidence": "measured",
+      "floor_note": "per-integral scorer: kokkosUtils.h dilog branches (DD_TRIAGE benign_no_op)",
+      "dominant_chain": {
+        "chain_id": "cascade_B8_6ba93dca_02166f70",
+        "signal_class": "cancellation_cascade",
+        "n_contributors": 5,
+        "chain_lines": [
+          "B1m.h:168",
+          "kokkosUtils.h:199",
+          "kokkosUtils.h:212",
+          "kokkosUtils.h:702"
+        ],
+        "ops": {
+          "add": 1,
+          "sub": 4
+        },
+        "max_cond": 41571.20658341601,
+        "max_sensitivity": 176138696156.54193,
+        "measured_max_rel_err": 0.006072581921322168,
+        "predicted_rel_err_if_float": 10498.684415611144,
+        "predicted_rel_err_if_ff": 0.002503081420805727,
+        "predicted_rel_err_if_double": 1.9555323600044742e-05,
+        "predicted_rel_err_if_dd": 2.171077051476538e-21,
+        "tightness_double_over_measured": 0.00322026509537594
+      },
+      "dominant_chain_tightness": 0.00322026509537594,
+      "cancellation_loss_digits": 5.81,
+      "predicted_dd_floor_digits": 26.09,
+      "dd_sufficient": true,
+      "predicted_dd_floor_lift": 15.95,
+      "verdict": "STABLE_ALREADY",
+      "verdict_reason": "floor 10.1 >= 10 digits (benign cancellation; DD_TRIAGE-class dd-inert), no lift warranted",
+      "top5_chains_by_measured_rel_err": [
+        {
+          "chain_id": "cascade_B8_6ba93dca_02166f70",
+          "signal_class": "cancellation_cascade",
+          "n_contributors": 5,
+          "chain_lines": [
+            "B1m.h:168",
+            "kokkosUtils.h:199",
+            "kokkosUtils.h:212",
+            "kokkosUtils.h:702"
+          ],
+          "ops": {
+            "add": 1,
+            "sub": 4
+          },
+          "max_cond": 41571.20658341601,
+          "max_sensitivity": 176138696156.54193,
+          "measured_max_rel_err": 0.006072581921322168,
+          "predicted_rel_err_if_float": 10498.684415611144,
+          "predicted_rel_err_if_ff": 0.002503081420805727,
+          "predicted_rel_err_if_double": 1.9555323600044742e-05,
+          "predicted_rel_err_if_dd": 2.171077051476538e-21,
+          "tightness_double_over_measured": 0.00322026509537594
+        },
+        {
+          "chain_id": "cascade_B8_6ba93dca_eeeae0c5",
+          "signal_class": "cancellation_cascade",
+          "n_contributors": 5,
+          "chain_lines": [
+            "B1m.h:168",
+            "kokkosUtils.h:199",
+            "kokkosUtils.h:212",
+            "kokkosUtils.h:702"
+          ],
+          "ops": {
+            "add": 1,
+            "sub": 4
+          },
+          "max_cond": 41571.20658341601,
+          "max_sensitivity": 176138696156.54193,
+          "measured_max_rel_err": 0.006072581921322057,
+          "predicted_rel_err_if_float": 10498.684415611144,
+          "predicted_rel_err_if_ff": 0.002503081420805727,
+          "predicted_rel_err_if_double": 1.9555323600044742e-05,
+          "predicted_rel_err_if_dd": 2.171077051476538e-21,
+          "tightness_double_over_measured": 0.003220265095375999
+        },
+        {
+          "chain_id": "cascade_B8_c0b66125_e0883fed",
+          "signal_class": "cancellation_cascade",
+          "n_contributors": 6,
+          "chain_lines": [
+            "B1m.h:168",
+            "kokkosUtils.h:212",
+            "kokkosUtils.h:621"
+          ],
+          "ops": {
+            "sub": 6
+          },
+          "max_cond": 398623.01386889466,
+          "max_sensitivity": 151990454902.511,
+          "measured_max_rel_err": 0.005063226174352999,
+          "predicted_rel_err_if_float": 9059.337073714196,
+          "predicted_rel_err_if_ff": 0.0021599142727170458,
+          "predicted_rel_err_if_double": 1.687433025560192e-05,
+          "predicted_rel_err_if_dd": 1.8734269974898154e-21,
+          "tightness_double_over_measured": 0.003332722986201223
+        },
+        {
+          "chain_id": "cascade_B8_c0b66125_9c6ef82d",
+          "signal_class": "cancellation_cascade",
+          "n_contributors": 6,
+          "chain_lines": [
+            "B1m.h:168",
+            "kokkosUtils.h:212",
+            "kokkosUtils.h:621"
+          ],
+          "ops": {
+            "sub": 6
+          },
+          "max_cond": 398623.01386889466,
+          "max_sensitivity": 151990454902.511,
+          "measured_max_rel_err": 0.005063226174352888,
+          "predicted_rel_err_if_float": 9059.337073714196,
+          "predicted_rel_err_if_ff": 0.0021599142727170458,
+          "predicted_rel_err_if_double": 1.687433025560192e-05,
+          "predicted_rel_err_if_dd": 1.8734269974898154e-21,
+          "tightness_double_over_measured": 0.003332722986201296
+        },
+        {
+          "chain_id": "cascade_B8_ddaf54af_0807ea36",
+          "signal_class": "cancellation_cascade",
+          "n_contributors": 3,
+          "chain_lines": [
+            "B1m.h:168",
+            "kokkosUtils.h:199",
+            "kokkosUtils.h:212"
+          ],
+          "ops": {
+            "sub": 3
+          },
+          "max_cond": 100439.74259624176,
+          "max_sensitivity": 79488245870.7216,
+          "measured_max_rel_err": 0.002648058396773503,
+          "predicted_rel_err_if_float": 4737.868658943272,
+          "predicted_rel_err_if_ff": 0.0011295959136350803,
+          "predicted_rel_err_if_double": 8.824968075274065e-06,
+          "predicted_rel_err_if_dd": 9.797682748751218e-22,
+          "tightness_double_over_measured": 0.0033326183765534584
+        }
+      ]
+    },
+    "B9": {
+      "present": true,
+      "samples": 5000,
+      "n_regions": 62,
+      "n_cascade_chains": 230,
+      "n_cancellation_cascade_chains": 230,
+      "max_region_rel_err": 0.00042420339925596456,
+      "floor_digits": 11.53,
+      "floor_source": "measured",
+      "floor_confidence": "measured",
+      "floor_note": "per-integral scorer: kokkosUtils.h:212 (DD_TRIAGE benign_no_op)",
+      "dominant_chain": {
+        "chain_id": "cascade_B9_07c01bd0_dec1d5f9",
+        "signal_class": "cancellation_cascade",
+        "n_contributors": 4,
+        "chain_lines": [
+          "B1m.h:204",
+          "kokkosUtils.h:212",
+          "kokkosUtils.h:702"
+        ],
+        "ops": {
+          "add": 1,
+          "sub": 3
+        },
+        "max_cond": 16123446.99882805,
+        "max_sensitivity": 12305483660.582458,
+        "measured_max_rel_err": 0.00042420339925596456,
+        "predicted_rel_err_if_float": 733.4639823783909,
+        "predicted_rel_err_if_ff": 0.00017487144050082944,
+        "predicted_rel_err_if_double": 1.36618312891273e-06,
+        "predicted_rel_err_if_dd": 1.5167679655733513e-22,
+        "tightness_double_over_measured": 0.0032205850573308924
+      },
+      "dominant_chain_tightness": 0.0032205850573308924,
+      "cancellation_loss_digits": 4.42,
+      "predicted_dd_floor_digits": 27.48,
+      "dd_sufficient": true,
+      "predicted_dd_floor_lift": 15.95,
+      "verdict": "STABLE_ALREADY",
+      "verdict_reason": "floor 11.5 >= 10 digits (benign cancellation; DD_TRIAGE-class dd-inert), no lift warranted",
+      "top5_chains_by_measured_rel_err": [
+        {
+          "chain_id": "cascade_B9_07c01bd0_dec1d5f9",
+          "signal_class": "cancellation_cascade",
+          "n_contributors": 4,
+          "chain_lines": [
+            "B1m.h:204",
+            "kokkosUtils.h:212",
+            "kokkosUtils.h:702"
+          ],
+          "ops": {
+            "add": 1,
+            "sub": 3
+          },
+          "max_cond": 16123446.99882805,
+          "max_sensitivity": 12305483660.582458,
+          "measured_max_rel_err": 0.00042420339925596456,
+          "predicted_rel_err_if_float": 733.4639823783909,
+          "predicted_rel_err_if_ff": 0.00017487144050082944,
+          "predicted_rel_err_if_double": 1.36618312891273e-06,
+          "predicted_rel_err_if_dd": 1.5167679655733513e-22,
+          "tightness_double_over_measured": 0.0032205850573308924
+        },
+        {
+          "chain_id": "cascade_B9_07c01bd0_cbca1683",
+          "signal_class": "cancellation_cascade",
+          "n_contributors": 4,
+          "chain_lines": [
+            "B1m.h:204",
+            "kokkosUtils.h:212",
+            "kokkosUtils.h:702"
+          ],
+          "ops": {
+            "add": 1,
+            "sub": 3
+          },
+          "max_cond": 16123446.99882805,
+          "max_sensitivity": 12305483660.582458,
+          "measured_max_rel_err": 0.00042420339925585353,
+          "predicted_rel_err_if_float": 733.4639823783909,
+          "predicted_rel_err_if_ff": 0.00017487144050082944,
+          "predicted_rel_err_if_double": 1.36618312891273e-06,
+          "predicted_rel_err_if_dd": 1.5167679655733513e-22,
+          "tightness_double_over_measured": 0.003220585057331735
+        },
+        {
+          "chain_id": "cascade_B9_7cbf4705_0d624cdf",
+          "signal_class": "cancellation_cascade",
+          "n_contributors": 4,
+          "chain_lines": [
+            "B1m.h:204",
+            "kokkosUtils.h:212"
+          ],
+          "ops": {
+            "add": 2,
+            "sub": 2
+          },
+          "max_cond": 125246782.79668976,
+          "max_sensitivity": 3277556568.0607553,
+          "measured_max_rel_err": 0.00011298656487380312,
+          "predicted_rel_err_if_float": 195.35759497050972,
+          "predicted_rel_err_if_ff": 4.657688020956748e-05,
+          "predicted_rel_err_if_double": 3.6388187663724594e-07,
+          "predicted_rel_err_if_dd": 4.039900376864813e-23,
+          "tightness_double_over_measured": 0.0032205765087528117
+        },
+        {
+          "chain_id": "cascade_B9_7cbf4705_22225537",
+          "signal_class": "cancellation_cascade",
+          "n_contributors": 4,
+          "chain_lines": [
+            "B1m.h:204",
+            "kokkosUtils.h:212"
+          ],
+          "ops": {
+            "add": 2,
+            "sub": 2
+          },
+          "max_cond": 125246782.79668976,
+          "max_sensitivity": 3277556568.0607553,
+          "measured_max_rel_err": 0.0001129865648736921,
+          "predicted_rel_err_if_float": 195.35759497050972,
+          "predicted_rel_err_if_ff": 4.657688020956748e-05,
+          "predicted_rel_err_if_double": 3.6388187663724594e-07,
+          "predicted_rel_err_if_dd": 4.039900376864813e-23,
+          "tightness_double_over_measured": 0.0032205765087559763
+        },
+        {
+          "chain_id": "cascade_B9_dc551fff_602e26f4",
+          "signal_class": "cancellation_cascade",
+          "n_contributors": 4,
+          "chain_lines": [
+            "B1m.h:204",
+            "kokkosUtils.h:212",
+            "kokkosUtils.h:702"
+          ],
+          "ops": {
+            "add": 1,
+            "sub": 3
+          },
+          "max_cond": 2665108.6183548532,
+          "max_sensitivity": 3148718299.930098,
+          "measured_max_rel_err": 0.00010854508234929032,
+          "predicted_rel_err_if_float": 187.67823576510537,
+          "predicted_rel_err_if_ff": 4.474597829940447e-05,
+          "predicted_rel_err_if_double": 3.4957795546409743e-07,
+          "predicted_rel_err_if_dd": 3.881094950576285e-23,
+          "tightness_double_over_measured": 0.003220578472078362
+        }
+      ]
+    },
+    "B10": {
+      "present": true,
+      "samples": 5000,
+      "n_regions": 67,
+      "n_cascade_chains": 2604,
+      "n_cancellation_cascade_chains": 2604,
+      "max_region_rel_err": 19.637241889689864,
+      "floor_digits": 9.878,
+      "floor_source": "measured",
+      "floor_confidence": "measured",
+      "floor_note": "per-integral scorer: kokkosUtils.h:212 (DD_TRIAGE physics_ceiling)",
+      "dominant_chain": {
+        "chain_id": "cascade_B10_612f1391_494252c4",
+        "signal_class": "cancellation_cascade",
+        "n_contributors": 16,
+        "chain_lines": [
+          "B1m.h:227",
+          "B1m.h:240",
+          "B1m.h:241",
+          "kokkosUtils.h:174",
+          "kokkosUtils.h:177",
+          "kokkosUtils.h:199",
+          "kokkosUtils.h:212",
+          "kokkosUtils.h:702",
+          "kokkosUtils.h:703",
+          "kokkosUtils.h:704"
+        ],
+        "ops": {
+          "add": 4,
+          "sub": 12
+        },
+        "max_cond": 11861.492674721307,
+        "max_sensitivity": 589309608430438.5,
+        "measured_max_rel_err": 19.637241889689864,
+        "predicted_rel_err_if_float": 35125589.87322083,
+        "predicted_rel_err_if_ff": 8.374593227677543,
+        "predicted_rel_err_if_double": 0.06542650959123081,
+        "predicted_rel_err_if_dd": 7.263801736904308e-18,
+        "tightness_double_over_measured": 0.003331756565344427
+      },
+      "dominant_chain_tightness": 0.003331756565344427,
+      "cancellation_loss_digits": 6.07,
+      "predicted_dd_floor_digits": 25.83,
+      "dd_sufficient": true,
+      "predicted_dd_floor_lift": 15.95,
+      "verdict": "COMPUTED",
+      "verdict_reason": "tight dominant-chain bound (tightness 0.003); catastrophic cancellation IS roundoff amplification -> dd lever exists",
+      "top5_chains_by_measured_rel_err": [
+        {
+          "chain_id": "cascade_B10_612f1391_494252c4",
+          "signal_class": "cancellation_cascade",
+          "n_contributors": 16,
+          "chain_lines": [
+            "B1m.h:227",
+            "B1m.h:240",
+            "B1m.h:241",
+            "kokkosUtils.h:174",
+            "kokkosUtils.h:177",
+            "kokkosUtils.h:199",
+            "kokkosUtils.h:212",
+            "kokkosUtils.h:702",
+            "kokkosUtils.h:703",
+            "kokkosUtils.h:704"
+          ],
+          "ops": {
+            "add": 4,
+            "sub": 12
+          },
+          "max_cond": 11861.492674721307,
+          "max_sensitivity": 589309608430438.5,
+          "measured_max_rel_err": 19.637241889689864,
+          "predicted_rel_err_if_float": 35125589.87322083,
+          "predicted_rel_err_if_ff": 8.374593227677543,
+          "predicted_rel_err_if_double": 0.06542650959123081,
+          "predicted_rel_err_if_dd": 7.263801736904308e-18,
+          "tightness_double_over_measured": 0.003331756565344427
+        },
+        {
+          "chain_id": "cascade_B10_612f1391_7ed5366c",
+          "signal_class": "cancellation_cascade",
+          "n_contributors": 16,
+          "chain_lines": [
+            "B1m.h:227",
+            "B1m.h:240",
+            "B1m.h:241",
+            "kokkosUtils.h:174",
+            "kokkosUtils.h:177",
+            "kokkosUtils.h:199",
+            "kokkosUtils.h:212",
+            "kokkosUtils.h:702",
+            "kokkosUtils.h:703",
+            "kokkosUtils.h:704"
+          ],
+          "ops": {
+            "add": 4,
+            "sub": 12
+          },
+          "max_cond": 11861.492674721307,
+          "max_sensitivity": 589309608430438.5,
+          "measured_max_rel_err": 19.637241889689864,
+          "predicted_rel_err_if_float": 35125589.87322083,
+          "predicted_rel_err_if_ff": 8.374593227677543,
+          "predicted_rel_err_if_double": 0.06542650959123081,
+          "predicted_rel_err_if_dd": 7.263801736904308e-18,
+          "tightness_double_over_measured": 0.003331756565344427
+        },
+        {
+          "chain_id": "cascade_B10_b9543316_22c85d3f",
+          "signal_class": "cancellation_cascade",
+          "n_contributors": 9,
+          "chain_lines": [
+            "B1m.h:240",
+            "B1m.h:241",
+            "kokkosUtils.h:199",
+            "kokkosUtils.h:206",
+            "kokkosUtils.h:212"
+          ],
+          "ops": {
+            "add": 2,
+            "sub": 7
+          },
+          "max_cond": 153203.76714811914,
+          "max_sensitivity": 16797252003166.76,
+          "measured_max_rel_err": 0.5790622779581517,
+          "predicted_rel_err_if_float": 1001194.2388514733,
+          "predicted_rel_err_if_ff": 0.23870330783163865,
+          "predicted_rel_err_if_double": 0.001864869592434677,
+          "predicted_rel_err_if_dd": 2.07042115944431e-19,
+          "tightness_double_over_measured": 0.003220499181902243
+        },
+        {
+          "chain_id": "cascade_B10_b9543316_cd2e75cb",
+          "signal_class": "cancellation_cascade",
+          "n_contributors": 9,
+          "chain_lines": [
+            "B1m.h:240",
+            "B1m.h:241",
+            "kokkosUtils.h:199",
+            "kokkosUtils.h:206",
+            "kokkosUtils.h:212"
+          ],
+          "ops": {
+            "add": 2,
+            "sub": 7
+          },
+          "max_cond": 153203.76714811914,
+          "max_sensitivity": 16797252003166.76,
+          "measured_max_rel_err": 0.5790622779581516,
+          "predicted_rel_err_if_float": 1001194.2388514733,
+          "predicted_rel_err_if_ff": 0.23870330783163865,
+          "predicted_rel_err_if_double": 0.001864869592434677,
+          "predicted_rel_err_if_dd": 2.07042115944431e-19,
+          "tightness_double_over_measured": 0.003220499181902244
+        },
+        {
+          "chain_id": "cascade_B10_3e76c438_3d98de32",
+          "signal_class": "cancellation_cascade",
+          "n_contributors": 14,
+          "chain_lines": [
+            "B1m.h:227",
+            "B1m.h:240",
+            "B1m.h:241",
+            "kokkosUtils.h:174",
+            "kokkosUtils.h:177",
+            "kokkosUtils.h:212",
+            "kokkosUtils.h:702",
+            "kokkosUtils.h:703",
+            "kokkosUtils.h:704"
+          ],
+          "ops": {
+            "add": 4,
+            "sub": 10
+          },
+          "max_cond": 3063.074707346552,
+          "max_sensitivity": 2030502003090.5334,
+          "measured_max_rel_err": 0.06771978554114279,
+          "predicted_rel_err_if_float": 121027.35060993036,
+          "predicted_rel_err_if_ff": 0.02885516896484622,
+          "predicted_rel_err_if_double": 0.0002254310075378611,
+          "predicted_rel_err_if_dd": 2.502786950329806e-20,
+          "tightness_double_over_measured": 0.0033288795251854675
+        }
+      ]
+    },
+    "B11": {
+      "present": true,
+      "samples": 5000,
+      "n_regions": 51,
+      "n_cascade_chains": 0,
+      "n_cancellation_cascade_chains": 0,
+      "max_region_rel_err": 2.048269556355675e-07,
+      "floor_digits": 10.089,
+      "floor_source": "derived_nochain",
+      "floor_confidence": "derived_nochain",
+      "floor_note": "no cascade chains; -log10(max_region_rel_err)+3.4 lower est",
+      "dominant_chain": null,
+      "dominant_chain_tightness": null,
+      "cancellation_loss_digits": 0.0,
+      "predicted_dd_floor_digits": 31.9,
+      "dd_sufficient": true,
+      "predicted_dd_floor_lift": 21.81,
+      "verdict": "STABLE_ALREADY",
+      "verdict_reason": "no cascade chains; well-conditioned (floor ~10.1 digits, no cancellation lever)",
+      "top5_chains_by_measured_rel_err": []
+    },
+    "B12": {
+      "present": true,
+      "samples": 5000,
+      "n_regions": 92,
+      "n_cascade_chains": 9388,
+      "n_cancellation_cascade_chains": 9388,
+      "max_region_rel_err": 16199947.780924479,
+      "floor_digits": 3.691,
+      "floor_source": "measured",
+      "floor_confidence": "measured",
+      "floor_note": "solver Stage-1 / whole-app min (sample 3868, coeff0.imag)",
+      "dominant_chain": {
+        "chain_id": "cascade_B12_65bb39c0_62ff5a3d",
+        "signal_class": "cancellation_cascade",
+        "n_contributors": 6,
+        "chain_lines": [
+          "B2m.h:206",
+          "B2m.h:207",
+          "B2m.h:241",
+          "kokkosUtils.h:212",
+          "kokkosUtils.h:702"
+        ],
+        "ops": {
+          "add": 1,
+          "sub": 5
+        },
+        "max_cond": 2419085308.151354,
+        "max_sensitivity": 1.0324011214900986e+22,
+        "measured_max_rel_err": 16199947.780924479,
+        "predicted_rel_err_if_float": 615359021121322.2,
+        "predicted_rel_err_if_ff": 146713023.45307404,
+        "predicted_rel_err_if_double": 1146195.495727141,
+        "predicted_rel_err_if_dd": 1.272532630077917e-10,
+        "tightness_double_over_measured": 0.07075303644353668
+      },
+      "dominant_chain_tightness": 0.07075303644353668,
+      "cancellation_loss_digits": 12.26,
+      "predicted_dd_floor_digits": 19.64,
+      "dd_sufficient": true,
+      "predicted_dd_floor_lift": 15.95,
+      "verdict": "COMPUTED",
+      "verdict_reason": "tight dominant-chain bound (tightness 0.071); catastrophic cancellation IS roundoff amplification -> dd lever exists",
+      "top5_chains_by_measured_rel_err": [
+        {
+          "chain_id": "cascade_B12_65bb39c0_62ff5a3d",
+          "signal_class": "cancellation_cascade",
+          "n_contributors": 6,
+          "chain_lines": [
+            "B2m.h:206",
+            "B2m.h:207",
+            "B2m.h:241",
+            "kokkosUtils.h:212",
+            "kokkosUtils.h:702"
+          ],
+          "ops": {
+            "add": 1,
+            "sub": 5
+          },
+          "max_cond": 2419085308.151354,
+          "max_sensitivity": 1.0324011214900986e+22,
+          "measured_max_rel_err": 16199947.780924479,
+          "predicted_rel_err_if_float": 615359021121322.2,
+          "predicted_rel_err_if_ff": 146713023.45307404,
+          "predicted_rel_err_if_double": 1146195.495727141,
+          "predicted_rel_err_if_dd": 1.272532630077917e-10,
+          "tightness_double_over_measured": 0.07075303644353668
+        },
+        {
+          "chain_id": "cascade_B12_65bb39c0_ddb1610c",
+          "signal_class": "cancellation_cascade",
+          "n_contributors": 6,
+          "chain_lines": [
+            "B2m.h:206",
+            "B2m.h:207",
+            "B2m.h:241",
+            "kokkosUtils.h:212",
+            "kokkosUtils.h:702"
+          ],
+          "ops": {
+            "add": 1,
+            "sub": 5
+          },
+          "max_cond": 2419085308.151354,
+          "max_sensitivity": 1.0324011214900986e+22,
+          "measured_max_rel_err": 16199947.780924479,
+          "predicted_rel_err_if_float": 615359021121322.2,
+          "predicted_rel_err_if_ff": 146713023.45307404,
+          "predicted_rel_err_if_double": 1146195.495727141,
+          "predicted_rel_err_if_dd": 1.272532630077917e-10,
+          "tightness_double_over_measured": 0.07075303644353668
+        },
+        {
+          "chain_id": "cascade_B12_a7cdda8e_a657eb7b",
+          "signal_class": "cancellation_cascade",
+          "n_contributors": 11,
+          "chain_lines": [
+            "B2m.h:206",
+            "B2m.h:207",
+            "B2m.h:241",
+            "B2m.h:533",
+            "kokkosUtils.h:174",
+            "kokkosUtils.h:177",
+            "kokkosUtils.h:212",
+            "kokkosUtils.h:702",
+            "kokkosUtils.h:703"
+          ],
+          "ops": {
+            "add": 2,
+            "sub": 9
+          },
+          "max_cond": 1497846120.8383427,
+          "max_sensitivity": 6.090466347869019e+21,
+          "measured_max_rel_err": 9526790.908096535,
+          "predicted_rel_err_if_float": 363020083181203.56,
+          "predicted_rel_err_if_ff": 86550732.41739358,
+          "predicted_rel_err_if_double": 676177.5970108873,
+          "predicted_rel_err_if_dd": 7.507079369371976e-11,
+          "tightness_double_over_measured": 0.07097642884512394
+        },
+        {
+          "chain_id": "cascade_B12_a7cdda8e_d1eb7ad8",
+          "signal_class": "cancellation_cascade",
+          "n_contributors": 11,
+          "chain_lines": [
+            "B2m.h:206",
+            "B2m.h:207",
+            "B2m.h:241",
+            "B2m.h:533",
+            "kokkosUtils.h:174",
+            "kokkosUtils.h:177",
+            "kokkosUtils.h:212",
+            "kokkosUtils.h:702",
+            "kokkosUtils.h:703"
+          ],
+          "ops": {
+            "add": 2,
+            "sub": 9
+          },
+          "max_cond": 1497846120.8383427,
+          "max_sensitivity": 6.090466347869019e+21,
+          "measured_max_rel_err": 9526790.908096535,
+          "predicted_rel_err_if_float": 363020083181203.56,
+          "predicted_rel_err_if_ff": 86550732.41739358,
+          "predicted_rel_err_if_double": 676177.5970108873,
+          "predicted_rel_err_if_dd": 7.507079369371976e-11,
+          "tightness_double_over_measured": 0.07097642884512394
+        },
+        {
+          "chain_id": "cascade_B12_01a801d3_3c673c0f",
+          "signal_class": "cancellation_cascade",
+          "n_contributors": 11,
+          "chain_lines": [
+            "B2m.h:241",
+            "B2m.h:534",
+            "kokkosUtils.h:231",
+            "kokkosUtils.h:935",
+            "kokkosUtils.h:936",
+            "kokkosUtils.h:937"
+          ],
+          "ops": {
+            "add": 6,
+            "sub": 5
+          },
+          "max_cond": 1302.409784525356,
+          "max_sensitivity": 2775635923.856298,
+          "measured_max_rel_err": 308.04024195057616,
+          "predicted_rel_err_if_float": 165.44079326726782,
+          "predicted_rel_err_if_ff": 3.944415885621734e-05,
+          "predicted_rel_err_if_double": 3.08157491064198e-07,
+          "predicted_rel_err_if_dd": 3.4212354179019353e-23,
+          "tightness_double_over_measured": 1.0003806292089611e-09
+        }
+      ]
+    },
+    "B13": {
+      "present": true,
+      "samples": 5000,
+      "n_regions": 81,
+      "n_cascade_chains": 9962,
+      "n_cancellation_cascade_chains": 9962,
+      "max_region_rel_err": 184.8885025739084,
+      "floor_digits": 8.62,
+      "floor_source": "derived",
+      "floor_confidence": "derived_in_calibration_range",
+      "floor_note": "model on dominant-chain rel-err (coarse; calibrated on 5 measured pts)",
+      "dominant_chain": {
+        "chain_id": "cascade_B13_79fc5b8f_f080f240",
+        "signal_class": "cancellation_cascade",
+        "n_contributors": 15,
+        "chain_lines": [
+          "B2m.h:300",
+          "B2m.h:301",
+          "B2m.h:305",
+          "B2m.h:306",
+          "B2m.h:355",
+          "B2m.h:533",
+          "kokkosUtils.h:212",
+          "kokkosUtils.h:702"
+        ],
+        "ops": {
+          "add": 2,
+          "sub": 13
+        },
+        "max_cond": 1512176388.5894632,
+        "max_sensitivity": 1.1790721213362845e+17,
+        "measured_max_rel_err": 184.8885025739084,
+        "predicted_rel_err_if_float": 7027817495.681551,
+        "predicted_rel_err_if_ff": 1675.5622615054967,
+        "predicted_rel_err_if_double": 13.090330168011693,
+        "predicted_rel_err_if_dd": 1.4533185952471876e-15,
+        "tightness_double_over_measured": 0.07080121254580928
+      },
+      "dominant_chain_tightness": 0.07080121254580928,
+      "cancellation_loss_digits": 7.33,
+      "predicted_dd_floor_digits": 24.57,
+      "dd_sufficient": true,
+      "predicted_dd_floor_lift": 15.95,
+      "verdict": "COMPUTED",
+      "verdict_reason": "tight dominant-chain bound (tightness 0.071); catastrophic cancellation IS roundoff amplification -> dd lever exists",
+      "top5_chains_by_measured_rel_err": [
+        {
+          "chain_id": "cascade_B13_79fc5b8f_f080f240",
+          "signal_class": "cancellation_cascade",
+          "n_contributors": 15,
+          "chain_lines": [
+            "B2m.h:300",
+            "B2m.h:301",
+            "B2m.h:305",
+            "B2m.h:306",
+            "B2m.h:355",
+            "B2m.h:533",
+            "kokkosUtils.h:212",
+            "kokkosUtils.h:702"
+          ],
+          "ops": {
+            "add": 2,
+            "sub": 13
+          },
+          "max_cond": 1512176388.5894632,
+          "max_sensitivity": 1.1790721213362845e+17,
+          "measured_max_rel_err": 184.8885025739084,
+          "predicted_rel_err_if_float": 7027817495.681551,
+          "predicted_rel_err_if_ff": 1675.5622615054967,
+          "predicted_rel_err_if_double": 13.090330168011693,
+          "predicted_rel_err_if_dd": 1.4533185952471876e-15,
+          "tightness_double_over_measured": 0.07080121254580928
+        },
+        {
+          "chain_id": "cascade_B13_79fc5b8f_fd819fa1",
+          "signal_class": "cancellation_cascade",
+          "n_contributors": 15,
+          "chain_lines": [
+            "B2m.h:300",
+            "B2m.h:301",
+            "B2m.h:305",
+            "B2m.h:306",
+            "B2m.h:355",
+            "B2m.h:533",
+            "kokkosUtils.h:212",
+            "kokkosUtils.h:702"
+          ],
+          "ops": {
+            "add": 2,
+            "sub": 13
+          },
+          "max_cond": 1512176388.5894632,
+          "max_sensitivity": 1.1790721213362845e+17,
+          "measured_max_rel_err": 184.8885025739084,
+          "predicted_rel_err_if_float": 7027817495.681551,
+          "predicted_rel_err_if_ff": 1675.5622615054967,
+          "predicted_rel_err_if_double": 13.090330168011693,
+          "predicted_rel_err_if_dd": 1.4533185952471876e-15,
+          "tightness_double_over_measured": 0.07080121254580928
+        },
+        {
+          "chain_id": "cascade_B13_3265593e_73821b70",
+          "signal_class": "cancellation_cascade",
+          "n_contributors": 16,
+          "chain_lines": [
+            "B2m.h:300",
+            "B2m.h:301",
+            "B2m.h:305",
+            "B2m.h:306",
+            "B2m.h:331",
+            "B2m.h:355",
+            "B2m.h:531",
+            "kokkosUtils.h:174",
+            "kokkosUtils.h:177",
+            "kokkosUtils.h:212"
+          ],
+          "ops": {
+            "add": 4,
+            "sub": 12
+          },
+          "max_cond": 184184724.16967213,
+          "max_sensitivity": 8.723536307205541e+16,
+          "measured_max_rel_err": 127.2994580177346,
+          "predicted_rel_err_if_float": 5199632827.762092,
+          "predicted_rel_err_if_ff": 1239.6890706448773,
+          "predicted_rel_err_if_double": 9.685070864413104,
+          "predicted_rel_err_if_dd": 1.0752588668797696e-15,
+          "tightness_double_over_measured": 0.07608100627627054
+        },
+        {
+          "chain_id": "cascade_B13_3265593e_ee4583b7",
+          "signal_class": "cancellation_cascade",
+          "n_contributors": 16,
+          "chain_lines": [
+            "B2m.h:300",
+            "B2m.h:301",
+            "B2m.h:305",
+            "B2m.h:306",
+            "B2m.h:331",
+            "B2m.h:355",
+            "B2m.h:531",
+            "kokkosUtils.h:174",
+            "kokkosUtils.h:177",
+            "kokkosUtils.h:212"
+          ],
+          "ops": {
+            "add": 4,
+            "sub": 12
+          },
+          "max_cond": 184184724.16967213,
+          "max_sensitivity": 8.723536307205541e+16,
+          "measured_max_rel_err": 127.2994580177346,
+          "predicted_rel_err_if_float": 5199632827.762092,
+          "predicted_rel_err_if_ff": 1239.6890706448773,
+          "predicted_rel_err_if_double": 9.685070864413104,
+          "predicted_rel_err_if_dd": 1.0752588668797696e-15,
+          "tightness_double_over_measured": 0.07608100627627054
+        },
+        {
+          "chain_id": "cascade_B13_30633313_40ef60bf",
+          "signal_class": "cancellation_cascade",
+          "n_contributors": 17,
+          "chain_lines": [
+            "B2m.h:300",
+            "B2m.h:301",
+            "B2m.h:305",
+            "B2m.h:306",
+            "B2m.h:355",
+            "B2m.h:533",
+            "kokkosUtils.h:212",
+            "kokkosUtils.h:702",
+            "kokkosUtils.h:704"
+          ],
+          "ops": {
+            "add": 3,
+            "sub": 14
+          },
+          "max_cond": 357893579.8962602,
+          "max_sensitivity": 3.327188994126831e+16,
+          "measured_max_rel_err": 52.250763664662955,
+          "predicted_rel_err_if_float": 1983159180.9551902,
+          "predicted_rel_err_if_ff": 472.8219940555549,
+          "predicted_rel_err_if_double": 3.6939218285590227,
+          "predicted_rel_err_if_dd": 4.101077065231687e-16,
+          "tightness_double_over_measured": 0.0706960352247868
+        }
+      ]
+    },
+    "B14": {
+      "present": true,
+      "samples": 5000,
+      "n_regions": 47,
+      "n_cascade_chains": 260,
+      "n_cancellation_cascade_chains": 260,
+      "max_region_rel_err": 326888.4458191704,
+      "floor_digits": 5.21,
+      "floor_source": "derived",
+      "floor_confidence": "derived_in_calibration_range",
+      "floor_note": "model on dominant-chain rel-err (coarse; calibrated on 5 measured pts)",
+      "dominant_chain": {
+        "chain_id": "cascade_B14_3429b1d4_01bf2ff3",
+        "signal_class": "cancellation_cascade",
+        "n_contributors": 4,
+        "chain_lines": [
+          "B2m.h:401",
+          "B2m.h:578",
+          "kokkosUtils.h:1208"
+        ],
+        "ops": {
+          "add": 2,
+          "sub": 2
+        },
+        "max_cond": 5611344846617421.0,
+        "max_sensitivity": 5.8475309268684807e+20,
+        "measured_max_rel_err": 326888.4458191704,
+        "predicted_rel_err_if_float": 34854000370910.65,
+        "predicted_rel_err_if_ff": 8309841.244437849,
+        "predicted_rel_err_if_double": 64920.6347221707,
+        "predicted_rel_err_if_dd": 7.207638344183331e-12,
+        "tightness_double_over_measured": 0.19860180300800165
+      },
+      "dominant_chain_tightness": 0.19860180300800165,
+      "cancellation_loss_digits": 10.74,
+      "predicted_dd_floor_digits": 21.16,
+      "dd_sufficient": true,
+      "predicted_dd_floor_lift": 15.95,
+      "verdict": "COMPUTED",
+      "verdict_reason": "tight dominant-chain bound (tightness 0.199); catastrophic cancellation IS roundoff amplification -> dd lever exists",
+      "top5_chains_by_measured_rel_err": [
+        {
+          "chain_id": "cascade_B14_3429b1d4_01bf2ff3",
+          "signal_class": "cancellation_cascade",
+          "n_contributors": 4,
+          "chain_lines": [
+            "B2m.h:401",
+            "B2m.h:578",
+            "kokkosUtils.h:1208"
+          ],
+          "ops": {
+            "add": 2,
+            "sub": 2
+          },
+          "max_cond": 5611344846617421.0,
+          "max_sensitivity": 5.8475309268684807e+20,
+          "measured_max_rel_err": 326888.4458191704,
+          "predicted_rel_err_if_float": 34854000370910.65,
+          "predicted_rel_err_if_ff": 8309841.244437849,
+          "predicted_rel_err_if_double": 64920.6347221707,
+          "predicted_rel_err_if_dd": 7.207638344183331e-12,
+          "tightness_double_over_measured": 0.19860180300800165
+        },
+        {
+          "chain_id": "cascade_B14_3429b1d4_9de611c7",
+          "signal_class": "cancellation_cascade",
+          "n_contributors": 4,
+          "chain_lines": [
+            "B2m.h:401",
+            "B2m.h:578",
+            "kokkosUtils.h:1208"
+          ],
+          "ops": {
+            "add": 2,
+            "sub": 2
+          },
+          "max_cond": 5611344846617421.0,
+          "max_sensitivity": 5.8475309268684807e+20,
+          "measured_max_rel_err": 326888.4458191704,
+          "predicted_rel_err_if_float": 34854000370910.65,
+          "predicted_rel_err_if_ff": 8309841.244437849,
+          "predicted_rel_err_if_double": 64920.6347221707,
+          "predicted_rel_err_if_dd": 7.207638344183331e-12,
+          "tightness_double_over_measured": 0.19860180300800165
+        },
+        {
+          "chain_id": "cascade_B14_3429b1d4_dabcb365",
+          "signal_class": "cancellation_cascade",
+          "n_contributors": 4,
+          "chain_lines": [
+            "B2m.h:401",
+            "B2m.h:578",
+            "kokkosUtils.h:1208"
+          ],
+          "ops": {
+            "add": 2,
+            "sub": 2
+          },
+          "max_cond": 5611344846617421.0,
+          "max_sensitivity": 5.8475309268684807e+20,
+          "measured_max_rel_err": 326888.4458191704,
+          "predicted_rel_err_if_float": 34854000370910.65,
+          "predicted_rel_err_if_ff": 8309841.244437849,
+          "predicted_rel_err_if_double": 64920.6347221707,
+          "predicted_rel_err_if_dd": 7.207638344183331e-12,
+          "tightness_double_over_measured": 0.19860180300800165
+        },
+        {
+          "chain_id": "cascade_B14_3429b1d4_db9d2d60",
+          "signal_class": "cancellation_cascade",
+          "n_contributors": 4,
+          "chain_lines": [
+            "B2m.h:401",
+            "B2m.h:578",
+            "kokkosUtils.h:1208"
+          ],
+          "ops": {
+            "add": 2,
+            "sub": 2
+          },
+          "max_cond": 5611344846617421.0,
+          "max_sensitivity": 5.8475309268684807e+20,
+          "measured_max_rel_err": 326888.4458191704,
+          "predicted_rel_err_if_float": 34854000370910.65,
+          "predicted_rel_err_if_ff": 8309841.244437849,
+          "predicted_rel_err_if_double": 64920.6347221707,
+          "predicted_rel_err_if_dd": 7.207638344183331e-12,
+          "tightness_double_over_measured": 0.19860180300800165
+        },
+        {
+          "chain_id": "cascade_B14_e1ca0824_0a83d9b5",
+          "signal_class": "cancellation_cascade",
+          "n_contributors": 1,
+          "chain_lines": [
+            "B2m.h:405"
+          ],
+          "ops": {
+            "sub": 1
+          },
+          "max_cond": 2162.5031798250757,
+          "max_sensitivity": 2162.5031798250757,
+          "measured_max_rel_err": 69843.24903133222,
+          "predicted_rel_err_if_float": 0.0001288952338591263,
+          "predicted_rel_err_if_ff": 3.0731018509656503e-11,
+          "predicted_rel_err_if_double": 2.4008608210669143e-13,
+          "predicted_rel_err_if_dd": 2.6654909624689464e-29,
+          "tightness_double_over_measured": 3.4374987623927254e-18
+        }
+      ]
+    },
+    "B15": {
+      "present": true,
+      "samples": 5000,
+      "n_regions": 66,
+      "n_cascade_chains": 9802,
+      "n_cancellation_cascade_chains": 9802,
+      "max_region_rel_err": 8.209012851141624e+23,
+      "floor_digits": 0.0,
+      "floor_source": "derived",
+      "floor_confidence": "derived_extrapolated",
+      "floor_note": "model on dominant-chain rel-err (coarse; calibrated on 5 measured pts)",
+      "dominant_chain": {
+        "chain_id": "cascade_B15_fd6a9047_21aeb3b8",
+        "signal_class": "cancellation_cascade",
+        "n_contributors": 9,
+        "chain_lines": [
+          "B2m.h:492",
+          "B2m.h:496",
+          "B2m.h:578",
+          "kokkosUtils.h:666",
+          "kokkosUtils.h:673",
+          "kokkosUtils.h:1198"
+        ],
+        "ops": {
+          "add": 5,
+          "sub": 4
+        },
+        "max_cond": 3333841573606272.0,
+        "max_sensitivity": 1.3519564021325635e+39,
+        "measured_max_rel_err": 8.209012851141624e+23,
+        "predicted_rel_err_if_float": 8.0582881100926605e+31,
+        "predicted_rel_err_if_ff": 1.9212456011993076e+25,
+        "predicted_rel_err_if_double": 1.500973125936959e+23,
+        "predicted_rel_err_if_dd": 16664149.237588067,
+        "tightness_double_over_measured": 0.18284453358216138
+      },
+      "dominant_chain_tightness": 0.18284453358216138,
+      "cancellation_loss_digits": 30.06,
+      "predicted_dd_floor_digits": 1.84,
+      "dd_sufficient": false,
+      "predicted_dd_floor_lift": 1.84,
+      "verdict": "COMPUTED",
+      "verdict_reason": "tight dominant-chain bound (tightness 0.183); catastrophic cancellation IS roundoff amplification -> dd lever exists",
+      "top5_chains_by_measured_rel_err": [
+        {
+          "chain_id": "cascade_B15_fd6a9047_21aeb3b8",
+          "signal_class": "cancellation_cascade",
+          "n_contributors": 9,
+          "chain_lines": [
+            "B2m.h:492",
+            "B2m.h:496",
+            "B2m.h:578",
+            "kokkosUtils.h:666",
+            "kokkosUtils.h:673",
+            "kokkosUtils.h:1198"
+          ],
+          "ops": {
+            "add": 5,
+            "sub": 4
+          },
+          "max_cond": 3333841573606272.0,
+          "max_sensitivity": 1.3519564021325635e+39,
+          "measured_max_rel_err": 8.209012851141624e+23,
+          "predicted_rel_err_if_float": 8.0582881100926605e+31,
+          "predicted_rel_err_if_ff": 1.9212456011993076e+25,
+          "predicted_rel_err_if_double": 1.500973125936959e+23,
+          "predicted_rel_err_if_dd": 16664149.237588067,
+          "tightness_double_over_measured": 0.18284453358216138
+        },
+        {
+          "chain_id": "cascade_B15_fd6a9047_f379eac9",
+          "signal_class": "cancellation_cascade",
+          "n_contributors": 9,
+          "chain_lines": [
+            "B2m.h:492",
+            "B2m.h:496",
+            "B2m.h:578",
+            "kokkosUtils.h:666",
+            "kokkosUtils.h:673",
+            "kokkosUtils.h:1198"
+          ],
+          "ops": {
+            "add": 5,
+            "sub": 4
+          },
+          "max_cond": 3333841573606272.0,
+          "max_sensitivity": 1.3519564021325635e+39,
+          "measured_max_rel_err": 8.209012851141624e+23,
+          "predicted_rel_err_if_float": 8.0582881100926605e+31,
+          "predicted_rel_err_if_ff": 1.9212456011993076e+25,
+          "predicted_rel_err_if_double": 1.500973125936959e+23,
+          "predicted_rel_err_if_dd": 16664149.237588067,
+          "tightness_double_over_measured": 0.18284453358216138
+        },
+        {
+          "chain_id": "cascade_B15_1662b195_0f575575",
+          "signal_class": "cancellation_cascade",
+          "n_contributors": 5,
+          "chain_lines": [
+            "B2m.h:496"
+          ],
+          "ops": {
+            "add": 2,
+            "sub": 3
+          },
+          "max_cond": 7553.611134095488,
+          "max_sensitivity": 47927353.737172075,
+          "measured_max_rel_err": 1545625573.5099726,
+          "predicted_rel_err_if_float": 2.856692894528632,
+          "predicted_rel_err_if_ff": 6.810886608430462e-07,
+          "predicted_rel_err_if_double": 5.321005162836298e-09,
+          "predicted_rel_err_if_dd": 5.907502445930188e-25,
+          "tightness_double_over_measured": 3.442622362124087e-18
+        },
+        {
+          "chain_id": "cascade_B15_1662b195_d2ee313f",
+          "signal_class": "cancellation_cascade",
+          "n_contributors": 5,
+          "chain_lines": [
+            "B2m.h:496"
+          ],
+          "ops": {
+            "add": 2,
+            "sub": 3
+          },
+          "max_cond": 7553.611134095488,
+          "max_sensitivity": 47927353.737172075,
+          "measured_max_rel_err": 1545625573.5099726,
+          "predicted_rel_err_if_float": 2.856692894528632,
+          "predicted_rel_err_if_ff": 6.810886608430462e-07,
+          "predicted_rel_err_if_double": 5.321005162836298e-09,
+          "predicted_rel_err_if_dd": 5.907502445930188e-25,
+          "tightness_double_over_measured": 3.442622362124087e-18
+        },
+        {
+          "chain_id": "cascade_B15_4148371e_99866375",
+          "signal_class": "cancellation_cascade",
+          "n_contributors": 4,
+          "chain_lines": [
+            "B2m.h:496"
+          ],
+          "ops": {
+            "add": 2,
+            "sub": 2
+          },
+          "max_cond": 636.4851234963255,
+          "max_sensitivity": 21317607.555557046,
+          "measured_max_rel_err": 687739038.719247,
+          "predicted_rel_err_if_float": 1.270628425810161,
+          "predicted_rel_err_if_ff": 3.029414238477137e-07,
+          "predicted_rel_err_if_double": 2.3667298738102633e-09,
+          "predicted_rel_err_if_dd": 2.6275979989723456e-25,
+          "tightness_double_over_measured": 3.441319658424137e-18
+        }
+      ]
+    },
+    "B16": {
+      "present": true,
+      "samples": 5000,
+      "n_regions": 79,
+      "n_cascade_chains": 9028,
+      "n_cancellation_cascade_chains": 9028,
+      "max_region_rel_err": 6.73991733879214e+17,
+      "floor_digits": 0.0,
+      "floor_source": "derived",
+      "floor_confidence": "derived_extrapolated",
+      "floor_note": "model on dominant-chain rel-err (coarse; calibrated on 5 measured pts)",
+      "dominant_chain": {
+        "chain_id": "cascade_B16_f0f0e95d_362b2901",
+        "signal_class": "cancellation_cascade",
+        "n_contributors": 13,
+        "chain_lines": [
+          "B3m.h:177",
+          "B3m.h:183",
+          "B3m.h:230",
+          "kokkosUtils.h:666",
+          "kokkosUtils.h:744",
+          "kokkosUtils.h:746",
+          "kokkosUtils.h:752",
+          "kokkosUtils.h:754",
+          "kokkosUtils.h:1198"
+        ],
+        "ops": {
+          "add": 8,
+          "sub": 5
+        },
+        "max_cond": 9955361.594129296,
+        "max_sensitivity": 1.1100085432022549e+33,
+        "measured_max_rel_err": 6.73991733879214e+17,
+        "predicted_rel_err_if_float": 6.616166491521924e+25,
+        "predicted_rel_err_if_ff": 1.5774170140080271e+19,
+        "predicted_rel_err_if_double": 1.2323570421937712e+17,
+        "predicted_rel_err_if_dd": 13.681911628024803,
+        "tightness_double_over_measured": 0.1828445335821614
+      },
+      "dominant_chain_tightness": 0.1828445335821614,
+      "cancellation_loss_digits": 23.67,
+      "predicted_dd_floor_digits": 8.23,
+      "dd_sufficient": false,
+      "predicted_dd_floor_lift": 8.23,
+      "verdict": "COMPUTED",
+      "verdict_reason": "tight dominant-chain bound (tightness 0.183); catastrophic cancellation IS roundoff amplification -> dd lever exists",
+      "top5_chains_by_measured_rel_err": [
+        {
+          "chain_id": "cascade_B16_f0f0e95d_362b2901",
+          "signal_class": "cancellation_cascade",
+          "n_contributors": 13,
+          "chain_lines": [
+            "B3m.h:177",
+            "B3m.h:183",
+            "B3m.h:230",
+            "kokkosUtils.h:666",
+            "kokkosUtils.h:744",
+            "kokkosUtils.h:746",
+            "kokkosUtils.h:752",
+            "kokkosUtils.h:754",
+            "kokkosUtils.h:1198"
+          ],
+          "ops": {
+            "add": 8,
+            "sub": 5
+          },
+          "max_cond": 9955361.594129296,
+          "max_sensitivity": 1.1100085432022549e+33,
+          "measured_max_rel_err": 6.73991733879214e+17,
+          "predicted_rel_err_if_float": 6.616166491521924e+25,
+          "predicted_rel_err_if_ff": 1.5774170140080271e+19,
+          "predicted_rel_err_if_double": 1.2323570421937712e+17,
+          "predicted_rel_err_if_dd": 13.681911628024803,
+          "tightness_double_over_measured": 0.1828445335821614
+        },
+        {
+          "chain_id": "cascade_B16_f0f0e95d_c5b1d1ec",
+          "signal_class": "cancellation_cascade",
+          "n_contributors": 13,
+          "chain_lines": [
+            "B3m.h:177",
+            "B3m.h:183",
+            "B3m.h:230",
+            "kokkosUtils.h:666",
+            "kokkosUtils.h:744",
+            "kokkosUtils.h:746",
+            "kokkosUtils.h:752",
+            "kokkosUtils.h:754",
+            "kokkosUtils.h:1198"
+          ],
+          "ops": {
+            "add": 8,
+            "sub": 5
+          },
+          "max_cond": 9955361.594129296,
+          "max_sensitivity": 1.1100085432022549e+33,
+          "measured_max_rel_err": 6.73991733879214e+17,
+          "predicted_rel_err_if_float": 6.616166491521924e+25,
+          "predicted_rel_err_if_ff": 1.5774170140080271e+19,
+          "predicted_rel_err_if_double": 1.2323570421937712e+17,
+          "predicted_rel_err_if_dd": 13.681911628024803,
+          "tightness_double_over_measured": 0.1828445335821614
+        },
+        {
+          "chain_id": "cascade_B16_110ba37a_79971352",
+          "signal_class": "cancellation_cascade",
+          "n_contributors": 6,
+          "chain_lines": [
+            "B3m.h:183",
+            "kokkosUtils.h:744",
+            "kokkosUtils.h:752",
+            "kokkosUtils.h:1198"
+          ],
+          "ops": {
+            "add": 3,
+            "sub": 3
+          },
+          "max_cond": 3132351014.7011075,
+          "max_sensitivity": 5.676146235474211e+26,
+          "measured_max_rel_err": 4220720851022.133,
+          "predicted_rel_err_if_float": 3.383246800586111e+19,
+          "predicted_rel_err_if_ff": 8066288949456.4795,
+          "predicted_rel_err_if_double": 63017882417.628746,
+          "predicted_rel_err_if_dd": 6.996390402317226e-06,
+          "tightness_double_over_measured": 0.014930597080915146
+        },
+        {
+          "chain_id": "cascade_B16_110ba37a_d4ad56bb",
+          "signal_class": "cancellation_cascade",
+          "n_contributors": 6,
+          "chain_lines": [
+            "B3m.h:183",
+            "kokkosUtils.h:744",
+            "kokkosUtils.h:752",
+            "kokkosUtils.h:1198"
+          ],
+          "ops": {
+            "add": 3,
+            "sub": 3
+          },
+          "max_cond": 3132351014.7011075,
+          "max_sensitivity": 5.676146235474211e+26,
+          "measured_max_rel_err": 4220720851022.133,
+          "predicted_rel_err_if_float": 3.383246800586111e+19,
+          "predicted_rel_err_if_ff": 8066288949456.4795,
+          "predicted_rel_err_if_double": 63017882417.628746,
+          "predicted_rel_err_if_dd": 6.996390402317226e-06,
+          "tightness_double_over_measured": 0.014930597080915146
+        },
+        {
+          "chain_id": "cascade_B16_255cf6fb_8a3d763c",
+          "signal_class": "cancellation_cascade",
+          "n_contributors": 5,
+          "chain_lines": [
+            "B3m.h:177",
+            "B3m.h:183",
+            "B3m.h:230",
+            "kokkosUtils.h:1208"
+          ],
+          "ops": {
+            "add": 3,
+            "sub": 2
+          },
+          "max_cond": 1.1222842939792972e+16,
+          "max_sensitivity": 5.753318269957788e+24,
+          "measured_max_rel_err": 3216151679.8610873,
+          "predicted_rel_err_if_float": 3.429244917605989e+17,
+          "predicted_rel_err_if_ff": 81759570064.68747,
+          "predicted_rel_err_if_double": 638746641.1303709,
+          "predicted_rel_err_if_dd": 7.091512278849197e-08,
+          "tightness_double_over_measured": 0.19860588203288962
+        }
+      ]
+    },
+    "BIN0": {
+      "present": true,
+      "samples": 5000,
+      "n_regions": 64,
+      "n_cascade_chains": 32302,
+      "n_cancellation_cascade_chains": 32302,
+      "max_region_rel_err": 4.005595944754258e+35,
+      "floor_digits": 0.0,
+      "floor_source": "derived",
+      "floor_confidence": "derived_extrapolated",
+      "floor_note": "model on dominant-chain rel-err (coarse; calibrated on 5 measured pts)",
+      "dominant_chain": {
+        "chain_id": "cascade_BIN0_a64a4564_219bdba7",
+        "signal_class": "cancellation_cascade",
+        "n_contributors": 6,
+        "chain_lines": [
+          "B0m.h:68",
+          "B0m.h:88",
+          "kokkosUtils.h:550",
+          "kokkosUtils.h:608"
+        ],
+        "ops": {
+          "add": 2,
+          "sub": 4
+        },
+        "max_cond": 1.6849966666969152e+16,
+        "max_sensitivity": 2.4052800538922725e+50,
+        "measured_max_rel_err": 4.005595944754258e+35,
+        "predicted_rel_err_if_float": 1.4336586319758132e+43,
+        "predicted_rel_err_if_ff": 3.418108539523633e+36,
+        "predicted_rel_err_if_double": 2.6703972965028383e+34,
+        "predicted_rel_err_if_dd": 2.964736563474222e+18,
+        "tightness_double_over_measured": 0.06666666666666667
+      },
+      "dominant_chain_tightness": 0.06666666666666667,
+      "cancellation_loss_digits": 42.33,
+      "predicted_dd_floor_digits": -10.43,
+      "dd_sufficient": false,
+      "predicted_dd_floor_lift": -10.43,
+      "verdict": "COMPUTED",
+      "verdict_reason": "tight dominant-chain bound (tightness 0.067); catastrophic cancellation IS roundoff amplification -> dd lever exists",
+      "top5_chains_by_measured_rel_err": [
+        {
+          "chain_id": "cascade_BIN0_a64a4564_219bdba7",
+          "signal_class": "cancellation_cascade",
+          "n_contributors": 6,
+          "chain_lines": [
+            "B0m.h:68",
+            "B0m.h:88",
+            "kokkosUtils.h:550",
+            "kokkosUtils.h:608"
+          ],
+          "ops": {
+            "add": 2,
+            "sub": 4
+          },
+          "max_cond": 1.6849966666969152e+16,
+          "max_sensitivity": 2.4052800538922725e+50,
+          "measured_max_rel_err": 4.005595944754258e+35,
+          "predicted_rel_err_if_float": 1.4336586319758132e+43,
+          "predicted_rel_err_if_ff": 3.418108539523633e+36,
+          "predicted_rel_err_if_double": 2.6703972965028383e+34,
+          "predicted_rel_err_if_dd": 2.964736563474222e+18,
+          "tightness_double_over_measured": 0.06666666666666667
+        },
+        {
+          "chain_id": "cascade_BIN0_a64a4564_cdfb5d70",
+          "signal_class": "cancellation_cascade",
+          "n_contributors": 6,
+          "chain_lines": [
+            "B0m.h:68",
+            "B0m.h:88",
+            "kokkosUtils.h:550",
+            "kokkosUtils.h:608"
+          ],
+          "ops": {
+            "add": 2,
+            "sub": 4
+          },
+          "max_cond": 1.6849966666969152e+16,
+          "max_sensitivity": 2.4052800538922725e+50,
+          "measured_max_rel_err": 4.005595944754258e+35,
+          "predicted_rel_err_if_float": 1.4336586319758132e+43,
+          "predicted_rel_err_if_ff": 3.418108539523633e+36,
+          "predicted_rel_err_if_double": 2.6703972965028383e+34,
+          "predicted_rel_err_if_dd": 2.964736563474222e+18,
+          "tightness_double_over_measured": 0.06666666666666667
+        },
+        {
+          "chain_id": "cascade_BIN0_37f5c229_1a875dbf",
+          "signal_class": "cancellation_cascade",
+          "n_contributors": 10,
+          "chain_lines": [
+            "B0m.h:68",
+            "B0m.h:69",
+            "B0m.h:88",
+            "kokkosUtils.h:550",
+            "kokkosUtils.h:608"
+          ],
+          "ops": {
+            "add": 2,
+            "sub": 8
+          },
+          "max_cond": 1.5974036245682832e+16,
+          "max_sensitivity": 1.3846354630979443e+50,
+          "measured_max_rel_err": 2.305881257765781e+35,
+          "predicted_rel_err_if_float": 8.253070492136146e+42,
+          "predicted_rel_err_if_ff": 1.9676853399601332e+36,
+          "predicted_rel_err_if_double": 1.537254171843854e+34,
+          "predicted_rel_err_if_dd": 1.7066949762821238e+18,
+          "tightness_double_over_measured": 0.06666666666666667
+        },
+        {
+          "chain_id": "cascade_BIN0_37f5c229_a9d233ef",
+          "signal_class": "cancellation_cascade",
+          "n_contributors": 10,
+          "chain_lines": [
+            "B0m.h:68",
+            "B0m.h:69",
+            "B0m.h:88",
+            "kokkosUtils.h:550",
+            "kokkosUtils.h:608"
+          ],
+          "ops": {
+            "add": 2,
+            "sub": 8
+          },
+          "max_cond": 1.5974036245682832e+16,
+          "max_sensitivity": 1.3846354630979443e+50,
+          "measured_max_rel_err": 2.305881257765781e+35,
+          "predicted_rel_err_if_float": 8.253070492136146e+42,
+          "predicted_rel_err_if_ff": 1.9676853399601332e+36,
+          "predicted_rel_err_if_double": 1.537254171843854e+34,
+          "predicted_rel_err_if_dd": 1.7066949762821238e+18,
+          "tightness_double_over_measured": 0.06666666666666667
+        },
+        {
+          "chain_id": "cascade_BIN0_b163c01e_9db976d4",
+          "signal_class": "cancellation_cascade",
+          "n_contributors": 8,
+          "chain_lines": [
+            "B0m.h:68",
+            "B0m.h:69",
+            "B0m.h:88",
+            "kokkosUtils.h:550",
+            "kokkosUtils.h:608"
+          ],
+          "ops": {
+            "add": 2,
+            "sub": 6
+          },
+          "max_cond": 9375674957691592.0,
+          "max_sensitivity": 8.08798800660241e+49,
+          "measured_max_rel_err": 1.3469205761733179e+35,
+          "predicted_rel_err_if_float": 4.820816520811564e+42,
+          "predicted_rel_err_if_ff": 1.1493722250012311e+36,
+          "predicted_rel_err_if_double": 8.979470507822118e+33,
+          "predicted_rel_err_if_dd": 9.969214906726662e+17,
+          "tightness_double_over_measured": 0.06666666666666667
+        }
+      ]
+    },
+    "BIN1": {
+      "present": true,
+      "samples": 5000,
+      "n_regions": 61,
+      "n_cascade_chains": 56723,
+      "n_cancellation_cascade_chains": 56723,
+      "max_region_rel_err": 1.1358495977222014e+40,
+      "floor_digits": 0.0,
+      "floor_source": "derived",
+      "floor_confidence": "derived_extrapolated",
+      "floor_note": "model on dominant-chain rel-err (coarse; calibrated on 5 measured pts)",
+      "dominant_chain": {
+        "chain_id": "cascade_BIN1_88bd2da7_056a12a1",
+        "signal_class": "cancellation_cascade",
+        "n_contributors": 20,
+        "chain_lines": [
+          "B1m.h:62",
+          "B1m.h:63",
+          "B1m.h:79",
+          "kokkosUtils.h:253",
+          "kokkosUtils.h:550",
+          "kokkosUtils.h:608"
+        ],
+        "ops": {
+          "add": 10,
+          "sub": 10
+        },
+        "max_cond": 1.6668327749369796e+16,
+        "max_sensitivity": 6.820494148761493e+54,
+        "measured_max_rel_err": 1.1358495977222014e+40,
+        "predicted_rel_err_if_float": 4.0653313092955905e+47,
+        "predicted_rel_err_if_ff": 9.692505143393494e+40,
+        "predicted_rel_err_if_double": 7.572269643276167e+38,
+        "predicted_rel_err_if_dd": 8.406908106635321e+22,
+        "tightness_double_over_measured": 0.06666612955149492
+      },
+      "dominant_chain_tightness": 0.06666612955149492,
+      "cancellation_loss_digits": 47.01,
+      "predicted_dd_floor_digits": -15.11,
+      "dd_sufficient": false,
+      "predicted_dd_floor_lift": -15.11,
+      "verdict": "COMPUTED",
+      "verdict_reason": "tight dominant-chain bound (tightness 0.067); catastrophic cancellation IS roundoff amplification -> dd lever exists",
+      "top5_chains_by_measured_rel_err": [
+        {
+          "chain_id": "cascade_BIN1_88bd2da7_056a12a1",
+          "signal_class": "cancellation_cascade",
+          "n_contributors": 20,
+          "chain_lines": [
+            "B1m.h:62",
+            "B1m.h:63",
+            "B1m.h:79",
+            "kokkosUtils.h:253",
+            "kokkosUtils.h:550",
+            "kokkosUtils.h:608"
+          ],
+          "ops": {
+            "add": 10,
+            "sub": 10
+          },
+          "max_cond": 1.6668327749369796e+16,
+          "max_sensitivity": 6.820494148761493e+54,
+          "measured_max_rel_err": 1.1358495977222014e+40,
+          "predicted_rel_err_if_float": 4.0653313092955905e+47,
+          "predicted_rel_err_if_ff": 9.692505143393494e+40,
+          "predicted_rel_err_if_double": 7.572269643276167e+38,
+          "predicted_rel_err_if_dd": 8.406908106635321e+22,
+          "tightness_double_over_measured": 0.06666612955149492
+        },
+        {
+          "chain_id": "cascade_BIN1_88bd2da7_2fb89b6f",
+          "signal_class": "cancellation_cascade",
+          "n_contributors": 20,
+          "chain_lines": [
+            "B1m.h:62",
+            "B1m.h:63",
+            "B1m.h:79",
+            "kokkosUtils.h:253",
+            "kokkosUtils.h:550",
+            "kokkosUtils.h:608"
+          ],
+          "ops": {
+            "add": 10,
+            "sub": 10
+          },
+          "max_cond": 1.6668327749369796e+16,
+          "max_sensitivity": 6.820494148761493e+54,
+          "measured_max_rel_err": 1.1358495977222014e+40,
+          "predicted_rel_err_if_float": 4.0653313092955905e+47,
+          "predicted_rel_err_if_ff": 9.692505143393494e+40,
+          "predicted_rel_err_if_double": 7.572269643276167e+38,
+          "predicted_rel_err_if_dd": 8.406908106635321e+22,
+          "tightness_double_over_measured": 0.06666612955149492
+        },
+        {
+          "chain_id": "cascade_BIN1_94b879e5_0f5cba42",
+          "signal_class": "cancellation_cascade",
+          "n_contributors": 13,
+          "chain_lines": [
+            "B1m.h:62",
+            "B1m.h:63",
+            "B1m.h:79",
+            "kokkosUtils.h:249",
+            "kokkosUtils.h:550",
+            "kokkosUtils.h:608"
+          ],
+          "ops": {
+            "add": 2,
+            "sub": 11
+          },
+          "max_cond": 1.5106514402064716e+16,
+          "max_sensitivity": 2.633237661618505e+54,
+          "measured_max_rel_err": 4.385275516283416e+39,
+          "predicted_rel_err_if_float": 1.5695319542995124e+47,
+          "predicted_rel_err_if_ff": 3.742055783985883e+40,
+          "predicted_rel_err_if_double": 2.923481081238971e+38,
+          "predicted_rel_err_if_dd": 3.2457160084475534e+22,
+          "tightness_double_over_measured": 0.06666584734262405
+        },
+        {
+          "chain_id": "cascade_BIN1_94b879e5_f8185388",
+          "signal_class": "cancellation_cascade",
+          "n_contributors": 13,
+          "chain_lines": [
+            "B1m.h:62",
+            "B1m.h:63",
+            "B1m.h:79",
+            "kokkosUtils.h:249",
+            "kokkosUtils.h:550",
+            "kokkosUtils.h:608"
+          ],
+          "ops": {
+            "add": 2,
+            "sub": 11
+          },
+          "max_cond": 1.5106514402064716e+16,
+          "max_sensitivity": 2.633237661618505e+54,
+          "measured_max_rel_err": 4.385275516283416e+39,
+          "predicted_rel_err_if_float": 1.5695319542995124e+47,
+          "predicted_rel_err_if_ff": 3.742055783985883e+40,
+          "predicted_rel_err_if_double": 2.923481081238971e+38,
+          "predicted_rel_err_if_dd": 3.2457160084475534e+22,
+          "tightness_double_over_measured": 0.06666584734262405
+        },
+        {
+          "chain_id": "cascade_BIN1_11e11961_64cc6943",
+          "signal_class": "cancellation_cascade",
+          "n_contributors": 14,
+          "chain_lines": [
+            "B1m.h:62",
+            "B1m.h:63",
+            "B1m.h:68",
+            "B1m.h:79",
+            "kokkosUtils.h:253",
+            "kokkosUtils.h:550",
+            "kokkosUtils.h:608"
+          ],
+          "ops": {
+            "add": 2,
+            "sub": 12
+          },
+          "max_cond": 1.7213477769221188e+16,
+          "max_sensitivity": 1.914779663763699e+54,
+          "measured_max_rel_err": 3.1887782087787146e+39,
+          "predicted_rel_err_if_float": 1.1412976168177717e+47,
+          "predicted_rel_err_if_ff": 2.721065561336927e+40,
+          "predicted_rel_err_if_double": 2.125832469794474e+38,
+          "predicted_rel_err_if_dd": 2.3601481544615877e+22,
+          "tightness_double_over_measured": 0.06666604983507639
+        }
+      ]
+    },
+    "BIN2": {
+      "present": true,
+      "samples": 5000,
+      "n_regions": 63,
+      "n_cascade_chains": 59001,
+      "n_cancellation_cascade_chains": 59001,
+      "max_region_rel_err": 8.487392941165474e+38,
+      "floor_digits": 0.0,
+      "floor_source": "derived",
+      "floor_confidence": "derived_extrapolated",
+      "floor_note": "model on dominant-chain rel-err (coarse; calibrated on 5 measured pts)",
+      "dominant_chain": {
+        "chain_id": "cascade_BIN2_52074b65_64667428",
+        "signal_class": "cancellation_cascade",
+        "n_contributors": 14,
+        "chain_lines": [
+          "B2m.h:64",
+          "B2m.h:65",
+          "B2m.h:84",
+          "kokkosUtils.h:249",
+          "kokkosUtils.h:550",
+          "kokkosUtils.h:608"
+        ],
+        "ops": {
+          "add": 1,
+          "sub": 13
+        },
+        "max_cond": 1.7909997790616176e+16,
+        "max_sensitivity": 5.096469360235232e+53,
+        "measured_max_rel_err": 8.487392941165474e+38,
+        "predicted_rel_err_if_float": 3.037732458254833e+46,
+        "predicted_rel_err_if_ff": 7.242518563878139e+39,
+        "predicted_rel_err_if_double": 5.658217628029796e+37,
+        "predicted_rel_err_if_dd": 6.281883488978619e+21,
+        "tightness_double_over_measured": 0.06666614433021431
+      },
+      "dominant_chain_tightness": 0.06666614433021431,
+      "cancellation_loss_digits": 45.83,
+      "predicted_dd_floor_digits": -13.93,
+      "dd_sufficient": false,
+      "predicted_dd_floor_lift": -13.93,
+      "verdict": "COMPUTED",
+      "verdict_reason": "tight dominant-chain bound (tightness 0.067); catastrophic cancellation IS roundoff amplification -> dd lever exists",
+      "top5_chains_by_measured_rel_err": [
+        {
+          "chain_id": "cascade_BIN2_52074b65_64667428",
+          "signal_class": "cancellation_cascade",
+          "n_contributors": 14,
+          "chain_lines": [
+            "B2m.h:64",
+            "B2m.h:65",
+            "B2m.h:84",
+            "kokkosUtils.h:249",
+            "kokkosUtils.h:550",
+            "kokkosUtils.h:608"
+          ],
+          "ops": {
+            "add": 1,
+            "sub": 13
+          },
+          "max_cond": 1.7909997790616176e+16,
+          "max_sensitivity": 5.096469360235232e+53,
+          "measured_max_rel_err": 8.487392941165474e+38,
+          "predicted_rel_err_if_float": 3.037732458254833e+46,
+          "predicted_rel_err_if_ff": 7.242518563878139e+39,
+          "predicted_rel_err_if_double": 5.658217628029796e+37,
+          "predicted_rel_err_if_dd": 6.281883488978619e+21,
+          "tightness_double_over_measured": 0.06666614433021431
+        },
+        {
+          "chain_id": "cascade_BIN2_52074b65_dc567b20",
+          "signal_class": "cancellation_cascade",
+          "n_contributors": 14,
+          "chain_lines": [
+            "B2m.h:64",
+            "B2m.h:65",
+            "B2m.h:84",
+            "kokkosUtils.h:249",
+            "kokkosUtils.h:550",
+            "kokkosUtils.h:608"
+          ],
+          "ops": {
+            "add": 1,
+            "sub": 13
+          },
+          "max_cond": 1.7909997790616176e+16,
+          "max_sensitivity": 5.096469360235232e+53,
+          "measured_max_rel_err": 8.487392941165474e+38,
+          "predicted_rel_err_if_float": 3.037732458254833e+46,
+          "predicted_rel_err_if_ff": 7.242518563878139e+39,
+          "predicted_rel_err_if_double": 5.658217628029796e+37,
+          "predicted_rel_err_if_dd": 6.281883488978619e+21,
+          "tightness_double_over_measured": 0.06666614433021431
+        },
+        {
+          "chain_id": "cascade_BIN2_29b72308_2cf1108f",
+          "signal_class": "cancellation_cascade",
+          "n_contributors": 20,
+          "chain_lines": [
+            "B2m.h:64",
+            "B2m.h:65",
+            "B2m.h:71",
+            "B2m.h:84",
+            "kokkosUtils.h:253",
+            "kokkosUtils.h:550",
+            "kokkosUtils.h:608"
+          ],
+          "ops": {
+            "add": 6,
+            "sub": 14
+          },
+          "max_cond": 1.1057685875937348e+16,
+          "max_sensitivity": 2.806363255427536e+53,
+          "measured_max_rel_err": 4.673565204866756e+38,
+          "predicted_rel_err_if_float": 1.6727228495046712e+46,
+          "predicted_rel_err_if_ff": 3.9880820500962047e+39,
+          "predicted_rel_err_if_double": 3.11568910163766e+37,
+          "predicted_rel_err_if_dd": 3.4591097782117996e+21,
+          "tightness_double_over_measured": 0.06666621658328802
+        },
+        {
+          "chain_id": "cascade_BIN2_29b72308_4c760396",
+          "signal_class": "cancellation_cascade",
+          "n_contributors": 20,
+          "chain_lines": [
+            "B2m.h:64",
+            "B2m.h:65",
+            "B2m.h:71",
+            "B2m.h:84",
+            "kokkosUtils.h:253",
+            "kokkosUtils.h:550",
+            "kokkosUtils.h:608"
+          ],
+          "ops": {
+            "add": 6,
+            "sub": 14
+          },
+          "max_cond": 1.1057685875937348e+16,
+          "max_sensitivity": 2.806363255427536e+53,
+          "measured_max_rel_err": 4.673565204866756e+38,
+          "predicted_rel_err_if_float": 1.6727228495046712e+46,
+          "predicted_rel_err_if_ff": 3.9880820500962047e+39,
+          "predicted_rel_err_if_double": 3.11568910163766e+37,
+          "predicted_rel_err_if_dd": 3.4591097782117996e+21,
+          "tightness_double_over_measured": 0.06666621658328802
+        },
+        {
+          "chain_id": "cascade_BIN2_595b1e36_854b0b82",
+          "signal_class": "cancellation_cascade",
+          "n_contributors": 14,
+          "chain_lines": [
+            "B2m.h:64",
+            "B2m.h:65",
+            "B2m.h:84",
+            "kokkosUtils.h:550",
+            "kokkosUtils.h:608"
+          ],
+          "ops": {
+            "add": 6,
+            "sub": 8
+          },
+          "max_cond": 1.5497000415052184e+16,
+          "max_sensitivity": 2.3212368134657325e+53,
+          "measured_max_rel_err": 3.865762480209985e+38,
+          "predicted_rel_err_if_float": 1.3835649570618466e+46,
+          "predicted_rel_err_if_ff": 3.298675911573998e+39,
+          "predicted_rel_err_if_double": 2.577090555917186e+37,
+          "predicted_rel_err_if_dd": 2.861145271723304e+21,
+          "tightness_double_over_measured": 0.06666448259845495
+        }
+      ]
+    },
+    "BIN3": {
+      "present": true,
+      "samples": 5000,
+      "n_regions": 78,
+      "n_cascade_chains": 31630,
+      "n_cancellation_cascade_chains": 31630,
+      "max_region_rel_err": 1.8588847131114133e+23,
+      "floor_digits": 0.0,
+      "floor_source": "derived",
+      "floor_confidence": "derived_extrapolated",
+      "floor_note": "model on dominant-chain rel-err (coarse; calibrated on 5 measured pts)",
+      "dominant_chain": {
+        "chain_id": "cascade_BIN3_799d51c7_25b9e24c",
+        "signal_class": "cancellation_cascade",
+        "n_contributors": 21,
+        "chain_lines": [
+          "B3m.h:76",
+          "B3m.h:78",
+          "B3m.h:109",
+          "kokkosUtils.h:550",
+          "kokkosUtils.h:608"
+        ],
+        "ops": {
+          "add": 2,
+          "sub": 19
+        },
+        "max_cond": 9476754882385152.0,
+        "max_sensitivity": 7.455566987523404e+37,
+        "measured_max_rel_err": 1.8588847131114133e+23,
+        "predicted_rel_err_if_float": 4.443864218904617e+30,
+        "predicted_rel_err_if_ff": 1.0594997927915137e+24,
+        "predicted_rel_err_if_double": 8.2773421311837e+21,
+        "predicted_rel_err_if_dd": 918969.5816740007,
+        "tightness_double_over_measured": 0.04452853946670545
+      },
+      "dominant_chain_tightness": 0.04452853946670545,
+      "cancellation_loss_digits": 29.38,
+      "predicted_dd_floor_digits": 2.52,
+      "dd_sufficient": false,
+      "predicted_dd_floor_lift": 2.52,
+      "verdict": "COMPUTED",
+      "verdict_reason": "tight dominant-chain bound (tightness 0.045); catastrophic cancellation IS roundoff amplification -> dd lever exists",
+      "top5_chains_by_measured_rel_err": [
+        {
+          "chain_id": "cascade_BIN3_799d51c7_25b9e24c",
+          "signal_class": "cancellation_cascade",
+          "n_contributors": 21,
+          "chain_lines": [
+            "B3m.h:76",
+            "B3m.h:78",
+            "B3m.h:109",
+            "kokkosUtils.h:550",
+            "kokkosUtils.h:608"
+          ],
+          "ops": {
+            "add": 2,
+            "sub": 19
+          },
+          "max_cond": 9476754882385152.0,
+          "max_sensitivity": 7.455566987523404e+37,
+          "measured_max_rel_err": 1.8588847131114133e+23,
+          "predicted_rel_err_if_float": 4.443864218904617e+30,
+          "predicted_rel_err_if_ff": 1.0594997927915137e+24,
+          "predicted_rel_err_if_double": 8.2773421311837e+21,
+          "predicted_rel_err_if_dd": 918969.5816740007,
+          "tightness_double_over_measured": 0.04452853946670545
+        },
+        {
+          "chain_id": "cascade_BIN3_799d51c7_b7c480f2",
+          "signal_class": "cancellation_cascade",
+          "n_contributors": 21,
+          "chain_lines": [
+            "B3m.h:76",
+            "B3m.h:78",
+            "B3m.h:109",
+            "kokkosUtils.h:550",
+            "kokkosUtils.h:608"
+          ],
+          "ops": {
+            "add": 2,
+            "sub": 19
+          },
+          "max_cond": 9476754882385152.0,
+          "max_sensitivity": 7.455566987523404e+37,
+          "measured_max_rel_err": 1.8588847131114133e+23,
+          "predicted_rel_err_if_float": 4.443864218904617e+30,
+          "predicted_rel_err_if_ff": 1.0594997927915137e+24,
+          "predicted_rel_err_if_double": 8.2773421311837e+21,
+          "predicted_rel_err_if_dd": 918969.5816740007,
+          "tightness_double_over_measured": 0.04452853946670545
+        },
+        {
+          "chain_id": "cascade_BIN3_8cd98ed4_368c9128",
+          "signal_class": "cancellation_cascade",
+          "n_contributors": 18,
+          "chain_lines": [
+            "B3m.h:109",
+            "kokkosUtils.h:253",
+            "kokkosUtils.h:550",
+            "kokkosUtils.h:608"
+          ],
+          "ops": {
+            "add": 6,
+            "sub": 12
+          },
+          "max_cond": 1.5463305815837776e+16,
+          "max_sensitivity": 6.539493473865679e+27,
+          "measured_max_rel_err": 1.5826193042601518e+23,
+          "predicted_rel_err_if_float": 3.89784185520749e+20,
+          "predicted_rel_err_if_ff": 92931791668116.81,
+          "predicted_rel_err_if_double": 726029622407.1626,
+          "predicted_rel_err_if_dd": 8.060548033563404e-05,
+          "tightness_double_over_measured": 4.587519060666137e-12
+        },
+        {
+          "chain_id": "cascade_BIN3_8cd98ed4_b8bb4816",
+          "signal_class": "cancellation_cascade",
+          "n_contributors": 18,
+          "chain_lines": [
+            "B3m.h:109",
+            "kokkosUtils.h:253",
+            "kokkosUtils.h:550",
+            "kokkosUtils.h:608"
+          ],
+          "ops": {
+            "add": 6,
+            "sub": 12
+          },
+          "max_cond": 1.5463305815837776e+16,
+          "max_sensitivity": 6.539493473865679e+27,
+          "measured_max_rel_err": 1.5826193042601518e+23,
+          "predicted_rel_err_if_float": 3.89784185520749e+20,
+          "predicted_rel_err_if_ff": 92931791668116.81,
+          "predicted_rel_err_if_double": 726029622407.1626,
+          "predicted_rel_err_if_dd": 8.060548033563404e-05,
+          "tightness_double_over_measured": 4.587519060666137e-12
+        },
+        {
+          "chain_id": "cascade_BIN3_b4c0ef74_226519f8",
+          "signal_class": "cancellation_cascade",
+          "n_contributors": 19,
+          "chain_lines": [
+            "B3m.h:109",
+            "kokkosUtils.h:550",
+            "kokkosUtils.h:608"
+          ],
+          "ops": {
+            "add": 4,
+            "sub": 15
+          },
+          "max_cond": 9081562878894144.0,
+          "max_sensitivity": 1.178599061064796e+36,
+          "measured_max_rel_err": 1.3688811220976487e+23,
+          "predicted_rel_err_if_float": 7.024997836737609e+28,
+          "predicted_rel_err_if_ff": 1.674890002426531e+22,
+          "predicted_rel_err_if_double": 1.3085078143957274e+20,
+          "predicted_rel_err_if_dd": 14527.355034440774,
+          "tightness_double_over_measured": 0.00095589587238269
+        }
+      ]
+    },
+    "BIN4": {
+      "present": true,
+      "samples": 5000,
+      "n_regions": 102,
+      "n_cascade_chains": 38605,
+      "n_cancellation_cascade_chains": 38605,
+      "max_region_rel_err": 5.36936490855253e+25,
+      "floor_digits": 0.0,
+      "floor_source": "derived",
+      "floor_confidence": "derived_extrapolated",
+      "floor_note": "model on dominant-chain rel-err (coarse; calibrated on 5 measured pts)",
+      "dominant_chain": {
+        "chain_id": "cascade_BIN4_552f079a_11f0ddd1",
+        "signal_class": "cancellation_cascade",
+        "n_contributors": 33,
+        "chain_lines": [
+          "B4m.h:119",
+          "B4m.h:195",
+          "B4m.h:198",
+          "B4m.h:233",
+          "kokkosUtils.h:253",
+          "kokkosUtils.h:550",
+          "kokkosUtils.h:608"
+        ],
+        "ops": {
+          "add": 10,
+          "sub": 23
+        },
+        "max_cond": 8271644295016390.0,
+        "max_sensitivity": 1.823718844244216e+40,
+        "measured_max_rel_err": 5.36936490855253e+25,
+        "predicted_rel_err_if_float": 1.0870211388136243e+33,
+        "predicted_rel_err_if_ff": 2.5916603536930665e+26,
+        "predicted_rel_err_if_double": 2.0247346513227082e+24,
+        "predicted_rel_err_if_dd": 224790702.86548588,
+        "tightness_double_over_measured": 0.037709015606252304
+      },
+      "dominant_chain_tightness": 0.037709015606252304,
+      "cancellation_loss_digits": 31.97,
+      "predicted_dd_floor_digits": -0.07,
+      "dd_sufficient": false,
+      "predicted_dd_floor_lift": -0.07,
+      "verdict": "COMPUTED",
+      "verdict_reason": "tight dominant-chain bound (tightness 0.038); catastrophic cancellation IS roundoff amplification -> dd lever exists",
+      "top5_chains_by_measured_rel_err": [
+        {
+          "chain_id": "cascade_BIN4_552f079a_11f0ddd1",
+          "signal_class": "cancellation_cascade",
+          "n_contributors": 33,
+          "chain_lines": [
+            "B4m.h:119",
+            "B4m.h:195",
+            "B4m.h:198",
+            "B4m.h:233",
+            "kokkosUtils.h:253",
+            "kokkosUtils.h:550",
+            "kokkosUtils.h:608"
+          ],
+          "ops": {
+            "add": 10,
+            "sub": 23
+          },
+          "max_cond": 8271644295016390.0,
+          "max_sensitivity": 1.823718844244216e+40,
+          "measured_max_rel_err": 5.36936490855253e+25,
+          "predicted_rel_err_if_float": 1.0870211388136243e+33,
+          "predicted_rel_err_if_ff": 2.5916603536930665e+26,
+          "predicted_rel_err_if_double": 2.0247346513227082e+24,
+          "predicted_rel_err_if_dd": 224790702.86548588,
+          "tightness_double_over_measured": 0.037709015606252304
+        },
+        {
+          "chain_id": "cascade_BIN4_552f079a_d5231b28",
+          "signal_class": "cancellation_cascade",
+          "n_contributors": 33,
+          "chain_lines": [
+            "B4m.h:119",
+            "B4m.h:195",
+            "B4m.h:198",
+            "B4m.h:233",
+            "kokkosUtils.h:253",
+            "kokkosUtils.h:550",
+            "kokkosUtils.h:608"
+          ],
+          "ops": {
+            "add": 10,
+            "sub": 23
+          },
+          "max_cond": 8271644295016390.0,
+          "max_sensitivity": 1.823718844244216e+40,
+          "measured_max_rel_err": 5.36936490855253e+25,
+          "predicted_rel_err_if_float": 1.0870211388136243e+33,
+          "predicted_rel_err_if_ff": 2.5916603536930665e+26,
+          "predicted_rel_err_if_double": 2.0247346513227082e+24,
+          "predicted_rel_err_if_dd": 224790702.86548588,
+          "tightness_double_over_measured": 0.037709015606252304
+        },
+        {
+          "chain_id": "cascade_BIN4_541d9157_72a92816",
+          "signal_class": "cancellation_cascade",
+          "n_contributors": 24,
+          "chain_lines": [
+            "B4m.h:128",
+            "B4m.h:195",
+            "B4m.h:198",
+            "B4m.h:209",
+            "B4m.h:233",
+            "kokkosUtils.h:253",
+            "kokkosUtils.h:550",
+            "kokkosUtils.h:608"
+          ],
+          "ops": {
+            "add": 3,
+            "sub": 21
+          },
+          "max_cond": 8922047556596035.0,
+          "max_sensitivity": 1.4692952144167038e+40,
+          "measured_max_rel_err": 5.155902643006248e+25,
+          "predicted_rel_err_if_float": 8.757681932548903e+32,
+          "predicted_rel_err_if_ff": 2.0879940825817354e+26,
+          "predicted_rel_err_if_double": 1.6312453770169808e+24,
+          "predicted_rel_err_if_dd": 181104617.63775963,
+          "tightness_double_over_measured": 0.03163840533780622
+        },
+        {
+          "chain_id": "cascade_BIN4_541d9157_b2bb8911",
+          "signal_class": "cancellation_cascade",
+          "n_contributors": 24,
+          "chain_lines": [
+            "B4m.h:128",
+            "B4m.h:195",
+            "B4m.h:198",
+            "B4m.h:209",
+            "B4m.h:233",
+            "kokkosUtils.h:253",
+            "kokkosUtils.h:550",
+            "kokkosUtils.h:608"
+          ],
+          "ops": {
+            "add": 3,
+            "sub": 21
+          },
+          "max_cond": 8922047556596035.0,
+          "max_sensitivity": 1.4692952144167038e+40,
+          "measured_max_rel_err": 5.155902643006248e+25,
+          "predicted_rel_err_if_float": 8.757681932548903e+32,
+          "predicted_rel_err_if_ff": 2.0879940825817354e+26,
+          "predicted_rel_err_if_double": 1.6312453770169808e+24,
+          "predicted_rel_err_if_dd": 181104617.63775963,
+          "tightness_double_over_measured": 0.03163840533780622
+        },
+        {
+          "chain_id": "cascade_BIN4_4e14f491_48b39c63",
+          "signal_class": "cancellation_cascade",
+          "n_contributors": 29,
+          "chain_lines": [
+            "B4m.h:119",
+            "B4m.h:195",
+            "B4m.h:198",
+            "B4m.h:233",
+            "kokkosUtils.h:550",
+            "kokkosUtils.h:608"
+          ],
+          "ops": {
+            "add": 10,
+            "sub": 19
+          },
+          "max_cond": 1.6906437766907288e+16,
+          "max_sensitivity": 5.556031919663245e+39,
+          "measured_max_rel_err": 1.6498288507798193e+25,
+          "predicted_rel_err_if_float": 3.3116530893225936e+32,
+          "predicted_rel_err_if_ff": 7.895596240335926e+25,
+          "predicted_rel_err_if_double": 6.168434562762442e+23,
+          "predicted_rel_err_if_dd": 68483380.77472474,
+          "tightness_double_over_measured": 0.03738833006736928
+        }
+      ]
+    }
+  },
+  "tierb_targets_ranked": [
+    {
+      "integral": "B10",
+      "floor_digits": 9.878,
+      "floor_source": "measured",
+      "floor_confidence": "measured",
+      "predicted_dd_floor_digits": 25.83,
+      "predicted_dd_floor_lift": 15.95,
+      "dd_sufficient": true,
+      "dominant_chain_lines": [
+        "B1m.h:227",
+        "B1m.h:240",
+        "B1m.h:241",
+        "kokkosUtils.h:174",
+        "kokkosUtils.h:177",
+        "kokkosUtils.h:199",
+        "kokkosUtils.h:212",
+        "kokkosUtils.h:702",
+        "kokkosUtils.h:703",
+        "kokkosUtils.h:704"
+      ],
+      "dominant_chain_tightness": 0.003331756565344427
+    },
+    {
+      "integral": "B12",
+      "floor_digits": 3.691,
+      "floor_source": "measured",
+      "floor_confidence": "measured",
+      "predicted_dd_floor_digits": 19.64,
+      "predicted_dd_floor_lift": 15.95,
+      "dd_sufficient": true,
+      "dominant_chain_lines": [
+        "B2m.h:206",
+        "B2m.h:207",
+        "B2m.h:241",
+        "kokkosUtils.h:212",
+        "kokkosUtils.h:702"
+      ],
+      "dominant_chain_tightness": 0.07075303644353668
+    },
+    {
+      "integral": "B13",
+      "floor_digits": 8.62,
+      "floor_source": "derived",
+      "floor_confidence": "derived_in_calibration_range",
+      "predicted_dd_floor_digits": 24.57,
+      "predicted_dd_floor_lift": 15.95,
+      "dd_sufficient": true,
+      "dominant_chain_lines": [
+        "B2m.h:300",
+        "B2m.h:301",
+        "B2m.h:305",
+        "B2m.h:306",
+        "B2m.h:355",
+        "B2m.h:533",
+        "kokkosUtils.h:212",
+        "kokkosUtils.h:702"
+      ],
+      "dominant_chain_tightness": 0.07080121254580928
+    },
+    {
+      "integral": "B14",
+      "floor_digits": 5.21,
+      "floor_source": "derived",
+      "floor_confidence": "derived_in_calibration_range",
+      "predicted_dd_floor_digits": 21.16,
+      "predicted_dd_floor_lift": 15.95,
+      "dd_sufficient": true,
+      "dominant_chain_lines": [
+        "B2m.h:401",
+        "B2m.h:578",
+        "kokkosUtils.h:1208"
+      ],
+      "dominant_chain_tightness": 0.19860180300800165
+    },
+    {
+      "integral": "B16",
+      "floor_digits": 0.0,
+      "floor_source": "derived",
+      "floor_confidence": "derived_extrapolated",
+      "predicted_dd_floor_digits": 8.23,
+      "predicted_dd_floor_lift": 8.23,
+      "dd_sufficient": false,
+      "dominant_chain_lines": [
+        "B3m.h:177",
+        "B3m.h:183",
+        "B3m.h:230",
+        "kokkosUtils.h:666",
+        "kokkosUtils.h:744",
+        "kokkosUtils.h:746",
+        "kokkosUtils.h:752",
+        "kokkosUtils.h:754",
+        "kokkosUtils.h:1198"
+      ],
+      "dominant_chain_tightness": 0.1828445335821614
+    },
+    {
+      "integral": "BIN3",
+      "floor_digits": 0.0,
+      "floor_source": "derived",
+      "floor_confidence": "derived_extrapolated",
+      "predicted_dd_floor_digits": 2.52,
+      "predicted_dd_floor_lift": 2.52,
+      "dd_sufficient": false,
+      "dominant_chain_lines": [
+        "B3m.h:76",
+        "B3m.h:78",
+        "B3m.h:109",
+        "kokkosUtils.h:550",
+        "kokkosUtils.h:608"
+      ],
+      "dominant_chain_tightness": 0.04452853946670545
+    },
+    {
+      "integral": "B15",
+      "floor_digits": 0.0,
+      "floor_source": "derived",
+      "floor_confidence": "derived_extrapolated",
+      "predicted_dd_floor_digits": 1.84,
+      "predicted_dd_floor_lift": 1.84,
+      "dd_sufficient": false,
+      "dominant_chain_lines": [
+        "B2m.h:492",
+        "B2m.h:496",
+        "B2m.h:578",
+        "kokkosUtils.h:666",
+        "kokkosUtils.h:673",
+        "kokkosUtils.h:1198"
+      ],
+      "dominant_chain_tightness": 0.18284453358216138
+    },
+    {
+      "integral": "BIN4",
+      "floor_digits": 0.0,
+      "floor_source": "derived",
+      "floor_confidence": "derived_extrapolated",
+      "predicted_dd_floor_digits": -0.07,
+      "predicted_dd_floor_lift": -0.07,
+      "dd_sufficient": false,
+      "dominant_chain_lines": [
+        "B4m.h:119",
+        "B4m.h:195",
+        "B4m.h:198",
+        "B4m.h:233",
+        "kokkosUtils.h:253",
+        "kokkosUtils.h:550",
+        "kokkosUtils.h:608"
+      ],
+      "dominant_chain_tightness": 0.037709015606252304
+    },
+    {
+      "integral": "BIN0",
+      "floor_digits": 0.0,
+      "floor_source": "derived",
+      "floor_confidence": "derived_extrapolated",
+      "predicted_dd_floor_digits": -10.43,
+      "predicted_dd_floor_lift": -10.43,
+      "dd_sufficient": false,
+      "dominant_chain_lines": [
+        "B0m.h:68",
+        "B0m.h:88",
+        "kokkosUtils.h:550",
+        "kokkosUtils.h:608"
+      ],
+      "dominant_chain_tightness": 0.06666666666666667
+    },
+    {
+      "integral": "BIN2",
+      "floor_digits": 0.0,
+      "floor_source": "derived",
+      "floor_confidence": "derived_extrapolated",
+      "predicted_dd_floor_digits": -13.93,
+      "predicted_dd_floor_lift": -13.93,
+      "dd_sufficient": false,
+      "dominant_chain_lines": [
+        "B2m.h:64",
+        "B2m.h:65",
+        "B2m.h:84",
+        "kokkosUtils.h:249",
+        "kokkosUtils.h:550",
+        "kokkosUtils.h:608"
+      ],
+      "dominant_chain_tightness": 0.06666614433021431
+    },
+    {
+      "integral": "BIN1",
+      "floor_digits": 0.0,
+      "floor_source": "derived",
+      "floor_confidence": "derived_extrapolated",
+      "predicted_dd_floor_digits": -15.11,
+      "predicted_dd_floor_lift": -15.11,
+      "dd_sufficient": false,
+      "dominant_chain_lines": [
+        "B1m.h:62",
+        "B1m.h:63",
+        "B1m.h:79",
+        "kokkosUtils.h:253",
+        "kokkosUtils.h:550",
+        "kokkosUtils.h:608"
+      ],
+      "dominant_chain_tightness": 0.06666612955149492
+    }
+  ]
+}
