@@ -24,7 +24,7 @@ import re
 from pathlib import Path
 
 from agents.strategy.models import (
-    ALL_KINDS, VIA_PLAIN, VIA_REGIONAL, RegionTarget, RemediationIntent,
+    ALL_KINDS, VIA_CHAIN, VIA_PLAIN, VIA_REGIONAL, RegionTarget, RemediationIntent,
 )
 
 
@@ -61,8 +61,18 @@ def parse_intent(wire: dict) -> RemediationIntent:
     intent_flavor = wire.get("intent")
     identity = wire.get("identity")
     via = wire.get("via", VIA_PLAIN) or VIA_PLAIN
-    if via not in (VIA_PLAIN, VIA_REGIONAL):
-        raise IntentError(f"unknown via {via!r} (expected {VIA_PLAIN!r} or {VIA_REGIONAL!r})")
+    if via not in (VIA_PLAIN, VIA_REGIONAL, VIA_CHAIN):
+        raise IntentError(
+            f"unknown via {via!r} (expected {VIA_PLAIN!r}, {VIA_REGIONAL!r} "
+            f"or {VIA_CHAIN!r})")
+    # Phase 2f: a chain intent carries the whole cascade chain's regions as
+    # (file, line_start, line_end) tuples; the Patcher chain path (dispatch._gen_chain)
+    # widens them together.  Normalize the JSON [file, ls, le] lists to tuples.
+    chain_lines_raw = wire.get("chain_lines") or []
+    try:
+        chain_lines = [(str(t[0]), int(t[1]), int(t[2])) for t in chain_lines_raw]
+    except (TypeError, ValueError, IndexError) as exc:
+        raise IntentError(f"intent.chain_lines malformed: {exc}") from exc
     try:
         return RemediationIntent(
             target=RegionTarget(file=file, line_start=line_start,
@@ -73,6 +83,7 @@ def parse_intent(wire: dict) -> RemediationIntent:
             rationale_id=str(wire.get("rationale_id", "")),
             identity=identity,
             via=via,
+            chain_lines=chain_lines,
         )
     except ValueError as exc:      # RemediationIntent.__post_init__ guards
         raise IntentError(str(exc)) from exc

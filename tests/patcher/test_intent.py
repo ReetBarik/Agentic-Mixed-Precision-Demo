@@ -22,6 +22,25 @@ def test_parse_rejects_unknown_kind():
         parse_intent(intent("promote-magic"))
 
 
+def test_parse_chain_intent_roundtrip():
+    # Phase 2f: a via="chain" intent (the wire form of a chain-dd candidate) must
+    # parse through the Patcher front door, carrying chain_lines as tuples.
+    from agents.strategy.models import RegionTarget, RemediationIntent, VIA_CHAIN
+    src = RemediationIntent(
+        target=RegionTarget("B2m.h", 206, 206, []), kind="double-to-dd",
+        intent="correctness", current_precision="double", rationale_id="cascade_B12_x",
+        via=VIA_CHAIN, chain_lines=[("B2m.h", 206, 206), ("kokkosUtils.h", 212, 212)])
+    p = parse_intent(src.to_patcher())
+    assert p.via == VIA_CHAIN
+    assert p.chain_lines == [("B2m.h", 206, 206), ("kokkosUtils.h", 212, 212)]
+    assert p.kind == "double-to-dd"
+
+
+def test_parse_rejects_unknown_via():
+    with pytest.raises(IntentError):
+        parse_intent(intent("double-to-dd", via="teleport"))
+
+
 def test_parse_rejects_bad_line_range():
     with pytest.raises(IntentError):
         parse_intent(intent("double-to-dd", line_start=6, line_end=4))
