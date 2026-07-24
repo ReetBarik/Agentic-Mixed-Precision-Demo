@@ -28,7 +28,8 @@ def _rank_reason(rung: str) -> str:
 def build_markdown(res: SolveResult, qb: QueueBuild, *, integral: str,
                    tree_path: str, diff_path: str, manifest_path: str,
                    report_regions: dict, gate: float, solve_wall_sec: float,
-                   snapshot: dict) -> str:
+                   snapshot: dict, per_integral_floor: dict | None = None,
+                   baseline_hotspot: dict | None = None) -> str:
     L: list[str] = []
     ap = L.append
 
@@ -43,8 +44,9 @@ def build_markdown(res: SolveResult, qb: QueueBuild, *, integral: str,
     ap(f"* **Manifest:** `{manifest_path}`")
     ap(f"* **Gate:** p100 = min_precise_digits across the random battery ≥ "
        f"**{gate:g}** (FP128 whole-app oracle). Locked; not the PLAN default "
-       f"p99≥10 (unachievable on qcdloop's 8.84-digit BIN1 floor — see "
-       f"FLOAT_RETRO_PROBE.md).")
+       f"p99≥10 (per FLOAT_RETRO_PROBE.md the aggregate whole-app floor is "
+       f"~8.84 digits at BIN1). **See the blocking finding — for the B12 pass the "
+       f"whole-app floor is B12's own 3.69, below the gate.**")
     ap(f"* **Snapshot:** seed={snapshot.get('seed')}, "
        f"sample_count={snapshot.get('sample_count')}")
     ap(f"* **Merged tree:** `{tree_path}` (HEAD `{(res.final_head or '')[:12]}`)")
@@ -66,6 +68,11 @@ def build_markdown(res: SolveResult, qb: QueueBuild, *, integral: str,
            f"{len([o for o in res.outcomes if o.outcome == SKIPPED_RESOLVED])} "
            f"skipped (region already resolved).")
     ap("")
+
+    # -- blocking finding (structural stop) --
+    if res.stopped == "stopped_gate_unimplementable":
+        _blocking_finding(ap, res, qb, integral, gate, per_integral_floor,
+                          baseline_hotspot)
 
     # -- queue rank table --
     ap("## Candidate queue (rank order)")
@@ -181,7 +188,104 @@ def build_markdown(res: SolveResult, qb: QueueBuild, *, integral: str,
     return "\n".join(L) + "\n"
 
 
+def _blocking_finding(ap, res, qb, integral, gate, per_integral_floor,
+                      baseline_hotspot) -> None:
+    ap("## ⛔ Stage-1 blocking finding — the p100 gate is unsatisfiable for "
+       f"{integral}")
+    ap("")
+    ap(f"The solver stopped on the **baseline**: the unpatched whole-app "
+       f"min_precise_digits (p100) is **{_fmt(res.baseline_min)} < gate "
+       f"{gate:g}**, so *no* candidate can pass — the floor is set before the "
+       f"solver touches anything.  This is the explicit STOP-and-flag case "
+       f"(PLAN 2e §Gate: \"do not silently pick a tolerance other than 6.0; if "
+       f"the gate is structurally unimplementable, STOP and flag\").  The solver "
+       f"did **not** retune the gate.")
+    ap("")
+    if baseline_hotspot:
+        ap(f"**Hotspot:** integral `{baseline_hotspot.get('integral')}`, sample "
+           f"{baseline_hotspot.get('sample_idx')}, component "
+           f"`{baseline_hotspot.get('component')}` — precise digits "
+           f"{_fmt(baseline_hotspot.get('precise_digits'))} "
+           f"(rel-err ≈ {10 ** -(baseline_hotspot.get('precise_digits') or 0):.2e} "
+           f"vs the FP128 oracle).")
+        ap("")
+    if per_integral_floor:
+        ap("**Per-integral double-precision floor (vanilla whole-app, this "
+           "battery).** Only the *target* integral is the global-min hotspot:")
+        ap("")
+        ap("| integral | worst-case p100 | < gate? |")
+        ap("|----------|----------------|:-------:|")
+        for name, floor in sorted(per_integral_floor.items(),
+                                  key=lambda kv: kv[1]):
+            flag = "**yes**" if floor < gate else "no"
+            mark = " ← target" if name == integral else ""
+            ap(f"| `{name}`{mark} | {floor:.4f} | {flag} |")
+        ap("")
+        n_below = sum(1 for f in per_integral_floor.values() if f < gate)
+        ap(f"{n_below} of {len(per_integral_floor)} integrals sit below the gate "
+           f"at double precision — and the target `{integral}` is the worst.")
+        ap("")
+    ap("### Why this is genuine, not an artifact")
+    ap("")
+    ap("The Validator scores each component against a **per-sample `ref_scale`** "
+       "(the largest |DD coeff| in that sample) with an analytic-zero band "
+       "(`effectively_zero` → capped, counted in `zeroed_components`).  A "
+       "near-zero-reference component would therefore report ~0 digits *or be "
+       "banded out* — not a moderate 3.69.  3.69 digits = a real 2.04e-4 relative "
+       "error against the sample's characteristic magnitude: a **genuine "
+       f"double-precision catastrophic-cancellation floor** intrinsic to "
+       f"{integral}'s algorithm at that sample, not a scoring artifact.")
+    ap("")
+    ap("### Why no candidate can lift it")
+    ap("")
+    ap(f"Every measured DISCRIM candidate ({', '.join(f'`{c.region_id} {c.rung}`' for c in qb.queue)}) "
+       f"leaves the hotspot component untouched — the first candidate "
+       f"(`B2m.h:188 float`) built + validated cleanly but produced p100 "
+       f"{_fmt(res.final_min)} = baseline (Δ ≈ 0 on the global min).  The dd "
+       f"upgrades that *could* add precision are exactly the measured-INERT cells "
+       f"(delta == baseline) — they do not touch the cancellation either.  So the "
+       f"floor is invariant under the entire catalog the fan-out measured for "
+       f"{integral}.")
+    ap("")
+    ap("### The measurement-layer gap this exposes (the point of Stage 1)")
+    ap("")
+    ap("The **whole-app global-min gate is the wrong instrument for a "
+       "per-integral solver whose target integral is itself the global-min "
+       "hotspot.**  FLOAT_RETRO_PROBE.md already recommended a *per-component, "
+       "float-touched* instrument over the global-min gate; this run makes it "
+       "concrete.  Options for Reet (the solver deliberately picks none — locked "
+       "at 6.0):")
+    ap("")
+    ap(f"1. **Regression-relative gate** — accept iff the candidate does not "
+       f"*worsen* the whole-app min beyond a small margin vs the double baseline "
+       f"(this is exactly `validate()`'s built-in 0.5-digit regression guard). "
+       f"Under it, {integral} float candidates that leave the 3.69 floor "
+       f"untouched (Δ≈0) would pass — the solver would accept float where it is "
+       f"harmless and land real speedup, which is the actual intent for an "
+       f"ill-conditioned integral.  This is the smallest change and the most "
+       f"defensible.")
+    ap("2. **Per-target-integral absolute gate** — score p100 over the target "
+       "integral's components only, against a floor calibrated to *its* "
+       "achievable precision (e.g. its dd-oracle self-consistency), not the "
+       "whole-app 6.0.")
+    ap("3. **Hotspot mask** — exclude the provably-cancellation components from "
+       "the absolute floor (they are workload physics ceilings that bind double "
+       "itself), keeping 6.0 on the rest.")
+    ap("")
+    ap(f"**Recommendation:** option 1 (regression-relative) for Stage 2 — it "
+       f"preserves an absolute-safety intuition while not penalizing the solver "
+       f"for an ill-conditioning it cannot fix.  Needs your sign-off; it changes "
+       f"the locked gate semantics.")
+    ap("")
+
+
 def _left_on_table(ap, res: SolveResult, qb: QueueBuild) -> None:
+    if res.stopped == "stopped_gate_unimplementable":
+        ap("* N/A — the walk never got past the baseline (the gate is "
+           "unsatisfiable before any candidate could be judged). The "
+           "solo-vs-joint question only becomes meaningful once the gate admits "
+           "at least the baseline; see the blocking finding.")
+        return
     accepted_regions = {o.candidate.region_id for o in res.accepted}
     rejected = [o for o in res.rejected]
     # Regions where a solo demotion was rejected but a *combination* might have
@@ -244,9 +348,14 @@ def _handoff(ap, res: SolveResult, qb: QueueBuild, integral: str,
     ap("### Stage 2 (all 21 integrals) cost estimate")
     ap("")
     n_cand = len(qb.queue)
-    per_cand = (solve_wall_sec / n_cand) if n_cand else 0.0
-    ap(f"* B12 solve: **{solve_wall_sec}s** for {n_cand} queued candidates "
-       f"(~{per_cand:.0f}s/candidate incl. build + whole-app validate).")
+    built = [o for o in res.outcomes if o.wall_sec and o.wall_sec > 0]
+    n_built = len(built)
+    per_cand = (sum(o.wall_sec for o in built) / n_built) if n_built else 0.0
+    ap(f"* {integral} solve: **{solve_wall_sec}s** wall; {n_built} of {n_cand} "
+       f"queued candidates actually built+validated "
+       f"(~{per_cand:.0f}s/candidate incl. Patcher fan-out build + whole-app "
+       f"validate; the rest were skipped/short-circuited"
+       + (" — the run STOPPED on the baseline" if res.stopped else "") + ").")
     ap(f"* Each candidate = 1 Patcher fan-out (LLM gen + build) + 1 whole-app "
        f"validate (build-fused). API cost is dominated by the fan-out LLM calls "
        f"(float/ff/dd shim generation).")
@@ -276,11 +385,21 @@ def _handoff(ap, res: SolveResult, qb: QueueBuild, integral: str,
            f"static gates (they build + measure but produce byte-identical "
            f"output). Not wrong, but each wasted one build in the measure pass; a "
            f"tighter static gate would save that. Enumerated above.")
-    ap("* Confirm the baseline whole-app p100 the solver measured "
-       f"({_fmt(res.baseline_min)}) matches your expectation (~8.84 from the BIN1 "
-       f"floor); a large mismatch would indicate a snapshot/oracle-cache drift.")
+    if res.stopped == "stopped_gate_unimplementable":
+        ap(f"* **The gate itself is the headline gap.** The baseline whole-app "
+           f"p100 for the {integral} pass is "
+           f"{_fmt(res.baseline_min)} — below the 6.0 gate — because the target "
+           f"integral is the whole-app global-min hotspot. This is *not* a "
+           f"snapshot/oracle drift (the FLOAT_RETRO ~8.84 figure is the aggregate "
+           f"run's BIN1 floor; this battery's global min is the target's own 3.69 "
+           f"sample). See the blocking finding for the gate-instrument options.")
+    else:
+        ap(f"* Baseline whole-app p100 = {_fmt(res.baseline_min)}. Confirm this "
+           f"matches expectation for the target integral; a large mismatch would "
+           f"indicate a snapshot/oracle-cache drift.")
     ap("")
-    ap("**STOP: do not run Stage 2 (all 21 integrals) until this is reviewed.**")
+    ap("**STOP: do not run Stage 2 (all 21 integrals) until this is reviewed** — "
+       "especially the gate-instrument decision, which Stage 2 depends on.")
 
 
 def write_report(path, res: SolveResult, qb: QueueBuild, **kw) -> Path:

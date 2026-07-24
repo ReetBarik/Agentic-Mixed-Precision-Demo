@@ -185,6 +185,8 @@ def main(argv: list[str] | None = None) -> int:
             error=resp.get("error"),
             wall_sec=round(time.monotonic() - t0, 1))
 
+    _diag = {"baseline_hotspot": None}
+
     def validate_fn(candidate_sha, gate_binary, gate_tree_hash):
         ctx = {"run_id": run_id, "branch": branch, "repo_path": str(tree),
                "tolerance": args.gate, "snapshot": snapshot,
@@ -192,6 +194,8 @@ def main(argv: list[str] | None = None) -> int:
                "gate_tree_hash": gate_tree_hash}
         t0 = time.monotonic()
         v = validator_fn(candidate_sha, ctx)
+        if _diag["baseline_hotspot"] is None:
+            _diag["baseline_hotspot"] = (v.get("current") or {}).get("hotspot")
         return ValidateResult(
             cand_min=(v.get("candidate") or {}).get("min_precise_digits"),
             curr_min=(v.get("current") or {}).get("min_precise_digits"),
@@ -222,11 +226,14 @@ def main(argv: list[str] | None = None) -> int:
     result_json = out_dir / "solver_result.json"
     _write_result_json(result_json, res, qb, integral, str(tree), str(diff_path),
                        solve_wall, starting_sha, args)
+    per_integral_floor = _per_integral_floor(args.seed, args.sample_count)
     md_path = out_dir / f"SOLVER_STAGE1_{integral}.md"
     write_report(md_path, res, qb, integral=integral, tree_path=str(tree),
                  diff_path=str(diff_path), manifest_path=str(manifest),
                  report_regions=report_regions, gate=args.gate,
-                 solve_wall_sec=solve_wall, snapshot=snapshot)
+                 solve_wall_sec=solve_wall, snapshot=snapshot,
+                 per_integral_floor=per_integral_floor,
+                 baseline_hotspot=_diag["baseline_hotspot"])
 
     print("\n=== solver Stage 1 summary ===", flush=True)
     print(f"  baseline p100 : {res.baseline_min}", flush=True)
@@ -239,6 +246,39 @@ def main(argv: list[str] | None = None) -> int:
     print(f"  wrote         : {md_path}", flush=True)
     print(f"  wrote         : {result_json}", flush=True)
     return 0
+
+
+def _per_integral_floor(seed: int, sample_count: int) -> dict | None:
+    """Per-integral worst-case min_precise_digits from the vanilla baseline scoring.
+
+    Reads the Validator's persisted ``current_precise_digits.jsonl`` (the vanilla
+    tree scoring, cached per DD-tree-hash + snapshot).  Returns
+    ``{integral: worst_p100}`` or None if no matching scoring file is found.  Used
+    only for the report's blocking-finding table; a missing file degrades the
+    report gracefully (table omitted).
+    """
+    from agents.validator.validate import _VALIDATOR_ROOT
+    root = Path(_VALIDATOR_ROOT)
+    if not root.exists():
+        return None
+    cands = sorted(root.glob(f"*_seed{seed}_n{sample_count}/current_precise_digits.jsonl"),
+                   key=lambda p: p.stat().st_mtime, reverse=True)
+    if not cands:
+        return None
+    floor: dict[str, float] = {}
+    with open(cands[0]) as fh:
+        for line in fh:
+            line = line.strip()
+            if not line:
+                continue
+            r = json.loads(line)
+            integ = r.get("integral")
+            for d in r.get("digits", []):
+                if d is None:
+                    continue
+                if integ not in floor or d < floor[integ]:
+                    floor[integ] = d
+    return floor or None
 
 
 def _write_result_json(path, res, qb, integral, tree, diff, wall, starting_sha,
