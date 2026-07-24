@@ -22,6 +22,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Callable
 
+from agents.integrator_base import boundary
 from agents.integrator_base.region import RegionIntegrationResult
 from agents.patcher import edits, gitops, result as R, rewrites
 from agents.strategy.models import VIA_REGIONAL, RemediationIntent
@@ -131,6 +132,21 @@ def generate(intent: RemediationIntent, deps: PatchDeps, attempt: int,
 # 1. regional-integrator
 # ---------------------------------------------------------------------------
 
+def _region_text_from_disk(target_path, line_start: int, line_end: int) -> str | None:
+    """Read the inclusive 1-based region ``[line_start, line_end]`` from the working
+    tree (reset to the parent SHA at gen time).  Returns ``None`` on any I/O or range
+    error — the 2d-B write-truncation gate then simply doesn't fire (honest
+    build+measure), never a crash."""
+    try:
+        lines = Path(target_path).read_text(
+            encoding="utf-8", errors="ignore").split("\n")
+    except (OSError, TypeError, ValueError):
+        return None
+    if line_start < 1 or line_end > len(lines) or line_start > line_end:
+        return None
+    return "\n".join(lines[line_start - 1:line_end])
+
+
 def _gen_regional(intent: RemediationIntent, deps: PatchDeps, attempt: int) -> Gen:
     to = intent.kind.split("-to-")[-1]
     # Target scalar tag + integrator key.  ``float`` (Wave 2) is a native demotion
@@ -166,6 +182,29 @@ def _gen_regional(intent: RemediationIntent, deps: PatchDeps, attempt: int) -> G
         rv = _do_revert(intent, deps, "-to-ff")
         if not rv.ok:
             return rv
+
+    # Phase 2d-B write-boundary-truncation gate (regional / chain-representative path).
+    # The region's enclosing function is unknown to the fan-out call graph, so its Case-B
+    # write targets are recovered region-locally.  When this UPCAST truncates every landing
+    # back to caller precision (no wider persistent sink), the promotion is numerically
+    # inert — fail terminally here, upstream of the LLM shim gen + build.  Only ever fires
+    # for an upcast with a source-visible caller-precision store (never a native float
+    # downcast, never a bare return), so a genuine remediation is not suppressed.
+    _, _wt_two_limb, _ = _precision_cpp(which)
+    if _wt_two_limb:
+        region_text = _region_text_from_disk(
+            deps.target_path, intent.target.line_start, intent.target.line_end)
+        if region_text is not None:
+            from agents.shared.region_scan import region_writes_from_source
+            wt_writes = region_writes_from_source(region_text)
+            if boundary.write_truncation_inert(
+                    region_text, list(intent.target.variables), wt_writes,
+                    _wt_two_limb, caller_type=caller_type):
+                return Gen(False, R.WRITE_TRUNCATION, R.ERR_TRUNCATION,
+                           f"write_truncation: region {intent.target.location} promotes "
+                           f"to {scalar} but every landing truncates back to "
+                           f"{caller_type} (no wider persistent sink) — numerically "
+                           f"inert at the boundary")
 
     try:
         res: RegionIntegrationResult = integrator(
@@ -334,6 +373,16 @@ def _gen_regional_fanout(intent: RemediationIntent, deps: PatchDeps, attempt: in
                    f"promotion_no_op: region {intent.target.location} promotes nothing "
                    f"(empty payload; reads={fr.reads_used}) — variant body is "
                    f"byte-identical to the original")
+
+    # Phase 2d-B write-boundary-truncation gate: the promotion retyped the body, but this
+    # UPCAST truncates every landing back to caller precision (no wider persistent sink),
+    # so the candidate is numerically inert (delta == baseline).  Terminal + deterministic
+    # (a wider rung would truncate identically) — fail here instead of paying a build.
+    if fr.write_truncation:
+        return Gen(False, R.WRITE_TRUNCATION, R.ERR_TRUNCATION,
+                   f"write_truncation: region {intent.target.location} promotes to "
+                   f"{scalar_cpp} but every landing truncates back to {caller_type} "
+                   f"(no wider persistent sink) — numerically inert at the boundary")
 
     return Gen(True, shim_paths=list(res.shim_paths), llm_tokens=res.llm_tokens,
                declared_variants=list(fr.declared_variants),

@@ -90,6 +90,15 @@ DISPATCH: dict[str, DispatchEntry] = {
     "promotion_no_op": DispatchEntry(
         action="advance_terminal", log_tag="promotion_no_op", counts_budget=False,
         is_reject=True, dd_untested=True),
+    # Phase 2d-B: an UPCAST promotion that retyped the body but truncates every landing
+    # back to caller precision (no wider persistent sink) → numerically inert.  Detected
+    # at gen time upstream of any build, the upcast analogue of promotion_no_op: terminal
+    # for this intent (deterministic + rung-fixed — a wider rung would truncate the same
+    # way), git-only so it doesn't count vs budget, a reject that leaves the rung
+    # dd_untested (no ceiling was proven — the region was skipped, not measured).
+    "write_truncation": DispatchEntry(
+        action="advance_terminal", log_tag="write_truncation", counts_budget=False,
+        is_reject=True, dd_untested=True),
 }
 
 

@@ -35,6 +35,9 @@ _FANOUT_FAILURE_PREFIXES = (
     "silent_bypass",
     # Phase 2c: an empty promotion payload (region body byte-identical to original).
     "promotion_no_op",
+    # Phase 2d-B: an upcast that retyped the body but truncates every landing back to
+    # caller precision (numerically inert; no wider persistent sink).
+    "write_truncation",
 )
 
 

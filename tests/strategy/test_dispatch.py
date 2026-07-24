@@ -11,6 +11,7 @@ def test_all_statuses_present():
         "ok", "build_failed", "runtime_nan", "runtime_crashed",
         "llm_gen_failed", "patch_apply_failed", "timeout", "commit_failed",
         "empty_candidate", "patch_inapplicable", "promotion_no_op",
+        "write_truncation",
     }
 
 
@@ -74,6 +75,17 @@ def test_promotion_no_op_is_terminal_and_free():
     assert e.is_reject is True
 
 
+def test_write_truncation_is_terminal_and_free():
+    # Phase 2d-B: an upcast that truncates every landing back to caller precision is a
+    # deterministic, rung-fixed inert promotion — terminal for the intent (a wider rung
+    # truncates identically), git-only so free vs budget, and a real reject.
+    e = dispatch("write_truncation")
+    assert e.action == "advance_terminal"
+    assert e.log_tag == "write_truncation"
+    assert e.counts_budget is False
+    assert e.is_reject is True
+
+
 def test_patch_apply_failed_is_strategy_bug_and_free():
     e = dispatch("patch_apply_failed")
     assert e.action == "skip_intent"
@@ -95,7 +107,8 @@ def test_non_ok_statuses_flag_dd_untested():
     # P6a: any Patcher failure at the DD rung means DD was never honestly tested.
     for status in ["build_failed", "runtime_nan", "runtime_crashed",
                    "llm_gen_failed", "patch_apply_failed", "timeout",
-                   "empty_candidate", "patch_inapplicable", "promotion_no_op"]:
+                   "empty_candidate", "patch_inapplicable", "promotion_no_op",
+                   "write_truncation"]:
         assert dispatch(status).dd_untested is True
     assert dispatch("ok").dd_untested is False
 

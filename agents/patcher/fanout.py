@@ -209,6 +209,11 @@ class FanoutResult:
     # — an empty promotion payload — which the Patcher turns into a terminal
     # ``promotion_no_op`` failure instead of a silent inert (bit-identical) candidate.
     promotion_applied: bool = False
+    # Phase 2d-B write-boundary-truncation gate: True iff the promotion retyped the body
+    # but every landing truncates back to caller precision (no wider persistent sink) —
+    # an UPCAST that is numerically inert.  The Patcher turns it into a terminal
+    # ``write_truncation`` (no build), the upcast analogue of ``promotion_no_op``.
+    write_truncation: bool = False
     # The reads set actually used (source-derived when the intent carried none) —
     # surfaced for forensics / tests.
     reads_used: list[str] = field(default_factory=list)
@@ -285,6 +290,14 @@ def fan_out_region(
         complex_type=complex_type, complex_tokens=frozenset(complex_tokens),
         complex_names=frozenset(complex_names), caller_complex=caller_complex)
 
+    # Phase 2d-B: an upcast whose promotion lands only in caller-precision stores is
+    # numerically inert (truncated at the boundary).  Detect it here, upstream of the
+    # variant emission + build, so the caller can terminal-fail (write_truncation)
+    # instead of paying a build for a candidate whose delta == baseline.
+    write_truncation = promotion_applied and boundary.write_truncation_inert(
+        region_text, reads, writes, two_limb, caller_type=caller_type,
+        complex_tokens=frozenset(complex_tokens), caller_complex=caller_complex)
+
     # --- degenerate: region is IN the entry point -> promote in place ---------
     if fd.name == graph.root:
         touched = _promote_in_place(tree, fd, line_start, line_end, reads, writes,
@@ -293,6 +306,7 @@ def fan_out_region(
         return FanoutResult(declared_variants=[], files_touched=touched,
                             root_edited=True, in_place_region=True,
                             paths_enumerated=1, promotion_applied=promotion_applied,
+                            write_truncation=write_truncation,
                             reads_used=list(reads))
 
     paths, truncated = graph.enumerate_paths(fd.name, max_paths=max_paths)
@@ -355,7 +369,8 @@ def fan_out_region(
     return FanoutResult(declared_variants=sorted(set(declared)),
                         files_touched=sorted(touched), root_edited=True,
                         paths_enumerated=len(paths), truncated=truncated,
-                        promotion_applied=promotion_applied, reads_used=list(reads))
+                        promotion_applied=promotion_applied,
+                        write_truncation=write_truncation, reads_used=list(reads))
 
 
 # --------------------------------------------------------------------------- #

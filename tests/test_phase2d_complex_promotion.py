@@ -221,6 +221,93 @@ def test_pre2d_scalar_behavior_unchanged():
 
 
 # --------------------------------------------------------------------------- #
+# boundary.write_truncation_inert (Phase 2d-B)
+# --------------------------------------------------------------------------- #
+
+TOK_CX = frozenset({"TOutput", "complex"})
+CALLER_CX = "Kokkos::complex<double>"
+
+
+def test_write_truncation_complex_decl_landing_ff():
+    # B2m.h:188 shape under the ff UPCAST: `const TOutput fac = TOutput(sibar*tabar);`.
+    # The extended product lands in `fac` (TOutput = caller complex) and is truncated
+    # back at the boundary → provably inert → write_truncation.
+    region = "        const TOutput fac = TOutput(sibar * tabar);"
+    assert boundary.write_truncation_inert(
+        region, ["sibar", "tabar"], [], True,
+        caller_type="double", complex_tokens=TOK_CX, caller_complex=CALLER_CX) is True
+
+
+def test_write_truncation_complex_add_chain_ff():
+    # B2m.h:193 shape under ff: `const TOutput wlog = wlogsmu + wlogtmu - wlog4mu;`
+    region = "        const TOutput wlog = wlogsmu + wlogtmu - wlog4mu;"
+    assert boundary.write_truncation_inert(
+        region, ["wlogsmu", "wlogtmu", "wlog4mu"], [], True,
+        caller_type="double", complex_tokens=TOK_CX, caller_complex=CALLER_CX) is True
+
+
+def test_write_truncation_not_flagged_for_float_downcast():
+    # Same B2m.h:188 region under the native float DOWNCAST — truncating to a narrower
+    # target is real precision loss, NOT a no-op; must still promote (build+measure).
+    region = "        const TOutput fac = TOutput(sibar * tabar);"
+    assert boundary.write_truncation_inert(
+        region, ["sibar", "tabar"], [], False,
+        caller_type="double", complex_tokens=TOK_CX, caller_complex=CALLER_CX) is False
+
+
+def test_write_truncation_caseB_store_dd():
+    # kokkosUtils.h:183 shape under dd: `A = TMass(... T ...);` — a pre-declared (Case-B)
+    # write to the caller-precision `A`.  The Case-B store is always demoted to caller
+    # precision on exit → provably inert → write_truncation.  (Real run: `A` is recovered
+    # by region_writes_from_source since it is template-typed; here it is passed in.)
+    region = ("            A = TMass(TMass(ql::Constants<TMass>::_half()) * "
+              "ql::Real(ql::kPow<TOutput, TMass, TScale>(ql::kLog(TMass("
+              "ql::Constants<TMass>::_one()) + T),2)));")
+    assert boundary.write_truncation_inert(
+        region, ["T"], ["A"], True, caller_type="double",
+        complex_tokens=TOK_CX, caller_complex=CALLER_CX) is True
+
+
+def test_write_truncation_spares_unrecognized_scalar_decl():
+    # boxGPU.h:139 shape under ff: `const TScale scalefac2 = scalefac * scalefac;`.
+    # TScale is an unrecognized template type — treated as a possibly-wider persistent
+    # sink, so the region is left to honest build+measure (it is a real, if tiny,
+    # measurement — must NOT be gated).
+    region = "        const TScale scalefac2 = scalefac * scalefac;"
+    assert boundary.write_truncation_inert(
+        region, ["scalefac"], [], True,
+        caller_type="double", complex_tokens=TOK_CX, caller_complex=CALLER_CX) is False
+
+
+def test_write_truncation_bare_return_not_flagged():
+    # kokkosUtils.h:212 shape: `return -(S * (B0 - H * B2) + A);` — no store landing.
+    # A bare return of a multi-op reduction is not provably inert (extended precision
+    # rounded once at the return could discriminate) → not flagged (conservative).
+    region = "        return -(S * (B0 - H * B2) + A);"
+    assert boundary.write_truncation_inert(
+        region, ["S", "B0", "H", "B2", "A"], [], True,
+        caller_type="double", complex_tokens=TOK_CX, caller_complex=CALLER_CX) is False
+
+
+def test_write_truncation_empty_payload_not_flagged():
+    # Nothing promotes (no reads / writes / promotable decls) → that is the empty-payload
+    # promotion_no_op class, not write-truncation.
+    region = "        T c = T(k);"   # sole operand is an int index -> no promotion
+    assert boundary.write_truncation_inert(
+        region, [], [], True, caller_type="double") is False
+
+
+def test_region_writes_from_source_recovers_template_write():
+    # kok:183-style template write is invisible to extract_region_writes(double) but
+    # recovered region-locally; a subscripted/aggregate store is NOT a Case-B write.
+    assert region_scan.region_writes_from_source("A = TMass(x + T);") == ["A"]
+    assert region_scan.region_writes_from_source(
+        "const TOutput fac = TOutput(a * b);") == []          # a decl, not Case-B
+    assert region_scan.region_writes_from_source("res(i, 0) /= scalefac2;") == []
+    assert region_scan.region_writes_from_source("if (a == b) { c = d; }") == ["c"]
+
+
+# --------------------------------------------------------------------------- #
 # shim_merge.dedup_inline
 # --------------------------------------------------------------------------- #
 

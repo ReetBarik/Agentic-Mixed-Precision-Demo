@@ -172,7 +172,8 @@ class _Patcher:
                 # deterministic failure only wastes the LLM budget.
                 if not llm_driven or gen.status in (R.PATCH_APPLY_FAILED,
                                                     R.PATCH_INAPPLICABLE,
-                                                    R.PROMOTION_NO_OP):
+                                                    R.PROMOTION_NO_OP,
+                                                    R.WRITE_TRUNCATION):
                     gitops.reset_hard(repo_root, parent)
                     return R.failure(gen.status, parent, err_kind=gen.err_kind,
                                      detail=gen.detail,

@@ -53,11 +53,21 @@ PATCH_INAPPLICABLE = "patch_inapplicable"
 # specifically "the promotion transform did nothing".  Phase 2c defense-in-depth so
 # an empty payload can never again masquerade as a silent ``measured`` scorer cell.
 PROMOTION_NO_OP = "promotion_no_op"
+# An UPCAST (ff/dd) promotion that DID retype the region body, but whose every landing
+# is a store back to caller precision (a Case-B write, or a region-local decl typed at
+# the caller scalar/complex) with no wider persistent sink — so the extended value is
+# truncated at the region boundary and the candidate is numerically inert (delta ==
+# baseline).  Terminal + deterministic (source-derived, rung-fixed), detected at gen
+# time upstream of any build.  Phase 2d-B — the upcast analogue of PROMOTION_NO_OP:
+# distinct in that the body IS retyped (not byte-identical), it just cannot survive the
+# demotion at the boundary.  NEVER raised for a native ``float`` downcast (truncating to
+# a narrower target is real precision loss — same two_limb discipline as the 2d-A guard).
+WRITE_TRUNCATION = "write_truncation"
 
 STATUSES = frozenset({
     OK, LLM_GEN_FAILED, PATCH_APPLY_FAILED, COMMIT_FAILED,
     BUILD_FAILED, RUNTIME_CRASHED, RUNTIME_NAN, TIMEOUT, EMPTY_CANDIDATE,
-    PATCH_INAPPLICABLE, PROMOTION_NO_OP,
+    PATCH_INAPPLICABLE, PROMOTION_NO_OP, WRITE_TRUNCATION,
 })
 
 # error.kind vocabulary (design §P2).
@@ -70,6 +80,7 @@ ERR_APPLY = "apply"
 ERR_COMMIT = "commit"
 ERR_TIMEOUT = "timeout"
 ERR_EMPTY = "empty"
+ERR_TRUNCATION = "truncation"   # Phase 2d-B write-boundary truncation
 
 
 def _artifacts(shim_paths=None, boundary_patch_path=None,

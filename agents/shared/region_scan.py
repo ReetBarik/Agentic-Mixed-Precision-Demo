@@ -180,6 +180,65 @@ def region_reads_from_function(func_source: str, func_line_start: int,
     return reads
 
 
+def region_writes_from_source(region_text: str) -> list[str]:
+    """Pre-declared (Case-B) write targets a region assigns, from its text alone.
+
+    A Case-B write is a bare ``<name> = <expr>`` assignment (a single ``=`` — not a
+    compound ``+=`` nor a comparison ``==``, which the tokenizer emits whole) whose
+    target is neither a region-local declaration (``<type> <name> = …``) nor a
+    subscripted / member store (``a(i) = …`` / ``a[i] = …`` / ``a.b = …``).
+
+    Phase 2d-B: the Patcher's regional (chain-representative) path reaches regions
+    whose enclosing function is unknown, so :func:`region_reads_from_function` — which
+    needs the function's decls to build its scalar-name universe — cannot run, and the
+    tracked-datatype write scan (:func:`extract_region_writes`) is blind to a
+    template-typed (``TMass`` / ``TOutput``) assignment.  This recovers the write
+    *targets* the only way that survives for such a region: a purely region-local
+    token scan, no enclosing function required.  Deterministic and source-only;
+    over-inclusion is harmless because :func:`~agents.integrator_base.boundary.\
+_compute_promotion` re-partitions a name that is actually a read or a decl.
+    """
+    toks = _tokenize(region_text)
+    n = len(toks)
+
+    # region-local declaration names (`<type> <name> =` at paren depth 0) to exclude:
+    # a decl is a *landing*, classified separately by _compute_promotion, not Case-B.
+    decl_names: set[str] = set()
+    depth = 0
+    for i, t in enumerate(toks):
+        if t.text == "(":
+            depth += 1
+            continue
+        if t.text == ")":
+            depth = max(0, depth - 1)
+            continue
+        if (depth == 0 and _is_ident_tok(t.text) and i + 2 < n
+                and _is_ident_tok(toks[i + 1].text) and toks[i + 2].text == "="):
+            decl_names.add(toks[i + 1].text)
+
+    writes: list[str] = []
+    seen: set[str] = set()
+    depth = 0
+    for i, t in enumerate(toks):
+        if t.text == "(":
+            depth += 1
+            continue
+        if t.text == ")":
+            depth = max(0, depth - 1)
+            continue
+        if depth != 0 or not _is_ident_tok(t.text):
+            continue
+        if t.text in seen or t.text in decl_names:
+            continue
+        nxt = toks[i + 1].text if i + 1 < n else ""
+        prev = toks[i - 1].text if i > 0 else ""
+        # bare `name =`, and NOT a member/subscript store or a `<type> name =` decl
+        if nxt == "=" and prev not in (".", "->") and not _is_ident_tok(prev):
+            seen.add(t.text)
+            writes.append(t.text)
+    return writes
+
+
 def _subscripted_names(toks: list["_Tok"], rs: int, re_: int) -> set[str]:
     """Identifiers used as an array-subscript base (``name [``) within the region."""
     out: set[str] = set()

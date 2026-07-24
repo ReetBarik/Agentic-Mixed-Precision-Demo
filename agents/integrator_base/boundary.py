@@ -536,6 +536,74 @@ def promote_region_block(
     return entry + new_region_text.split("\n") + exit_lines, True
 
 
+def write_truncation_inert(
+    region_text: str,
+    reads: list[str],
+    writes: list[str],
+    two_limb: bool,
+    *,
+    caller_type: str = "double",
+    complex_tokens=frozenset(),
+    caller_complex: str | None = None,
+) -> bool:
+    """Phase 2d-B — provably-inert *write-boundary truncation* detector.
+
+    Returns ``True`` when an UPCAST promotion is provably numerically inert because
+    every value it widens is truncated back to caller precision at the region
+    boundary — there is no persistent *wider* sink for the extended value to survive
+    in.  The Patcher turns a ``True`` here into a terminal ``write_truncation`` status
+    (no build), the upcast analogue of the empty-payload ``promotion_no_op``.
+
+    Fires iff ALL of:
+
+    * ``two_limb`` — an UPCAST (ff / dd).  A native ``float`` DOWNCAST is *never*
+      flagged: truncating a read to a narrower ``float`` at an aggregate/store sink
+      genuinely loses precision (``boxGPU.h:140-142``, de≈5.8e-8) — the exact
+      regression the 2d-A guard fix restored.  Same ``two_limb`` discipline.
+    * the promotion has something to widen (a read / pre-declared write / promoted
+      local decl) — else it is the *empty payload* ``promotion_no_op`` class, not
+      write-truncation.
+    * every promoted region-local decl lands at a **recognized** caller-precision
+      type — the literal ``caller_type``, the ``caller_complex`` spelling, or a
+      ``complex_tokens`` entry (which resolves to the caller complex, e.g. ``TOutput``
+      → ``Kokkos::complex<double>``).  A decl at an *unrecognized* template type
+      (``TScale`` / ``TMass``) is treated as a possibly-wider persistent sink and the
+      region is left to honest build+measure — conservative, so ``boxGPU.h:139``
+      (``const TScale scalefac2 = scalefac * scalefac;``) stays a real measurement.
+    * there is at least one **provable** caller-precision landing — a pre-declared
+      (Case-B) write (always demoted to ``caller_type`` on exit) or a decl at a
+      recognized caller type.  A bare ``return`` / expression with no store is not
+      flagged (nothing provably truncates; an extended multi-op reduction rounded
+      once at the return could discriminate — honest build+measure).
+
+    Deterministic, source-only, upstream of any build.  Mirrors
+    :func:`promote_region_block`'s no-op guard but for the *landed-but-truncated*
+    case rather than the *nothing-promotes* case; the two are mutually exclusive by
+    construction (this needs a landing, that fires only when none exists).
+    """
+    if not two_limb:
+        return False
+
+    prom = _compute_promotion(region_text, reads, writes)
+    if not prom.pure_reads and not prom.caseB and not prom.decl_writes:
+        return False  # empty payload → promotion_no_op territory, not truncation
+
+    recognized = {caller_type}
+    if caller_complex:
+        recognized.add(caller_complex)
+    recognized |= set(complex_tokens)
+
+    # A region-local decl at an unrecognized (possibly-wider) type is a persistent
+    # sink the extended value could survive in → not provably inert; bail.
+    if any(d.type_text not in recognized for d in prom.decl_writes):
+        return False
+
+    # Need ≥1 landing that provably truncates back to caller precision: a Case-B
+    # write (always demoted to caller_type) or a recognized-caller decl.  After the
+    # guard above every decl is recognized, so a decl is a provable landing.
+    return bool(prom.caseB) or bool(prom.decl_writes)
+
+
 def synthesize_boundary_patch(
     *,
     rel_file: str,

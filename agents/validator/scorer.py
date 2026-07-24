@@ -86,6 +86,10 @@ _PATCHER_STATUS_TO_CELL_STATUS = {
     # folds to patcher_failed — never a silent ``measured`` cell.  The finer
     # ``promotion_no_op`` label is preserved in the manifest failure_modes histogram.
     "promotion_no_op": STATUS_PATCHER_FAILED,
+    # Phase 2d-B: an upcast whose promotion truncates back at the boundary (retyped but
+    # numerically inert).  A codegen/precision gap, not a measurement → patcher_failed;
+    # the finer ``write_truncation`` label survives in the manifest failure_modes.
+    "write_truncation": STATUS_PATCHER_FAILED,
     "timeout": STATUS_PATCHER_FAILED,
     "build_failed": STATUS_BUILD_FAILED,
     "call_graph_build_failed": STATUS_BUILD_FAILED,
