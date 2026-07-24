@@ -63,11 +63,23 @@ PROMOTION_NO_OP = "promotion_no_op"
 # demotion at the boundary.  NEVER raised for a native ``float`` downcast (truncating to
 # a narrower target is real precision loss — same two_limb discipline as the 2d-A guard).
 WRITE_TRUNCATION = "write_truncation"
+# A precision-rung intent (float/ff/dd transition) on a region whose characterizer
+# ``signal_class`` is ``cancellation_cascade`` or ``local_cancellation`` — a region
+# where wider intermediates are STRUCTURALLY inert (a precision rung cannot rescue a
+# chained near-equal cascade or an |a-b|→0 local cancellation).  The Patcher declines
+# to enumerate the rung: no LLM shim generation, no build — just a terminal cell that
+# flags the region as awaiting an *algorithmic* rewrite (Kahan / identity), the real
+# lever (Strategy already models these via agents/strategy/walk.py::_rewrites_for; the
+# fan-out wiring to fire them is a separate, larger phase).  Phase 2e Stage-2 prep —
+# the signal_class analogue of the 2c/2d ``promotion_no_op`` / ``write_truncation``
+# terminal gates: deterministic, source-derived, upstream of any build.
+AWAITING_ALGORITHMIC_REWRITE = "awaiting_algorithmic_rewrite"
 
 STATUSES = frozenset({
     OK, LLM_GEN_FAILED, PATCH_APPLY_FAILED, COMMIT_FAILED,
     BUILD_FAILED, RUNTIME_CRASHED, RUNTIME_NAN, TIMEOUT, EMPTY_CANDIDATE,
     PATCH_INAPPLICABLE, PROMOTION_NO_OP, WRITE_TRUNCATION,
+    AWAITING_ALGORITHMIC_REWRITE,
 })
 
 # error.kind vocabulary (design §P2).
@@ -81,6 +93,7 @@ ERR_COMMIT = "commit"
 ERR_TIMEOUT = "timeout"
 ERR_EMPTY = "empty"
 ERR_TRUNCATION = "truncation"   # Phase 2d-B write-boundary truncation
+ERR_AWAITING_REWRITE = "awaiting_rewrite"   # Phase 2e signal_class filter
 
 
 def _artifacts(shim_paths=None, boundary_patch_path=None,

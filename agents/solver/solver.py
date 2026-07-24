@@ -1,26 +1,46 @@
 """Greedy sequential-layering solver core (Phase 2e Stage 1).
 
 Consumes a ranked candidate queue (``queue.build_queue``) and drives the
-accept/revert walk locked by Reet 2026-07-24:
+accept/revert walk locked by Reet 2026-07-24, under the **regression-relative
+gate** (Reet 2026-07-24, Stage-2 prep — replaces the Stage-1 absolute p100≥6):
 
+    baseline_min = whole-app p100 of the UNPATCHED tree (measured once at start)
     for each candidate in rank order (float < ff < dd):
         if its region already resolved at a cheaper rung -> skip
         apply the patch ON TOP OF the accumulated tree (not the baseline)
         build the whole app + run the whole-app validator
-        accept  (min_precise_digits >= gate) -> keep; region resolved; new baseline
-        reject  (min_precise_digits <  gate) -> revert this one patch; continue
+        accept  (cand_min >= baseline_min - margin) -> keep; region resolved
+        reject  (cand_min <  baseline_min - margin)  -> revert this one patch
     terminate when the queue is exhausted.
 
 No joint re-measurement, no strategy combining, no re-characterization between
 accepts (v1 keeps it simple — PLAN_overview §Loop semantics).
 
-**The gate is the raw p100 metric, deliberately NOT the validator's accept
-verdict.** ``verdict["candidate"]["min_precise_digits"]`` is the worst-case
-precise-decimal-digits across the random battery (p100 = min across samples). The
-task locks the bar at **6.0**.  The Validator's own verdict additionally bundles a
-0.5-digit *regression* guard vs the baseline (~8.84 digits on qcdloop), which
-would reject any candidate that legitimately spends precision down toward 6 — so
-the solver reads the metric and decides itself.  See SOLVER_STAGE1 report.
+**Regression-relative gate (Reet's call, Stage-2 prep).**  A candidate is accepted
+iff it does not *worsen* the whole-app worst-case precise-digits (p100) by more
+than ``margin`` digits vs the double baseline measured at solve start:
+
+    accept  ⇔  candidate.min_precise_digits >= baseline.min_precise_digits - margin
+
+``margin`` is the same 0.5-digit figure the Validator's own accept verdict bundles
+as its regression guard (:data:`agents.validator.validate.DEFAULT_MAX_REGRESSION`)
+— reused here, not re-invented.  This replaces the Stage-1 *absolute* ``p100 >= 6``
+gate, which was structurally unsatisfiable when the target integral is itself the
+whole-app global-min hotspot (B12's double-precision cancellation floor is 3.69 <
+6, a physics ceiling no candidate can lift — see SOLVER_STAGE1_B12.md).  The safety
+statement "float where possible, dd where necessary, never make it worse" is a
+*regression* claim, not a claim that double hits 6 on every integral; the
+regression-relative gate encodes exactly that.
+
+``candidate.min_precise_digits`` / ``baseline.min_precise_digits`` are read
+DIRECTLY from the Validator's measurement (``verdict["candidate"]``/
+``["current"]``), NOT its bundled accept verdict — the solver owns the decision.
+
+**STOP-and-flag discipline is preserved** for structural unimplementability: if the
+baseline itself cannot be scored (crash / NaN / no min), there is no reference to
+gate against, so the solver stops and flags rather than guessing.  (A *low* but
+well-defined baseline is no longer a stop — that is the whole point of going
+regression-relative.)
 
 All side effects are injected (``apply_fn`` / ``validate_fn`` / ``revert_fn`` /
 ``head_fn``) so the walk logic is unit-testable without a real build.
@@ -28,12 +48,17 @@ All side effects are injected (``apply_fn`` / ``validate_fn`` / ``revert_fn`` /
 
 from __future__ import annotations
 
+import math
 from dataclasses import dataclass, field
 from typing import Callable, Optional
 
 from agents.solver.queue import Candidate
+from agents.validator.validate import DEFAULT_MAX_REGRESSION
 
-DEFAULT_GATE = 6.0
+# Regression-relative accept margin (digits) — reuse the Validator's regression
+# guard figure so the solver and the bundled validate() verdict agree on "how much
+# worse is still acceptable".
+DEFAULT_MARGIN = DEFAULT_MAX_REGRESSION
 BASELINE_PRECISION = "double"
 
 
@@ -90,14 +115,23 @@ class CandidateOutcome:
 @dataclass
 class SolveResult:
     outcomes: list[CandidateOutcome] = field(default_factory=list)
-    baseline_min: Optional[float] = None      # vanilla whole-app p100
+    baseline_min: Optional[float] = None      # vanilla whole-app p100 (the reference)
     final_min: Optional[float] = None         # accumulated p100 at the end
     final_head: Optional[str] = None
     # region_id -> landed rung ("double" for regions that never accepted a rung)
     region_final: dict = field(default_factory=dict)
-    gate: float = DEFAULT_GATE
+    margin: float = DEFAULT_MARGIN            # regression-relative accept margin (digits)
     stopped: Optional[str] = None             # non-None => hard stop reason
     stop_detail: str = ""
+
+    @property
+    def accept_threshold(self) -> Optional[float]:
+        """The regression-relative accept bar: ``baseline_min - margin``.
+
+        ``None`` until the baseline is measured (first successful validate)."""
+        if self.baseline_min is None:
+            return None
+        return self.baseline_min - self.margin
 
     @property
     def accepted(self) -> list[CandidateOutcome]:
@@ -119,16 +153,19 @@ def solve(queue: list[Candidate], *,
           validate_fn: Callable[[str, Optional[str], Optional[str]], ValidateResult],
           revert_fn: Callable[[str], None],
           head_fn: Callable[[], str],
-          gate: float = DEFAULT_GATE,
+          margin: float = DEFAULT_MARGIN,
           all_region_ids: Optional[set] = None,
           on_event: Optional[Callable[[CandidateOutcome], None]] = None) -> SolveResult:
-    """Run the greedy walk over ``queue``.
+    """Run the greedy walk over ``queue`` under the regression-relative gate.
 
-    ``all_region_ids`` (optional) seeds ``region_final`` so every region — even
-    ones with no candidate — is reported at ``double``.  ``on_event`` is called
-    with each ``CandidateOutcome`` as it is decided (live progress).
+    ``margin`` is the regression-relative accept margin (digits): a candidate is
+    accepted iff ``cand_min >= baseline_min - margin`` where ``baseline_min`` is the
+    unpatched whole-app p100 measured once at solve start.  ``all_region_ids``
+    (optional) seeds ``region_final`` so every region — even ones with no candidate
+    — is reported at ``double``.  ``on_event`` is called with each
+    ``CandidateOutcome`` as it is decided (live progress).
     """
-    result = SolveResult(gate=gate)
+    result = SolveResult(margin=margin)
     for rid in (all_region_ids or set()):
         result.region_final.setdefault(rid, BASELINE_PRECISION)
     for c in queue:
@@ -165,19 +202,22 @@ def solve(queue: list[Candidate], *,
         vr = validate_fn(ar.candidate_sha, ar.gate_binary, ar.gate_tree_hash)
 
         # Establish the vanilla baseline from the first successful validate
-        # (validator's `current` is always the unpatched tree).  If the baseline
-        # itself is below the gate, the p100>=gate rule is structurally
-        # unimplementable on this workload -> STOP and flag (PLAN 2e §Gate).
+        # (validator's `current` is always the unpatched tree) — the reference the
+        # regression-relative gate compares every candidate against.  STOP-and-flag
+        # only when the baseline cannot be scored at all (crash / NaN / no min):
+        # there is then no reference to gate against.  A *low* but well-defined
+        # baseline is fine — the whole point of the regression-relative gate is to
+        # not penalize the solver for an ill-conditioning floor it cannot fix.
         if result.baseline_min is None:
             result.baseline_min = vr.curr_min
             accumulated_min = vr.curr_min
-            if vr.curr_min < gate:
+            if not _scoreable(vr.curr_min):
                 revert_fn(parent)
                 result.stopped = STOPPED_GATE_UNIMPLEMENTABLE
                 result.stop_detail = (
-                    f"baseline whole-app min_precise_digits={vr.curr_min:.4f} "
-                    f"< gate={gate}; no candidate can satisfy p100>=gate when the "
-                    f"unpatched tree already fails it")
+                    f"baseline whole-app min_precise_digits={vr.curr_min!r} is "
+                    f"unscoreable (crash / NaN / no min); the regression-relative "
+                    f"gate has no reference to compare candidates against")
                 emit(CandidateOutcome(
                     candidate=cand, outcome=STOPPED_GATE_UNIMPLEMENTABLE,
                     min_before=vr.curr_min, min_after=vr.cand_min,
@@ -188,24 +228,29 @@ def solve(queue: list[Candidate], *,
                     wall_sec=ar.wall_sec + vr.wall_sec))
                 break
 
+        threshold = result.accept_threshold   # baseline_min - margin (fixed for the run)
         min_before = accumulated_min
-        if vr.cand_min >= gate:
+        if _scoreable(vr.cand_min) and vr.cand_min >= threshold:
             resolved.add(cand.region_id)
             result.region_final[cand.region_id] = cand.rung
             accumulated_min = vr.cand_min
             emit(CandidateOutcome(
                 candidate=cand, outcome=ACCEPTED,
                 min_before=min_before, min_after=vr.cand_min,
-                reason="p100 >= gate", candidate_sha=ar.candidate_sha,
+                reason=f"p100 {vr.cand_min:.4f} >= baseline {result.baseline_min:.4f} "
+                       f"- margin {margin} = {threshold:.4f}",
+                candidate_sha=ar.candidate_sha,
                 patcher_status=ar.patcher_status, validator_verdict=vr.verdict,
                 combined_min_after=vr.combined_cand_min,
                 wall_sec=ar.wall_sec + vr.wall_sec))
         else:
             revert_fn(parent)  # drop this one patch; HEAD stays at `parent`
+            shown = f"{vr.cand_min:.4f}" if _scoreable(vr.cand_min) else repr(vr.cand_min)
             emit(CandidateOutcome(
                 candidate=cand, outcome=REJECTED,
                 min_before=min_before, min_after=vr.cand_min,
-                reason=f"p100 {vr.cand_min:.4f} < gate {gate}",
+                reason=f"p100 {shown} < baseline {result.baseline_min:.4f} "
+                       f"- margin {margin} = {threshold:.4f}",
                 candidate_sha=ar.candidate_sha, patcher_status=ar.patcher_status,
                 validator_verdict=vr.verdict,
                 combined_min_after=vr.combined_cand_min,
@@ -214,6 +259,15 @@ def solve(queue: list[Candidate], *,
     result.final_head = head_fn()
     result.final_min = accumulated_min if accumulated_min is not None else result.baseline_min
     return result
+
+
+def _scoreable(x: Optional[float]) -> bool:
+    """True iff ``x`` is a usable min_precise_digits (not None / NaN / inf).
+
+    A candidate or baseline whose whole-app p100 came back ``None`` (validator
+    could not score) or non-finite (NaN/inf from a crash) carries no comparable
+    number for the regression-relative gate."""
+    return x is not None and isinstance(x, (int, float)) and math.isfinite(x)
 
 
 def _error_reason(ar: ApplyResult) -> str:

@@ -3,17 +3,23 @@
 A tiny in-memory harness stands in for git + Patcher + Validator: the fake tree
 tracks HEAD as a commit counter, ``apply_fn`` "commits" a new sha, ``revert_fn``
 resets HEAD, and ``validate_fn`` returns a scripted p100 per (region_id, rung).
+
+Gate semantics (Stage-2 prep): **regression-relative** — a candidate is accepted
+iff ``cand_min >= baseline_min - margin`` where ``baseline_min`` is the unpatched
+whole-app p100 measured once at solve start and ``margin`` defaults to 0.5.
 """
 
 import pytest
 
 from agents.solver.queue import Candidate
 from agents.solver.solver import (
-    ACCEPTED, APPLY_FAILED, REJECTED, SKIPPED_RESOLVED,
+    ACCEPTED, APPLY_FAILED, DEFAULT_MARGIN, REJECTED, SKIPPED_RESOLVED,
     STOPPED_GATE_UNIMPLEMENTABLE, ApplyResult, ValidateResult, solve,
 )
 
 BASELINE = 8.84   # qcdloop-like vanilla whole-app p100
+MARGIN = DEFAULT_MARGIN            # 0.5
+THRESHOLD = BASELINE - MARGIN      # 8.34 — the accept bar at the default baseline
 
 
 def _cand(region_id, rung, de=1e-7, bde=1e-13):
@@ -28,7 +34,7 @@ class FakeHarness:
     def __init__(self, cand_min_by_key, *, baseline=BASELINE, fail_keys=()):
         # cand_min_by_key: {(region_id, rung): p100_of_accumulated_tree_with_it}
         self.cand_min = cand_min_by_key
-        self.baseline = baseline
+        self.baseline = baseline          # curr_min the validator reports (None => unscoreable)
         self.fail_keys = set(fail_keys)
         self._head = "sha0"
         self._n = 0
@@ -53,7 +59,7 @@ class FakeHarness:
     def validate(self, candidate_sha, gate_binary, gate_tree_hash):
         # find which candidate produced candidate_sha (last applied)
         key = self.applied[-1]
-        cm = self.cand_min[key]
+        cm = self.cand_min.get(key)
         return ValidateResult(cand_min=cm, curr_min=self.baseline,
                               combined_cand_min=cm, verdict="?", verdict_reason="?")
 
@@ -61,39 +67,41 @@ class FakeHarness:
         self.reverted.append(parent)
         self._head = parent
 
-    def run(self, queue, gate=6.0):
+    def run(self, queue, margin=MARGIN):
         return solve(queue, apply_fn=self.apply, validate_fn=self.validate,
-                     revert_fn=self.revert, head_fn=self.head, gate=gate)
+                     revert_fn=self.revert, head_fn=self.head, margin=margin)
 
 
 # --- accept layering ----------------------------------------------------------
 def test_accept_keeps_commit_and_advances_head():
     q = [_cand("A.h:10", "float")]
-    h = FakeHarness({("A.h:10", "float"): 7.5})
+    h = FakeHarness({("A.h:10", "float"): 8.5})    # >= threshold 8.34
     res = h.run(q)
     assert res.accepted and res.accepted[0].candidate.region_id == "A.h:10"
     assert res.final_head == "sha1"          # kept
     assert h.reverted == []                  # nothing reverted
     assert res.region_final["A.h:10"] == "float"
-    assert res.final_min == 7.5
+    assert res.final_min == 8.5
+    assert res.baseline_min == pytest.approx(BASELINE)
+    assert res.accept_threshold == pytest.approx(THRESHOLD)
 
 
 def test_two_independent_accepts_layer_sequentially():
     q = [_cand("A.h:10", "float"), _cand("B.h:20", "float")]
-    h = FakeHarness({("A.h:10", "float"): 7.5, ("B.h:20", "float"): 7.0})
+    h = FakeHarness({("A.h:10", "float"): 8.5, ("B.h:20", "float"): 8.4})
     res = h.run(q)
     assert [o.outcome for o in res.outcomes] == [ACCEPTED, ACCEPTED]
     # min_before threads: first sees baseline, second sees first's accumulated min
     assert res.outcomes[0].min_before == pytest.approx(BASELINE)
-    assert res.outcomes[1].min_before == pytest.approx(7.5)
-    assert res.final_min == 7.0
+    assert res.outcomes[1].min_before == pytest.approx(8.5)
+    assert res.final_min == 8.4
     assert res.precision_distribution()["float"] == 2
 
 
 # --- reject revert ------------------------------------------------------------
 def test_reject_reverts_and_leaves_region_unresolved():
     q = [_cand("A.h:10", "float")]
-    h = FakeHarness({("A.h:10", "float"): 5.0})   # below gate 6.0
+    h = FakeHarness({("A.h:10", "float"): 7.0})   # below threshold 8.34
     res = h.run(q)
     assert res.rejected and not res.accepted
     assert h.reverted == ["sha0"]                 # reset to parent
@@ -103,9 +111,9 @@ def test_reject_reverts_and_leaves_region_unresolved():
 
 
 def test_float_reject_then_ff_accept_same_region():
-    # float fails the gate, ff (next rung) holds -> region lands at ff
+    # float regresses below threshold, ff (next rung) holds -> region lands at ff
     q = [_cand("A.h:10", "float"), _cand("A.h:10", "ff")]
-    h = FakeHarness({("A.h:10", "float"): 5.0, ("A.h:10", "ff"): 7.2})
+    h = FakeHarness({("A.h:10", "float"): 7.0, ("A.h:10", "ff"): 8.5})
     res = h.run(q)
     assert [o.outcome for o in res.outcomes] == [REJECTED, ACCEPTED]
     assert res.region_final["A.h:10"] == "ff"
@@ -116,32 +124,60 @@ def test_float_reject_then_ff_accept_same_region():
 def test_cheaper_rung_accept_skips_remaining_rungs_of_region():
     # float holds -> ff for the same region must be skipped, never applied
     q = [_cand("A.h:10", "float"), _cand("A.h:10", "ff")]
-    h = FakeHarness({("A.h:10", "float"): 7.5, ("A.h:10", "ff"): 8.0})
+    h = FakeHarness({("A.h:10", "float"): 8.5, ("A.h:10", "ff"): 8.6})
     res = h.run(q)
     assert [o.outcome for o in res.outcomes] == [ACCEPTED, SKIPPED_RESOLVED]
     assert ("A.h:10", "ff") not in h.applied      # never built
     assert res.region_final["A.h:10"] == "float"
 
 
-# --- gate boundary ------------------------------------------------------------
-def test_gate_is_inclusive_at_exactly_six():
+# --- gate boundary (regression-relative) --------------------------------------
+def test_gate_is_inclusive_at_exactly_the_threshold():
     q = [_cand("A.h:10", "float")]
-    h = FakeHarness({("A.h:10", "float"): 6.0})   # exactly the gate
-    res = h.run(q, gate=6.0)
+    h = FakeHarness({("A.h:10", "float"): THRESHOLD})   # exactly baseline - margin
+    res = h.run(q)
     assert res.accepted
 
 
-def test_gate_rejects_just_below_six():
+def test_gate_rejects_just_below_the_threshold():
     q = [_cand("A.h:10", "float")]
-    h = FakeHarness({("A.h:10", "float"): 5.9999})
-    res = h.run(q, gate=6.0)
+    h = FakeHarness({("A.h:10", "float"): THRESHOLD - 1e-4})
+    res = h.run(q)
+    assert res.rejected
+
+
+def test_margin_widens_the_accept_bar():
+    # A candidate 1 digit below baseline is rejected at margin 0.5 but accepted at 1.5.
+    q = [_cand("A.h:10", "float")]
+    below = BASELINE - 1.0
+    assert FakeHarness({("A.h:10", "float"): below}).run(q, margin=0.5).rejected
+    assert FakeHarness({("A.h:10", "float"): below}).run(q, margin=1.5).accepted
+
+
+# --- low-but-defined baseline is NOT a stop (the whole point) ------------------
+def test_low_baseline_does_not_stop_and_admits_harmless_candidate():
+    # B12-like: baseline 3.69 (a physics cancellation floor, well below any absolute
+    # 6.0).  Regression-relative admits a candidate that leaves the floor untouched.
+    q = [_cand("A.h:10", "float")]
+    h = FakeHarness({("A.h:10", "float"): 3.69}, baseline=3.69)
+    res = h.run(q)
+    assert res.stopped is None
+    assert res.accepted                      # 3.69 >= 3.69 - 0.5
+    assert res.baseline_min == pytest.approx(3.69)
+
+
+def test_low_baseline_still_rejects_a_worsening_candidate():
+    q = [_cand("A.h:10", "float")]
+    h = FakeHarness({("A.h:10", "float"): 2.5}, baseline=3.69)  # 2.5 < 3.19
+    res = h.run(q)
+    assert res.stopped is None
     assert res.rejected
 
 
 # --- apply failure ------------------------------------------------------------
 def test_apply_failure_is_recorded_not_reverted_by_solver():
     q = [_cand("A.h:10", "float"), _cand("B.h:20", "float")]
-    h = FakeHarness({("B.h:20", "float"): 7.0},
+    h = FakeHarness({("B.h:20", "float"): 8.5},
                     fail_keys={("A.h:10", "float")})
     res = h.run(q)
     assert res.outcomes[0].outcome == APPLY_FAILED
@@ -151,16 +187,24 @@ def test_apply_failure_is_recorded_not_reverted_by_solver():
     assert res.region_final["A.h:10"] == "double"
 
 
-# --- structural-unimplementable stop -----------------------------------------
-def test_baseline_below_gate_stops_and_flags():
+# --- structural-unimplementable stop (unscoreable baseline) -------------------
+def test_unscoreable_baseline_stops_and_flags():
     q = [_cand("A.h:10", "float"), _cand("B.h:20", "float")]
-    h = FakeHarness({("A.h:10", "float"): 3.0}, baseline=3.5)  # baseline < gate 6
-    res = h.run(q, gate=6.0)
+    # baseline (curr_min) comes back None => nothing to gate against
+    h = FakeHarness({("A.h:10", "float"): 3.0}, baseline=None)
+    res = h.run(q)
     assert res.stopped == STOPPED_GATE_UNIMPLEMENTABLE
     assert res.outcomes[-1].outcome == STOPPED_GATE_UNIMPLEMENTABLE
     assert h.reverted == ["sha0"]                  # first candidate rolled back
     assert len(res.outcomes) == 1                  # walk halted, B.h:20 untried
     assert ("B.h:20", "float") not in h.applied
+
+
+def test_nan_baseline_stops_and_flags():
+    q = [_cand("A.h:10", "float")]
+    h = FakeHarness({("A.h:10", "float"): 3.0}, baseline=float("nan"))
+    res = h.run(q)
+    assert res.stopped == STOPPED_GATE_UNIMPLEMENTABLE
 
 
 # --- empty queue --------------------------------------------------------------
@@ -169,13 +213,14 @@ def test_empty_queue_no_builds():
     res = h.run([])
     assert res.outcomes == []
     assert res.baseline_min is None
+    assert res.accept_threshold is None
     assert h.applied == []
 
 
 def test_all_regions_seeded_at_double():
     q = [_cand("A.h:10", "float")]
-    h = FakeHarness({("A.h:10", "float"): 7.0})
+    h = FakeHarness({("A.h:10", "float"): 8.5})
     res = solve(q, apply_fn=h.apply, validate_fn=h.validate, revert_fn=h.revert,
-                head_fn=h.head, gate=6.0, all_region_ids={"A.h:10", "C.h:99"})
+                head_fn=h.head, margin=MARGIN, all_region_ids={"A.h:10", "C.h:99"})
     assert res.region_final["C.h:99"] == "double"   # region with no candidate
     assert res.region_final["A.h:10"] == "float"

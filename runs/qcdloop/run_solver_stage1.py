@@ -1,14 +1,16 @@
 #!/usr/bin/env python3
-"""Phase 2e Stage 1 — greedy mixed-precision solver on a SINGLE integral (B12).
+"""Phase 2e — greedy mixed-precision solver on a SINGLE integral.
 
 Consumes the per-integral fan-out's assembled scorer manifest
 (``manifest_scorer_<I>.jsonl``), ranks its measured DISCRIM ``(region, rung)``
 cells float<ff<dd, and greedily layers each onto an accumulated source tree — build
-+ whole-app validate + accept/revert — under a p100 >= 6.0 precise-digits gate
-(``agents.solver``).  The accumulated tree at the end is the optimized source.
++ whole-app validate + accept/revert — under the **regression-relative gate**
+(accept iff candidate p100 >= baseline p100 - margin, margin=0.5; ``agents.solver``).
+The accumulated tree at the end is the optimized source.
 
-STOP: Stage 1 is B12-only by design (PLAN 2e §Scope).  Do NOT point this at all 21
-integrals — that is Stage 2, gated on Reet reviewing Stage 1 output.
+Single-integral driver: Stage 1 used it on B12; the log_near_root probe and each
+Stage-2 pass reuse it per integral (Stage 2 fans it across all 21 via
+``run_solver_stage2.py`` --workers).
 
 Run under the venv + module env with the proxy up, detached so it survives:
     tmux new-session -d -s solver1 \
@@ -52,7 +54,15 @@ from agents.validator.agent import make_validator_fn                  # noqa: E4
 from runs.qcdloop.run_strategy_e2e import _build_headers_repo, _git   # noqa: E402
 
 APP_CMAKE_DIR = HERE / "app"
-GATE = 6.0  # LOCKED (Reet 2026-07-24): p100 >= 6 precise decimal digits.
+# Regression-relative gate margin (Reet 2026-07-24, Stage-2 prep): accept iff
+# candidate p100 >= baseline p100 - MARGIN.  Reuses the Validator's regression-guard
+# figure (agents.validator.validate.DEFAULT_MAX_REGRESSION).
+MARGIN = 0.5
+# Validator's own absolute-floor tolerance: irrelevant to the solver's accept
+# decision (the solver reads min_precise_digits and applies the regression-relative
+# gate itself), but validate() still needs a tolerance for its own reporting.  Kept
+# at the measurement tolerance so cached scorings line up.
+VALIDATE_TOLERANCE = 10.0
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -70,17 +80,18 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--sample-count", type=int, default=5000)
     ap.add_argument("--seed", type=int, default=12345)
     ap.add_argument("--entry-point", default="BO")
-    ap.add_argument("--gate", type=float, default=GATE)
+    ap.add_argument("--margin", type=float, default=MARGIN,
+                    help="Regression-relative accept margin in digits (default 0.5).")
+    ap.add_argument("--tolerance", type=float, default=VALIDATE_TOLERANCE,
+                    help="Validator absolute-floor tolerance (reporting only; the "
+                         "solver gate is regression-relative and ignores it).")
     ap.add_argument("--clean", action="store_true")
     args = ap.parse_args(argv)
 
     integral = args.integral
-    if integral != "B12":
-        print(f"[solver] WARNING Stage 1 is B12-only by design; got {integral!r}. "
-              f"Proceeding, but this is outside the reviewed scope.", file=sys.stderr)
-    if args.gate != GATE:
-        print(f"[solver] gate overridden to {args.gate} (locked default {GATE}).",
-              file=sys.stderr)
+    if args.margin != MARGIN:
+        print(f"[solver] regression margin overridden to {args.margin} "
+              f"(default {MARGIN}).", file=sys.stderr)
 
     out_dir = Path(args.out_dir).resolve()
     if args.clean and out_dir.exists():
@@ -126,7 +137,9 @@ def main(argv: list[str] | None = None) -> int:
     print(f"  manifest      : {manifest}", flush=True)
     print(f"  tree          : {tree}", flush=True)
     print(f"  starting_sha  : {starting_sha}", flush=True)
-    print(f"  gate          : p100 >= {args.gate} precise digits", flush=True)
+    print(f"  gate          : regression-relative, margin {args.margin} digits "
+          f"vs baseline (validate tolerance {args.tolerance}, reporting-only)",
+          flush=True)
     print(f"  queue         : {len(qb.queue)} DISCRIM candidates "
           f"({len(qb.inert)} inert excluded, {len(qb.non_measured)} non-measured)",
           flush=True)
@@ -143,8 +156,10 @@ def main(argv: list[str] | None = None) -> int:
     run_dir.mkdir(parents=True, exist_ok=True)
 
     clear_graph_cache()
+    from agents.patcher.fanout import signal_class_map          # noqa: E402
     fanout = FanoutSettings(entry_point=args.entry_point, integral=integral,
-                            app_source_roots=[str(HERE / "src")])
+                            app_source_roots=[str(HERE / "src")],
+                            signal_class_by_region=signal_class_map(report_regions))
     build_config = {"app_cmake_dir": str(APP_CMAKE_DIR),
                     "kokkos_root": args.kokkos_root}
     patcher_fn = make_patcher_fn(build_config=build_config,
@@ -157,7 +172,7 @@ def main(argv: list[str] | None = None) -> int:
         "tail_samples": _tail.load_tail_samples(filtered),
     }
     validator_fn = make_validator_fn(
-        base_state, starting_sha, str(tree), tolerance=args.gate,
+        base_state, starting_sha, str(tree), tolerance=args.tolerance,
         baseline_spec=_scorer.qcdloop_baseline_spec())
 
     repo = GitRepo(tree)
@@ -189,7 +204,7 @@ def main(argv: list[str] | None = None) -> int:
 
     def validate_fn(candidate_sha, gate_binary, gate_tree_hash):
         ctx = {"run_id": run_id, "branch": branch, "repo_path": str(tree),
-               "tolerance": args.gate, "snapshot": snapshot,
+               "tolerance": args.tolerance, "snapshot": snapshot,
                "iter_id": _iter["i"], "gate_binary": gate_binary,
                "gate_tree_hash": gate_tree_hash}
         t0 = time.monotonic()
@@ -216,7 +231,7 @@ def main(argv: list[str] | None = None) -> int:
 
     t_solve = time.monotonic()
     res = solve(qb.queue, apply_fn=apply_fn, validate_fn=validate_fn,
-                revert_fn=revert_fn, head_fn=head_fn, gate=args.gate,
+                revert_fn=revert_fn, head_fn=head_fn, margin=args.margin,
                 all_region_ids=all_region_ids, on_event=on_event)
     solve_wall = round(time.monotonic() - t_solve, 1)
 
@@ -230,7 +245,7 @@ def main(argv: list[str] | None = None) -> int:
     md_path = out_dir / f"SOLVER_STAGE1_{integral}.md"
     write_report(md_path, res, qb, integral=integral, tree_path=str(tree),
                  diff_path=str(diff_path), manifest_path=str(manifest),
-                 report_regions=report_regions, gate=args.gate,
+                 report_regions=report_regions, margin=args.margin,
                  solve_wall_sec=solve_wall, snapshot=snapshot,
                  per_integral_floor=per_integral_floor,
                  baseline_hotspot=_diag["baseline_hotspot"])
@@ -284,7 +299,8 @@ def _per_integral_floor(seed: int, sample_count: int) -> dict | None:
 def _write_result_json(path, res, qb, integral, tree, diff, wall, starting_sha,
                        args) -> None:
     payload = {
-        "integral": integral, "gate": args.gate, "starting_sha": starting_sha,
+        "integral": integral, "margin": args.margin,
+        "tolerance": args.tolerance, "starting_sha": starting_sha,
         "tree_path": tree, "diff_path": diff, "final_head": res.final_head,
         "baseline_min_precise_digits": res.baseline_min,
         "final_min_precise_digits": res.final_min,

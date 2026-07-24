@@ -90,6 +90,12 @@ _PATCHER_STATUS_TO_CELL_STATUS = {
     # numerically inert).  A codegen/precision gap, not a measurement → patcher_failed;
     # the finer ``write_truncation`` label survives in the manifest failure_modes.
     "write_truncation": STATUS_PATCHER_FAILED,
+    # Phase 2e signal_class filter: a precision rung declined on a cancellation-cascade /
+    # local-cancellation region (structurally inert; awaiting a Kahan/identity rewrite).
+    # Folds to patcher_failed so the solver excludes it from the queue exactly like the
+    # other terminal gates; the finer ``awaiting_algorithmic_rewrite`` label survives in
+    # the manifest failure_modes histogram (the Kahan/identity plumbing backlog).
+    "awaiting_algorithmic_rewrite": STATUS_PATCHER_FAILED,
     "timeout": STATUS_PATCHER_FAILED,
     "build_failed": STATUS_BUILD_FAILED,
     "call_graph_build_failed": STATUS_BUILD_FAILED,

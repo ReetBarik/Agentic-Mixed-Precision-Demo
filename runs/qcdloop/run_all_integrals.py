@@ -99,8 +99,14 @@ def _run_one(task: dict) -> dict:
         # integral entry point and built once per pass against the cloned tree.
         fanout = None
         if task.get("fanout"):
-            from agents.patcher.fanout import FanoutSettings, clear_graph_cache
+            from agents.patcher.fanout import (FanoutSettings, clear_graph_cache,
+                                               signal_class_map)
             clear_graph_cache()          # fresh graph per pass (per-process reuse only)
+            # Phase 2e signal_class filter: map region_id -> signal_class from the
+            # filtered report so the Patcher skips precision rungs (no LLM/build) on
+            # cancellation-cascade / local-cancellation regions.
+            _regions = (json.loads(Path(filtered_report).read_text())
+                        .get("integrals", {}).get(integral, {}).get("regions", {}))
             fanout = FanoutSettings(
                 entry_point=task["entry_point"], integral=integral,
                 max_paths=task.get("fanout_max_paths", 1024),
@@ -108,7 +114,8 @@ def _run_one(task: dict) -> dict:
                 # (run_app<Kokkos::complex<double>, double, double, ...>) that binds
                 # TOutput→complex / TMass,TScale→double, so the boundary transform can
                 # promote complex operands to the extended complex container.
-                app_source_roots=[str(HERE / "src")])
+                app_source_roots=[str(HERE / "src")],
+                signal_class_by_region=signal_class_map(_regions))
         patcher_fn = make_patcher_fn(build_config=build_config,
                                      config=PipelineConfig(), fanout=fanout)
         tail_samples = _tail.load_tail_samples(filtered_report)

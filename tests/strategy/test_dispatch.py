@@ -11,7 +11,7 @@ def test_all_statuses_present():
         "ok", "build_failed", "runtime_nan", "runtime_crashed",
         "llm_gen_failed", "patch_apply_failed", "timeout", "commit_failed",
         "empty_candidate", "patch_inapplicable", "promotion_no_op",
-        "write_truncation",
+        "write_truncation", "awaiting_algorithmic_rewrite",
     }
 
 
@@ -84,6 +84,18 @@ def test_write_truncation_is_terminal_and_free():
     assert e.log_tag == "write_truncation"
     assert e.counts_budget is False
     assert e.is_reject is True
+
+
+def test_awaiting_algorithmic_rewrite_is_terminal_and_free():
+    # Phase 2e: a precision rung declined on a cancellation region is deterministic and
+    # rung-independent (no wider type helps) — terminal for the intent, git-only so free
+    # vs budget, a real reject, and dd_untested (skipped, not measured, at the dd rung).
+    e = dispatch("awaiting_algorithmic_rewrite")
+    assert e.action == "advance_terminal"
+    assert e.log_tag == "awaiting_algorithmic_rewrite"
+    assert e.counts_budget is False
+    assert e.is_reject is True
+    assert e.dd_untested is True
 
 
 def test_patch_apply_failed_is_strategy_bug_and_free():

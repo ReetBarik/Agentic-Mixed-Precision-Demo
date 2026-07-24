@@ -38,6 +38,9 @@ _FANOUT_FAILURE_PREFIXES = (
     # Phase 2d-B: an upcast that retyped the body but truncates every landing back to
     # caller precision (numerically inert; no wider persistent sink).
     "write_truncation",
+    # Phase 2e: a precision rung declined on a cancellation-cascade / local-cancellation
+    # region (signal_class filter; structurally inert, awaiting an algorithmic rewrite).
+    "awaiting_algorithmic_rewrite",
 )
 
 

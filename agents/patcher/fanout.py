@@ -32,6 +32,34 @@ body.  This still fixes Blocker #1 — the promoted arithmetic is genuinely comp
 but produces no new symbol, so the symbol-presence gate has nothing extra to assert
 for those lines.
 
+signal_class filter — skip precision rungs on cancellation regions (Phase 2e)
+----------------------------------------------------------------------------
+Some regions cannot be rescued by *any* precision rung: a
+``cancellation_cascade`` (chained near-equal subtractions) or a
+``local_cancellation`` (``|a-b|→0``) loses its leading digits to catastrophic
+cancellation, and widening the intermediates (float→ff→dd) does not restore them —
+the loss is algorithmic, not representational.  Enumerating float/ff/dd on such a
+region wastes one LLM shim generation + one build per rung, only to come back
+measured-INERT.
+
+The Patcher therefore consults each region's characterizer ``signal_class``
+(supplied per pass via :attr:`FanoutSettings.signal_class_by_region`, keyed by the
+region's ``file:line`` location) BEFORE any generation.  When the region is a
+cascade / local-cancellation class and the intent is a *precision transition*
+(:data:`agents.strategy.models.TRANSITION_KINDS` — not a reformulate kind), the
+dispatch short-circuits to the terminal ``awaiting_algorithmic_rewrite`` status
+(see :mod:`agents.patcher.dispatch`) — no LLM call, no build.  The correctness
+walk's ``double→dd`` attempt is the only precision rung it enumerates for these
+regions, so the short-circuit yields exactly one such cell per region (the walk
+then settles as ``dd_untested`` and stops).
+
+This is only the *filter* (skip cleanly).  The actual fix — firing the algorithmic
+rewrites — is a separate, larger phase: Strategy already models the rewrite
+catalog in :func:`agents.strategy.walk._rewrites_for` (``reformulate-kahan`` for
+cascade, the identity catalog for local cancellation), but those intents are not
+yet plumbed into the fan-out.  Wiring them there is the follow-up this status
+flags as the backlog.
+
 Statelessness across intents
 ----------------------------
 Strategy drives the Patcher one intent at a time, committing between intents; the
@@ -70,6 +98,47 @@ class FanoutError(RuntimeError):
     unreachable from the entry point, or a variant-name collision)."""
 
 
+# Signal classes whose regions cannot be rescued by any precision rung — the loss is
+# algorithmic (chained/near-equal cancellation), so widening intermediates is inert.
+# Kept as a local set (avoids a dispatch→strategy import for one enum) but mirrors
+# agents.strategy.models.SIGNAL_CANCELLATION_CASCADE / SIGNAL_LOCAL_CANCELLATION.
+_ALGORITHMIC_REWRITE_SIGNAL_CLASSES = frozenset({
+    "cancellation_cascade", "local_cancellation",
+})
+
+
+def awaits_algorithmic_rewrite(signal_class: str | None) -> bool:
+    """True iff ``signal_class`` marks a region a precision rung cannot fix.
+
+    Such a region is skipped by the fan-out (no rung enumeration, no build/LLM) and
+    flagged ``awaiting_algorithmic_rewrite`` — it needs a Kahan/identity reformulate,
+    not a wider type.  See the module docstring's *signal_class filter* section."""
+    return signal_class in _ALGORITHMIC_REWRITE_SIGNAL_CLASSES
+
+
+def signal_class_map(regions) -> dict[str, str]:
+    """``{region_id: signal_class}`` from a characterization report's region records.
+
+    ``regions`` is the report's per-integral ``regions`` mapping (``{region_id ->
+    record}``, region_id already a ``file:line`` / ``file:start-end`` string that
+    matches ``RegionTarget.location``).  Empty keys and records without a
+    ``signal_class`` are dropped.  Handed to :attr:`FanoutSettings.signal_class_by_region`
+    so the Patcher can consult a region's class without threading it through every
+    intent."""
+    out: dict[str, str] = {}
+    if isinstance(regions, dict):
+        items = regions.items()
+    else:  # tolerate a list of records that carry their own id
+        items = ((r.get("region_id") or r.get("location"), r) for r in (regions or []))
+    for rid, rec in items:
+        if not rid or not isinstance(rec, dict):
+            continue
+        sc = rec.get("signal_class")
+        if sc:
+            out[rid] = sc
+    return out
+
+
 @dataclass
 class FanoutSettings:
     """Per-pass fan-out configuration injected into the Patcher.
@@ -93,6 +162,12 @@ class FanoutSettings:
     # vs real scalars (agents.shared.type_resolve).  Empty → complex-container
     # promotion is disabled and the transform degrades to the pre-2d scalar-only path.
     app_source_roots: list[str] = field(default_factory=list)
+    # Phase 2e signal_class filter: {region_id -> signal_class} from the report (built
+    # via signal_class_map).  A precision-rung intent on a cascade / local-cancellation
+    # region is short-circuited to awaiting_algorithmic_rewrite (no LLM, no build).
+    # Empty → the filter is inert (fail-open; pre-2e behavior for passes that don't
+    # supply the map).
+    signal_class_by_region: dict = field(default_factory=dict)
 
 
 # One call graph per (tree, entry point) — built once and reused for the pass's

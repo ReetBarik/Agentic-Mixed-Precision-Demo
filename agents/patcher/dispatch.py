@@ -25,7 +25,7 @@ from typing import Callable
 from agents.integrator_base import boundary
 from agents.integrator_base.region import RegionIntegrationResult
 from agents.patcher import edits, gitops, result as R, rewrites
-from agents.strategy.models import VIA_REGIONAL, RemediationIntent
+from agents.strategy.models import TRANSITION_KINDS, VIA_REGIONAL, RemediationIntent
 
 # ---- dispatch-path tags ----
 PATH_REGIONAL = "regional"
@@ -110,6 +110,16 @@ class PatchDeps:
 def generate(intent: RemediationIntent, deps: PatchDeps, attempt: int,
              path: str) -> Gen:
     """Run the generator for ``path``, mutating the (clean) working tree."""
+    # Phase 2e signal_class filter: a precision-rung intent on a cancellation-cascade
+    # / local-cancellation region is structurally inert (a wider type cannot restore
+    # catastrophically cancelled digits).  Short-circuit BEFORE any LLM/build to the
+    # terminal awaiting_algorithmic_rewrite status — no shim generation, no compile.
+    # Reformulate kinds are exempt (they ARE the algorithmic fix), as is any pass that
+    # supplies no signal_class map (fail-open).  See fanout.py's module docstring.
+    awaiting = _awaiting_rewrite(intent, deps)
+    if awaiting is not None:
+        return awaiting
+
     if path == PATH_REGIONAL:
         # Phase 2a: a regional intent in a fan-out-enabled pass is realized as
         # per-caller-path function variants instead of a type-specialization shim
@@ -126,6 +136,32 @@ def generate(intent: RemediationIntent, deps: PatchDeps, attempt: int,
     if path == PATH_LLM_REWRITE:
         return _gen_rewrite(intent, deps, attempt)
     raise ValueError(f"unknown dispatch path {path!r}")
+
+
+def _awaiting_rewrite(intent: RemediationIntent, deps: PatchDeps) -> Gen | None:
+    """Terminal ``awaiting_algorithmic_rewrite`` Gen, or None if the filter is inert.
+
+    Fires only for a *precision transition* (``TRANSITION_KINDS``; reformulate kinds
+    are the fix, not the target) on a region the report classes
+    ``cancellation_cascade`` / ``local_cancellation``, when the pass supplied a
+    ``signal_class_by_region`` map (via ``FanoutSettings``).  No LLM, no build."""
+    from agents.patcher import fanout as fo
+    if intent.kind not in TRANSITION_KINDS:
+        return None
+    fanout = getattr(deps, "fanout", None)
+    sc_map = getattr(fanout, "signal_class_by_region", None) if fanout else None
+    if not sc_map:
+        return None
+    signal_class = sc_map.get(intent.target.location)
+    if not fo.awaits_algorithmic_rewrite(signal_class):
+        return None
+    return Gen(False, R.AWAITING_ALGORITHMIC_REWRITE, R.ERR_AWAITING_REWRITE,
+               f"awaiting_algorithmic_rewrite: region {intent.target.location} "
+               f"signal_class={signal_class}; precision rungs are structurally inert "
+               f"(wider intermediates cannot rescue chained/near-equal cancellation); "
+               f"awaiting an algorithmic rewrite catalog entry (Strategy models "
+               f"reformulate-kahan / reformulate-identity via "
+               f"agents/strategy/walk.py::_rewrites_for; not yet wired into the fan-out)")
 
 
 # ---------------------------------------------------------------------------

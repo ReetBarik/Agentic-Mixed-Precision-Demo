@@ -85,13 +85,20 @@ _DEFAULT_KOKKOS = Path.home() / "kokkos-install"
 _VALIDATOR_ROOT = _REPO / "runs" / "qcdloop" / "validator"
 _CACHE_DIR = _VALIDATOR_ROOT / "cache"
 
+# The regression-guard margin: a candidate may lose at most this many digits of
+# global-min vs the baseline before it is rejected as a regression.  Exposed as a
+# named constant (default for ``validate``'s ``max_regression``) so downstream
+# consumers that apply the same regression-relative rule — e.g. the Phase-2e solver
+# gate — reuse the one figure instead of re-inventing it.
+DEFAULT_MAX_REGRESSION = 0.5
+
 
 # ---------------------------------------------------------------------------
 # Public API
 # ---------------------------------------------------------------------------
 
 def validate(base_state: dict, candidate_patch: str | None, tolerance: float = 8.0,
-             snapshot: dict | None = None, *, max_regression: float = 0.5,
+             snapshot: dict | None = None, *, max_regression: float = DEFAULT_MAX_REGRESSION,
              chunk: int = 0, workers: int = 1,
              run_id: str | None = None, persist: bool = True,
              reuse_binary: str | None = None,

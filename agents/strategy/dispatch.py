@@ -99,6 +99,17 @@ DISPATCH: dict[str, DispatchEntry] = {
     "write_truncation": DispatchEntry(
         action="advance_terminal", log_tag="write_truncation", counts_budget=False,
         is_reject=True, dd_untested=True),
+    # Phase 2e signal_class filter: a precision rung declined on a cancellation-cascade
+    # / local-cancellation region (wider intermediates are structurally inert; the fix
+    # is an algorithmic rewrite, not a wider type).  Detected at gen time upstream of
+    # any build/LLM, so like promotion_no_op / write_truncation it is terminal for this
+    # intent (deterministic + rung-independent), git-only (doesn't count vs budget), and
+    # a reject that leaves the rung dd_untested — the region was skipped, not measured.
+    # At the dd rung this yields dd_untested, so the correctness walk emits exactly one
+    # such cell per region and then settles (it never reaches the reformulate phase).
+    "awaiting_algorithmic_rewrite": DispatchEntry(
+        action="advance_terminal", log_tag="awaiting_algorithmic_rewrite",
+        counts_budget=False, is_reject=True, dd_untested=True),
 }
 
 
