@@ -396,7 +396,61 @@ def fan_out_region(
     new_specs: dict[str, dict[str, VariantSpec]] = {}
     root_reroutes: dict[str, str] = {}
     name_maps: list[dict[str, str]] = []
+    _accumulate_region_specs(
+        paths=paths, fd=fd, line_start=line_start, line_end=line_end,
+        reads=reads, writes=writes, integral=integral, graph=graph,
+        scalar_type=scalar_type, two_limb=two_limb, shim_include=shim_include,
+        caller_type=caller_type, ckw=ckw,
+        new_specs=new_specs, root_reroutes=root_reroutes, name_maps=name_maps)
+    assert_no_collisions(name_maps)
 
+    # --- apply: merge specs into each file's fan-out block --------------------
+    touched: set[str] = set()
+    declared: list[str] = []
+    for file_key, specs in new_specs.items():
+        _merge_into_file(Path(file_key), specs)
+        touched.add(file_key)
+        declared.extend(specs.keys())
+
+    # --- edit the entry point's body in place (reroute to first-level variant) --
+    root_file = _resolve_root_file(graph)
+    root_fd = _pick_def(graph, graph.root)
+    if _reroute_in_function(Path(root_file), root_fd, root_reroutes):
+        touched.add(root_file)
+
+    return FanoutResult(declared_variants=sorted(set(declared)),
+                        files_touched=sorted(touched), root_edited=True,
+                        paths_enumerated=len(paths), truncated=truncated,
+                        promotion_applied=promotion_applied,
+                        write_truncation=write_truncation, reads_used=list(reads))
+
+
+def _accumulate_region_specs(
+    *, paths, fd, line_start: int, line_end: int, reads, writes, integral: str,
+    graph: CallGraph, scalar_type: str, two_limb: bool, shim_include: str | None,
+    caller_type: str, ckw: dict,
+    new_specs: dict[str, dict[str, "VariantSpec"]],
+    root_reroutes: dict[str, str], name_maps: list[dict[str, str]],
+) -> None:
+    """Accumulate the variant specs + root reroutes for ONE region's caller paths.
+
+    Extracted from :func:`fan_out_region` (behavior-preserving) so the Phase-2f
+    chain coordinator (:mod:`agents.patcher.chain_promote`) can call it once per
+    chain region into SHARED accumulators before a single ``_merge_into_file`` per
+    file.  Because ``variant_names_for_path`` is a pure function of ``(path,
+    integral)``, two regions reaching the same ancestor produce the same variant
+    name, so their :class:`Promote`s / reroutes merge onto one :class:`VariantSpec`
+    via ``setdefault`` — that is what makes multi-region chain promotion coherent.
+
+    ``paths`` are the already-enumerated caller paths for ``fd`` (root-first);
+    ``ckw`` is the complex-container kwargs dict (``complex_type`` / ``complex_tokens``
+    / ``complex_names`` / ``caller_complex``).  Mutates ``new_specs`` /
+    ``root_reroutes`` / ``name_maps`` in place.
+    """
+    complex_type = ckw.get("complex_type")
+    complex_tokens = ckw.get("complex_tokens", [])
+    complex_names = ckw.get("complex_names", [])
+    caller_complex = ckw.get("caller_complex")
     for path in paths:
         names = variant_names_for_path(path, integral)
         name_maps.append(names)
@@ -424,28 +478,6 @@ def fan_out_region(
                     complex_names=list(complex_names), caller_complex=caller_complex))
                 if shim_include and shim_include not in spec.shim_includes:
                     spec.shim_includes.append(shim_include)
-
-    assert_no_collisions(name_maps)
-
-    # --- apply: merge specs into each file's fan-out block --------------------
-    touched: set[str] = set()
-    declared: list[str] = []
-    for file_key, specs in new_specs.items():
-        _merge_into_file(Path(file_key), specs)
-        touched.add(file_key)
-        declared.extend(specs.keys())
-
-    # --- edit the entry point's body in place (reroute to first-level variant) --
-    root_file = _resolve_root_file(graph)
-    root_fd = _pick_def(graph, graph.root)
-    if _reroute_in_function(Path(root_file), root_fd, root_reroutes):
-        touched.add(root_file)
-
-    return FanoutResult(declared_variants=sorted(set(declared)),
-                        files_touched=sorted(touched), root_edited=True,
-                        paths_enumerated=len(paths), truncated=truncated,
-                        promotion_applied=promotion_applied,
-                        write_truncation=write_truncation, reads_used=list(reads))
 
 
 # --------------------------------------------------------------------------- #
