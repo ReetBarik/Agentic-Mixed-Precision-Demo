@@ -840,6 +840,28 @@ def _range_ok_for_float(reg: dict) -> bool:
     return True
 
 
+def chain_range_ok_for_float(chain: dict, classified_regions: dict) -> bool:
+    """A cascade chain is float-range-safe iff *every* contributor line is.
+
+    Cascade-chain records carry no aggregated ``abs_val_min/max`` of their own
+    (``_extract_cascade_chains`` unions source spans, not value ranges), so the
+    WI1 float-range prune had no signal on chains and failed open.  Derive it from
+    the already-classified region records for the chain's contributor lines: the
+    chain spans those lines, so if any one line's measured |val| leaves float's
+    normal range the whole chain is range-unsafe.  A contributor line with no
+    region record defaults to safe (fail-open, matching ``_range_ok_for_float``'s
+    missing-data behavior — an omission never silently *blocks* a float rung).
+    """
+    for span in chain.get("chain", []) or []:
+        f = span.get("file")
+        for ln in range(int(span.get("line_start", 0)),
+                        int(span.get("line_end", 0)) + 1):
+            reg = classified_regions.get(f"{f}:{ln}")
+            if reg is not None and not reg.get("value_range_ok_for_float", True):
+                return False
+    return True
+
+
 def _signal_class(reg: dict, cfg: ReducerConfig) -> tuple[str, str]:
     """Mechanistic classification of the error phenomenon (no acceptance policy).
 
@@ -941,6 +963,11 @@ def finalize_report(merged: dict, cfg: ReducerConfig | None = None) -> dict:
         # region — Strategy's correctness tier 2 consumes these.
         chains = idata.get("cascade_chains", {})
         cascade_chains = [chains[cid] for cid in sorted(chains)]
+        # WI1: stamp the float-range flag on each chain from its contributor
+        # regions (chains carry no abs_val range of their own), so the Strategy
+        # float-rung prune no longer fails open on chain records.
+        for ch in cascade_chains:
+            ch["value_range_ok_for_float"] = chain_range_ok_for_float(ch, regions)
 
         out_integrals[name] = {
             "samples": merged.get("samples_seen", {}).get(name, 0),
