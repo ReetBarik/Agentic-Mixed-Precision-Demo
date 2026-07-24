@@ -400,12 +400,14 @@ def _resolve_headers_dir(repo_root: Path, cfg: dict) -> Path:
 
 
 def _default_integrators() -> dict:
+    from agents.chain_integrator import agent as chain_integrator
     from agents.dd_integrator import agent as dd_integrator
     from agents.ff_integrator import agent as ff_integrator
     from agents.float_integrator import agent as float_integrator
     return {"ff": ff_integrator.integrate_region,
             "dd": dd_integrator.integrate_region,
-            "float": float_integrator.integrate_region}
+            "float": float_integrator.integrate_region,
+            "chain_dd": chain_integrator.integrate_region}
 
 
 def _default_llm_call(config: PipelineConfig | None):

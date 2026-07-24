@@ -144,6 +144,10 @@ class RegionTarget:
 # dispatch path); it defaults to "plain".
 VIA_PLAIN = "plain"
 VIA_REGIONAL = "regional"
+# Phase 2f: a chain-scoped double-double promotion (a whole cancellation-cascade
+# chain widened together).  The intent carries ``chain_lines`` and routes to the
+# Patcher chain path (agents.patcher.chain_promote) via the chain integrator.
+VIA_CHAIN = "chain"
 
 
 @dataclass
@@ -162,6 +166,9 @@ class RemediationIntent:
     rationale_id: str
     identity: str | None = None
     via: str = VIA_PLAIN
+    # Phase 2f: for a chain-scoped promotion (via == VIA_CHAIN), the whole chain's
+    # (file, line_start, line_end) regions.  Empty for every non-chain intent.
+    chain_lines: list = field(default_factory=list)
 
     def __post_init__(self) -> None:
         if self.kind not in ALL_KINDS:
@@ -172,8 +179,10 @@ class RemediationIntent:
             raise ValueError("reformulate-identity requires an `identity`")
         if self.kind != "reformulate-identity" and self.identity is not None:
             raise ValueError(f"identity only valid for reformulate-identity, got {self.kind!r}")
-        if self.via not in (VIA_PLAIN, VIA_REGIONAL):
+        if self.via not in (VIA_PLAIN, VIA_REGIONAL, VIA_CHAIN):
             raise ValueError(f"unknown via {self.via!r}")
+        if self.via == VIA_CHAIN and not self.chain_lines:
+            raise ValueError("via=chain requires chain_lines")
 
     def to_patcher(self) -> dict:
         """The wire form handed to the Patcher callable (P1 shape)."""
@@ -187,4 +196,6 @@ class RemediationIntent:
         }
         if self.identity is not None:
             payload["identity"] = self.identity
+        if self.chain_lines:
+            payload["chain_lines"] = [list(t) for t in self.chain_lines]
         return payload

@@ -25,13 +25,15 @@ from typing import Callable
 from agents.integrator_base import boundary
 from agents.integrator_base.region import RegionIntegrationResult
 from agents.patcher import edits, gitops, result as R, rewrites
-from agents.strategy.models import TRANSITION_KINDS, VIA_REGIONAL, RemediationIntent
+from agents.strategy.models import (
+    TRANSITION_KINDS, VIA_CHAIN, VIA_REGIONAL, RemediationIntent)
 
 # ---- dispatch-path tags ----
 PATH_REGIONAL = "regional"
 PATH_PLAIN_EDIT = "plain_edit"
 PATH_REVERT = "revert"
 PATH_LLM_REWRITE = "llm_rewrite"
+PATH_CHAIN = "chain"           # Phase 2f: coordinated whole-chain dd promotion
 
 _TO_FF = frozenset({"float-to-ff", "double-to-ff"})
 _TO_DD = frozenset({"double-to-dd"})
@@ -45,6 +47,10 @@ _TO_FLOAT = frozenset({"double-to-float", "ff-to-float"})
 
 
 def dispatch_path(kind: str, via: str = "plain") -> str:
+    # Phase 2f: a chain-scoped promotion (via="chain") is realized as a coordinated
+    # whole-chain dd envelope regardless of the (double-to-dd) kind.
+    if via == VIA_CHAIN:
+        return PATH_CHAIN
     # Wave 2: a ``-to-float`` demotion on a template-typed region (via="regional")
     # is realized by generating a float-specialized shim, exactly like ff/dd.
     if via == VIA_REGIONAL and kind in _TO_FLOAT:
@@ -62,7 +68,7 @@ def dispatch_path(kind: str, via: str = "plain") -> str:
 
 def is_llm_driven(path: str) -> bool:
     """LLM-driven paths get the N=3 bounded retry (P4); deterministic ones don't."""
-    return path in (PATH_REGIONAL, PATH_LLM_REWRITE)
+    return path in (PATH_REGIONAL, PATH_LLM_REWRITE, PATH_CHAIN)
 
 
 def is_retryable_misgen(gate) -> bool:
@@ -110,6 +116,12 @@ class PatchDeps:
 def generate(intent: RemediationIntent, deps: PatchDeps, attempt: int,
              path: str) -> Gen:
     """Run the generator for ``path``, mutating the (clean) working tree."""
+    # Phase 2f: the chain path is the coordinated fix FOR cancellation cascades, so it
+    # is exempt from the signal_class awaiting_algorithmic_rewrite filter below (which
+    # skips single-region precision rungs on cascade regions).  Route it first.
+    if path == PATH_CHAIN:
+        return _gen_chain(intent, deps, attempt)
+
     # Phase 2e signal_class filter: a precision-rung intent on a cancellation-cascade
     # / local-cancellation region is structurally inert (a wider type cannot restore
     # catastrophically cancelled digits).  Short-circuit BEFORE any LLM/build to the
@@ -295,10 +307,11 @@ def _precision_cpp(which: str) -> tuple[str, bool, str]:
     truth (no duplication of ``quad::ffun::ffloat`` etc. in the Patcher).  The complex
     spelling (``quad::ffun::ffcomplex`` / ``quad::ddfun::ddcomplex`` /
     ``Kokkos::complex<float>``) drives the Phase-2d complex-container promotion."""
+    from agents.chain_integrator.agent import SPEC as _CH
     from agents.dd_integrator.agent import SPEC as _DD
     from agents.ff_integrator.agent import SPEC as _FF
     from agents.float_integrator.agent import SPEC as _FL
-    spec = {"dd": _DD, "ff": _FF, "float": _FL}[which]
+    spec = {"dd": _DD, "ff": _FF, "float": _FL, "chain_dd": _CH}[which]
     return spec.cpp_scalar, spec.two_limb, spec.cpp_complex
 
 
@@ -424,6 +437,117 @@ def _gen_regional_fanout(intent: RemediationIntent, deps: PatchDeps, attempt: in
                declared_variants=list(fr.declared_variants),
                files_touched=list(fr.files_touched),
                in_place_region=fr.in_place_region)
+
+
+# ---------------------------------------------------------------------------
+# 1c. chain-scoped dd promotion via the coordinated fan-out (Phase 2f)
+# ---------------------------------------------------------------------------
+
+def _gen_chain(intent: RemediationIntent, deps: PatchDeps, attempt: int) -> Gen:
+    """Realize a chain-scoped dd promotion as a coordinated multi-region envelope.
+
+    Generates a ddouble shim for EACH chain region via the chain integrator (all
+    merge into the one ``ql_shim_dd.h``), then hands the whole ``chain_lines`` set to
+    :func:`agents.patcher.chain_promote.chain_promote`, which splices per-integral
+    variants + reroutes the chain-internal calls bottom-up.  The chain-scope 2c/2d
+    gates (empty-whole-chain / outermost-truncation) map to the SAME terminal statuses
+    the single-region fan-out uses.  Requires fan-out settings (entry_point/integral).
+    """
+    from agents.patcher import chain_promote as cp
+    from agents.patcher import fanout as fo
+    from agents.patcher.call_graph import CallGraphError
+    from agents.patcher.variant_naming import VariantNameError
+
+    fanout = getattr(deps, "fanout", None)
+    if fanout is None:
+        return Gen(False, R.LLM_GEN_FAILED, R.ERR_INTEGRATOR,
+                   "chain path requires fan-out settings (entry_point / integral)")
+    # Prefer the chain integrator; fall back to the dd integrator (same ddouble target).
+    integrator = deps.integrators.get("chain_dd") or deps.integrators.get("dd")
+    if integrator is None:
+        return Gen(False, R.LLM_GEN_FAILED, R.ERR_INTEGRATOR,
+                   "no chain_dd/dd integrator wired")
+
+    chain_lines = [tuple(t) for t in (getattr(intent, "chain_lines", None) or [])]
+    if not chain_lines:
+        return Gen(False, R.PATCH_APPLY_FAILED, R.ERR_APPLY,
+                   f"chain intent {intent.rationale_id} carries no chain_lines")
+
+    try:
+        graph = fo.graph_for_pass(fanout, deps.repo_root)
+    except CallGraphError as exc:
+        return Gen(False, R.PATCH_APPLY_FAILED, R.ERR_APPLY,
+                   f"call_graph_build_failed: {exc}")
+
+    scalar_cpp, two_limb, complex_cpp = _precision_cpp("chain_dd")
+    shim_include = "ql_shim_dd.h"                 # regional.canonical_shim_name(dd)
+    app_roots = list(getattr(fanout, "app_source_roots", []) or [])
+
+    # 1. Generate a ddouble shim for each chain region (LLM, retryable); the boundary
+    #    patches are ignored — chain_promote splices the promotion into variant copies.
+    total_tokens = 0
+    all_shims: list[str] = []
+    resolved_lines: list[tuple[str, int, int]] = []
+    for (cfile, cls, cle) in chain_lines:
+        fd = graph.enclosing_function(cfile, cls)
+        if fd is None:
+            return Gen(False, R.PATCH_APPLY_FAILED, R.ERR_APPLY,
+                       f"chain region {cfile}:{cls}-{cle} not inside any known function")
+        try:
+            rel_file = Path(fd.file).resolve().relative_to(
+                deps.repo_root.resolve()).as_posix()
+        except (AttributeError, ValueError):
+            rel_file = cfile
+        resolved_lines.append((rel_file, cls, cle))
+        try:
+            res: RegionIntegrationResult = integrator(
+                file=rel_file, line_start=cls, line_end=cle, variables=[],
+                working_tree=deps.parent_sha, repo_path=str(deps.repo_root),
+                scalar_type="ddouble", caller_type="double", direction="in",
+                out_dir=deps.shims_dir, attempt=attempt)
+        except NotImplementedError as exc:
+            return Gen(False, R.LLM_GEN_FAILED, R.ERR_INTEGRATOR, str(exc))
+        except Exception as exc:  # noqa: BLE001 - integrator crash → retryable gen fail
+            return Gen(False, R.LLM_GEN_FAILED, R.ERR_INTEGRATOR, repr(exc))
+        if res is None or not getattr(res, "ok", False):
+            detail = getattr(res, "error", None) or "integrator returned no result"
+            toks = getattr(res, "llm_tokens", 0) if res else 0
+            return Gen(False, R.LLM_GEN_FAILED, R.ERR_INTEGRATOR,
+                       f"chain region {cfile}:{cls}: {detail}", llm_tokens=total_tokens + toks)
+        total_tokens += res.llm_tokens
+        all_shims.extend(res.shim_paths)
+
+    # 2. Coordinated chain promotion (deterministic variant splice + reroute cascade).
+    manifest = cp.ChainManifest(
+        chain_id=intent.rationale_id or "chain", integral=fanout.integral,
+        entry_point=fanout.entry_point, lines=resolved_lines)
+    try:
+        cr = cp.chain_promote(
+            manifest=manifest, graph=graph, tree_root=str(deps.repo_root),
+            scalar_type=scalar_cpp, two_limb=two_limb, shim_include=shim_include,
+            caller_type="double", complex_type=complex_cpp,
+            max_paths=fanout.max_paths, app_source_roots=app_roots)
+    except VariantNameError as exc:
+        return Gen(False, R.PATCH_APPLY_FAILED, R.ERR_APPLY,
+                   f"variant_name_collision: {exc}")
+    except fo.FanoutError as exc:
+        return Gen(False, R.PATCH_APPLY_FAILED, R.ERR_APPLY, f"chain_fanout_failed: {exc}")
+
+    # 3. Chain-scope 2c / 2d-B gates (envelope, not individual links).
+    if not cr.promotion_applied:
+        return Gen(False, R.PROMOTION_NO_OP, R.ERR_EMPTY,
+                   f"chain promotion_no_op: chain {manifest.chain_id} promotes nothing "
+                   f"across all {len(chain_lines)} regions (empty whole-chain payload)")
+    if cr.write_truncation:
+        return Gen(False, R.WRITE_TRUNCATION, R.ERR_TRUNCATION,
+                   f"chain write_truncation: chain {manifest.chain_id}'s outermost region "
+                   f"truncates every landing back to double (no wider persistent sink) — "
+                   f"the chain output boundary is numerically inert")
+
+    return Gen(True, shim_paths=all_shims, llm_tokens=total_tokens,
+               declared_variants=list(cr.declared_variants),
+               files_touched=list(cr.files_touched),
+               in_place_region=(cr.in_place_regions > 0 and not cr.declared_variants))
 
 
 # ---------------------------------------------------------------------------
