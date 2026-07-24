@@ -2,6 +2,8 @@
 
 import json
 
+import pytest
+
 from agents.strategy.characterization import load_chains, load_regions
 
 
@@ -182,6 +184,34 @@ def test_load_chains_builds_multiline_records(tmp_path):
     assert c.walk_record().predicted_rel_err_if_ff == 1e-2
     # walk_record's representative target is the first chain line
     assert c.walk_record().target.location == "B2m.h:355"
+
+
+def test_load_chains_populates_bound_decomposition(tmp_path):
+    # Phase 2f: max_sensitivity/tightness/predicted_lift come from the shared
+    # bound arithmetic (same math the analysis script uses).
+    from agents.shared.bound_decomposition import (
+        U_DOUBLE, chain_row, chain_predicted_lift)
+    ch = _chain("cascade_IX_a_1", [("B2m.h", 355)], rel=1e-3)
+    ch["max_sensitivity"] = 1e-3 / U_DOUBLE   # tightness == 1.0 (perfectly tight)
+    integrals = {"IX": {"regions": {}, "cascade_chains": [ch]}}
+    chains, _ = load_chains(_report(tmp_path, integrals))
+    c = chains[0]
+    assert c.max_sensitivity == pytest.approx(1e-3 / U_DOUBLE)
+    assert c.tightness == pytest.approx(1.0)
+    assert c.predicted_lift == pytest.approx(chain_predicted_lift(chain_row(ch)))
+    assert c.predicted_lift > 0.0
+
+
+def test_load_chains_missing_sensitivity_gives_zero_tightness(tmp_path):
+    # A report predating max_sensitivity: sens defaults 0 -> predicted_double 0 ->
+    # tightness 0.0 (below the COMPUTED band, so the chain won't enqueue for dd).
+    ch = _chain("cascade_IX_a_1", [("B2m.h", 355)], rel=1e-3)  # no max_sensitivity
+    integrals = {"IX": {"regions": {}, "cascade_chains": [ch]}}
+    chains, _ = load_chains(_report(tmp_path, integrals))
+    c = chains[0]
+    assert c.max_sensitivity == 0.0
+    assert c.tightness == 0.0
+    assert c.predicted_lift == 0.0
 
 
 def test_load_chains_empty_when_absent(tmp_path):

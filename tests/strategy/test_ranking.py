@@ -2,11 +2,22 @@
 
 import json
 
+from agents.strategy.characterization import ChainRecord
+from agents.strategy.models import RegionTarget
 from agents.strategy.ranking import (
-    build_correctness_queue, build_queues, build_speedup_queue, error_threshold,
-    flop_weighted_score, load_flop_weights,
+    build_chain_dd_queue, build_correctness_queue, build_queues,
+    build_speedup_queue, error_threshold, flop_weighted_score, load_flop_weights,
 )
 from tests.strategy.conftest import make_region
+
+
+def _chain_rec(chain_id, tightness, predicted_lift):
+    return ChainRecord(
+        integral="B12", chain_id=chain_id,
+        lines=[RegionTarget(file="f.h", line_start=1, line_end=1, variables=[])],
+        signal_class="cancellation_cascade", max_cond=1e2, max_rel_err=1e-3,
+        predicted_rel_err_if_float=1e-2, predicted_rel_err_if_ff=1e-2,
+        op_count=2, n=2, tightness=tightness, predicted_lift=predicted_lift)
 
 # Minimal flop-weight table (shape of ratio_multipliers.json): log ≫ add in ff.
 _WEIGHTS = {"native_double": {"add": 1, "mul": 1, "div": 1, "log": 20},
@@ -20,6 +31,29 @@ BELOW = 1e-12  # < 1e-10 threshold → fine
 
 def test_error_threshold():
     assert error_threshold(10.0) == 1e-10
+
+
+def test_chain_dd_queue_filters_by_tightness_band_and_ranks_by_lift():
+    # COMPUTED band is [1e-3, 1e1] (agents.shared.bound_decomposition).
+    big = _chain_rec("c_big", tightness=0.1, predicted_lift=18.0)
+    small = _chain_rec("c_small", tightness=1.0, predicted_lift=10.0)
+    loose = _chain_rec("c_loose", tightness=1e-6, predicted_lift=20.0)   # < band
+    overpredict = _chain_rec("c_over", tightness=50.0, predicted_lift=20.0)  # > band
+    no_tight = _chain_rec("c_none", tightness=None, predicted_lift=5.0)   # no measure
+    q = build_chain_dd_queue([small, loose, big, overpredict, no_tight])
+    # only band-passing chains survive; ranked by predicted_lift descending
+    assert [c.chain_id for c in q] == ["c_big", "c_small"]
+
+
+def test_chain_dd_queue_band_edges_inclusive():
+    lo = _chain_rec("c_lo", tightness=1e-3, predicted_lift=1.0)
+    hi = _chain_rec("c_hi", tightness=1e1, predicted_lift=2.0)
+    q = build_chain_dd_queue([lo, hi])
+    assert {c.chain_id for c in q} == {"c_lo", "c_hi"}
+
+
+def test_chain_dd_queue_empty_input():
+    assert build_chain_dd_queue([]) == []
 
 
 def test_tier_order_is_fixed():

@@ -122,7 +122,9 @@ def chain_predicted_lift(row: dict) -> float:
     """
     measured = row.get("measured_max_rel_err", 0.0) or 0.0
     sens = row.get("max_sensitivity", 0.0) or 0.0
-    if measured <= 0.0:
+    # No measured error (nothing to recover) or no sensitivity (no forward-cone
+    # model to predict dd behavior) -> no defensible lift claim.
+    if measured <= 0.0 or sens <= 0.0:
         return 0.0
     digits_now = -math.log10(measured)
     pred_dd = row.get("predicted_rel_err_if_dd")

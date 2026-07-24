@@ -99,6 +99,11 @@ def test_chain_predicted_lift_zero_when_no_measured_error():
     assert chain_predicted_lift(chain_row(_chain(1.0e8, 0.0))) == 0.0
 
 
+def test_chain_predicted_lift_zero_when_no_sensitivity():
+    # measured error present but sens=0 -> no forward-cone model -> no lift claim.
+    assert chain_predicted_lift(chain_row(_chain(0.0, 1.0e-3))) == 0.0
+
+
 def test_chain_predicted_lift_never_exceeds_dd_digits():
     # Catastrophic cancellation: huge measured error, huge sens.
     row = chain_row(_chain(1.0e20, 1.0e-1))

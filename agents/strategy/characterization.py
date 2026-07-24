@@ -19,6 +19,8 @@ import sys
 from dataclasses import dataclass, field
 from pathlib import Path
 
+from agents.shared.bound_decomposition import (
+    chain_row, chain_tightness, chain_predicted_lift)
 from agents.strategy.models import RegionTarget
 
 
@@ -80,6 +82,13 @@ class ChainRecord:
     variables: list[str] = field(default_factory=list)
     value_range_ok_for_float: bool = True
     ops: dict[str, int] = field(default_factory=dict)
+    # Phase 2f: first-order bound decomposition (agents.shared.bound_decomposition).
+    # ``max_sensitivity = cond * amp`` is precision-invariant; ``tightness`` =
+    # predicted_if_double/measured (COMPUTED band gates chain-dd enqueue);
+    # ``predicted_lift`` = digits recovered double->dd (ranks the chain-dd tier).
+    max_sensitivity: float = 0.0
+    tightness: float | None = None
+    predicted_lift: float = 0.0
 
     def walk_record(self) -> "RegionRecord":
         """A single-target ``RegionRecord`` the retry walk drives on.
@@ -208,6 +217,9 @@ def load_chains(report_path: str | Path) -> tuple[list[ChainRecord], dict]:
                 continue
             ops = _op_mix(chain)
             pred_float = float(chain.get("predicted_rel_err_if_float", 0.0) or 0.0)
+            # Phase 2f: decompose the raw chain via the shared bound arithmetic so
+            # tightness / predicted-lift match the analysis script exactly.
+            row = chain_row(chain)
             chains.append(ChainRecord(
                 integral=integral,
                 chain_id=chain["chain_id"],
@@ -221,7 +233,10 @@ def load_chains(report_path: str | Path) -> tuple[list[ChainRecord], dict]:
                 n=int(chain.get("n", 0) or 0),
                 variables=list(chain.get("region_local_vars", []) or []),
                 value_range_ok_for_float=_range_ok_for_float(chain),
-                ops=ops))
+                ops=ops,
+                max_sensitivity=float(chain.get("max_sensitivity", 0.0) or 0.0),
+                tightness=chain_tightness(row),
+                predicted_lift=chain_predicted_lift(row)))
     return chains, {"n_chains": len(chains)}
 
 

@@ -32,7 +32,8 @@ import json
 import sys
 from pathlib import Path
 
-from agents.strategy.characterization import RegionRecord
+from agents.shared.bound_decomposition import TIGHT_LO, TIGHT_HI
+from agents.strategy.characterization import ChainRecord, RegionRecord
 from agents.strategy.models import (
     SIGNAL_CANCELLATION_CASCADE, SIGNAL_LOCAL_CANCELLATION,
     SIGNAL_LOG_NEAR_ROOT, SIGNAL_STABLE,
@@ -151,6 +152,25 @@ def build_speedup_queue(regions: list[RegionRecord], tolerance: float,
     else:
         key = lambda r: (-r.op_count, r.target.location)
     return sorted(candidates, key=key)
+
+
+def build_chain_dd_queue(chains: list[ChainRecord]) -> list[ChainRecord]:
+    """The Phase-2f chain-dd (Tier-1 correctness) queue.
+
+    A cancellation-cascade chain qualifies for whole-chain double-double promotion
+    iff its first-order bound is **COMPUTED** — tightness (predicted_if_double /
+    measured) in ``[TIGHT_LO, TIGHT_HI]``, i.e. the cone explains the measured
+    error so a dd lever exists.  Reet 2026-07-24: qualify by tightness ALONE (no
+    integral-level ``floor < 10`` gate, no predicted-lift threshold) and let the
+    solver's positive-lift acceptance gate decide per candidate.
+
+    Ranked by ``predicted_lift`` descending (biggest wins first — highest accept
+    confidence, so if wall/budget runs tight the largest lifts are locked first);
+    ``chain_id`` breaks ties deterministically.
+    """
+    computed = [c for c in chains
+                if c.tightness is not None and TIGHT_LO <= c.tightness <= TIGHT_HI]
+    return sorted(computed, key=lambda c: (-c.predicted_lift, c.chain_id))
 
 
 def build_queues(regions: list[RegionRecord], tolerance: float,
