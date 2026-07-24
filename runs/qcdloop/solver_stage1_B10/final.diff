@@ -1,0 +1,208 @@
+diff --git a/box/B1m.h b/box/B1m.h
+index 00deee0..09c064c 100644
+--- a/box/B1m.h
++++ b/box/B1m.h
+@@ -10,6 +10,7 @@
+ #pragma once
+ 
+ #include "box_common.h"
++#include "ql_shim_float.h"
+ 
+ 
+ namespace ql
+@@ -396,4 +397,125 @@ namespace ql
+     }
+ #endif
+ 
++// ===== AMP-FANOUT-BEGIN (generated variants; edit the pipeline, not here) =====
++// AMP-FANOUT-MANIFEST: {"variants": [{"file": "/home/rbarik/Agentic-Mixed-Precision-Demo/runs/qcdloop/solver_stage1_B10/tree_B10/box/B1m.h", "orig_end": 250, "orig_name": "B10", "orig_start": 211, "promotes": [{"caller_complex": "Kokkos::complex<double>", "caller_type": "double", "complex_names": [], "complex_tokens": ["TOutput", "complex"], "complex_type": "Kokkos::complex<float>", "reads": ["si", "tabar", "mp2sq", "m4sqbar"], "region_end": 227, "region_start": 227, "scalar_type": "float", "two_limb": false, "writes": []}], "reroutes": {}, "shim_includes": ["ql_shim_float.h"], "variant_name": "B10_B1m_B10"}, {"file": "/home/rbarik/Agentic-Mixed-Precision-Demo/runs/qcdloop/solver_stage1_B10/tree_B10/box/B1m.h", "orig_end": 325, "orig_name": "B1m", "orig_start": 258, "promotes": [], "reroutes": {"B10": "B10_B1m_B10"}, "shim_includes": [], "variant_name": "B1m_B10"}]}
++
++// --- variant B10_B1m_B10 (of B10) ---
++    template<typename TOutput, typename TMass, typename TScale>
++    KOKKOS_INLINE_FUNCTION
++    void B10_B1m_B10(
++        const Kokkos::View<TOutput* [3]>& res, 
++        const Kokkos::Array<Kokkos::Array<TMass, 4>, 4>& Y,
++        TScale const& mu2,
++        const int i) {
++
++        const TMass msq = Y[3][3];
++        const TMass si = ql::Constants<TMass>::_two() * Y[0][2];
++        const TMass tabar = ql::Constants<TMass>::_two() * Y[1][3];
++        const TMass m4sqbar = ql::Constants<TMass>::_two() * Y[0][3];
++        const TMass m3sqbar = ql::Constants<TMass>::_two() * Y[2][3];
++        const TMass mp2sq = ql::Constants<TMass>::_two() * Y[1][2];
++        const TMass mean = ql::kSqrt(mu2 * msq);
++
++        float si__ff = float(si);  // Rule R1: promote region read to float
++        float tabar__ff = float(tabar);  // Rule R1: promote region read to float
++        float mp2sq__ff = float(mp2sq);  // Rule R1: promote region read to float
++        float m4sqbar__ff = float(m4sqbar);  // Rule R1: promote region read to float
++        const Kokkos::complex<float> fac__ext = Kokkos::complex<float>(si__ff * tabar__ff - mp2sq__ff * m4sqbar__ff);
++        TOutput fac = TOutput(static_cast<double>(fac__ext.real()), static_cast<double>(fac__ext.imag()));  // Rule R1: demote region write to TOutput
++        const TOutput wlogsmu = ql::Lnrat<TOutput, TMass, TScale>(si, mu2);
++        const TOutput wlogtmu = ql::Lnrat<TOutput, TMass, TScale>(tabar, mu2);
++        const TOutput wlog2mu = ql::Lnrat<TOutput, TMass, TScale>(mp2sq, mu2);
++        const TOutput wlog4mu = ql::Lnrat<TOutput, TMass, TScale>(m4sqbar, mu2);
++
++        const TOutput dilog1 = ql::Li2omrat<TOutput, TMass, TScale>(mp2sq, si);
++        const TOutput dilog2 = ql::Li2omrat<TOutput, TMass, TScale>(tabar, m4sqbar);
++        const TOutput dilog3 = ql::Li2omx2<TOutput, TMass, TScale>(mp2sq, m4sqbar, si, tabar);
++        const TOutput dilog4 = ql::Li2omx2<TOutput, TMass, TScale>(m3sqbar, tabar, mp2sq, msq);
++        const TOutput dilog5 = ql::Li2omx2<TOutput, TMass, TScale>(m3sqbar, m4sqbar, si, msq);
++
++        res(i,2) = ql::Constants<TOutput>::_zero();
++        res(i,1) = wlog2mu + wlog4mu - wlogsmu - wlogtmu;
++        res(i,0) = dilog4 - dilog5
++            - ql::Constants<TOutput>::_two() * dilog1
++            + ql::Constants<TOutput>::_two() * dilog2
++            + ql::Constants<TOutput>::_two() * dilog3
++            + ql::Constants<TOutput>::_two() * res(i,1) * ql::Lnrat<TOutput, TMass, TScale>(mean, tabar);
++           
++        for (size_t j = 0; j < 3; j++) {
++            res(i,j) /= fac;
++        }
++    }
++
++// --- variant B1m_B10 (of B1m) ---
++    template<typename TOutput, typename TMass, typename TScale>
++    KOKKOS_INLINE_FUNCTION
++    void B1m_B10(
++        const Kokkos::View<TOutput* [3]>& res, 
++        const Kokkos::Array<TMass, 13>& xpi, 
++        const TScale& mu2,
++        const int i) {
++
++        int jsort = 0;
++        for (int j = 0; j < 4; j++) {
++            if (!ql::iszero<TOutput, TMass, TScale>(xpi[j])) {
++                jsort = j;
++            }
++        }
++
++        Kokkos::Array<TMass, 13> xpi_in;
++        for (size_t j = 0; j < 13; j++) {
++            xpi_in[ql::swap_b1m(j, jsort)] = xpi[j];
++        }
++
++        Kokkos::Array<Kokkos::Array<TMass, 4>, 4> Y;
++        Y[0][0] = xpi_in[0];
++        Y[1][1] = xpi_in[1];
++        Y[2][2] = xpi_in[2];
++        Y[3][3] = xpi_in[3];
++        Y[0][1] = Y[1][0] = ql::Constants<TMass>::_half() * (xpi_in[0] + xpi_in[1] - xpi_in[4]);
++        Y[0][2] = Y[2][0] = ql::Constants<TMass>::_half() * (xpi_in[0] + xpi_in[2] - xpi_in[8]);
++        Y[0][3] = Y[3][0] = ql::Constants<TMass>::_half() * (xpi_in[0] + xpi_in[3] - xpi_in[7]);
++        Y[1][2] = Y[2][1] = ql::Constants<TMass>::_half() * (xpi_in[1] + xpi_in[2] - xpi_in[5]);
++        Y[1][3] = Y[3][1] = ql::Constants<TMass>::_half() * (xpi_in[1] + xpi_in[3] - xpi_in[9]);
++        Y[2][3] = Y[3][2] = ql::Constants<TMass>::_half() * (xpi_in[2] + xpi_in[3] - xpi_in[6]);
++
++        if (!ql::iszero<TOutput, TMass, TScale>(Y[0][0]) || 
++            !ql::iszero<TOutput, TMass, TScale>(Y[1][1]) || 
++            !ql::iszero<TOutput, TMass, TScale>(Y[2][2])) {
++            Kokkos::printf("Box::B1m - Wrong ordering.");
++        }
++
++        const bool zY01 = ql::iszero<TOutput, TMass, TScale>(Y[0][1]);
++        const bool zY12 = ql::iszero<TOutput, TMass, TScale>(Y[1][2]);
++        const bool zY23 = ql::iszero<TOutput, TMass, TScale>(Y[2][3]);
++        const bool zY30 = ql::iszero<TOutput, TMass, TScale>(Y[3][0]);
++
++        if (zY01 && zY12 && zY23 && zY30) 
++            ql::B6<TOutput, TMass, TScale>(res, Y, mu2, i);
++        else if (zY01 && zY12 && zY23) 
++            ql::B7<TOutput, TMass, TScale>(res, Y, mu2, i);
++        else if (zY01 && zY12 && zY30) {
++            Kokkos::Array<Kokkos::Array<TMass, 4>, 4> Yalt;
++            ql::Ycalc<TOutput, TMass, TScale>(Y, Yalt, 1);
++            ql::B7<TOutput, TMass, TScale>(res, Yalt, mu2, i);
++        } else if (zY01 && zY12) 
++            ql::B8<TOutput, TMass, TScale>(res, Y, mu2, i);
++        else if (zY01 && zY30) 
++            ql::B9<TOutput, TMass, TScale>(res, Y, mu2, i);
++        else if (zY12 && zY23) {
++            Kokkos::Array<Kokkos::Array<TMass, 4>, 4> Yalt;
++            ql::Ycalc<TOutput, TMass, TScale>(Y, Yalt, 1);
++            ql::B9<TOutput, TMass, TScale>(res, Yalt, mu2, i);
++        } else if (zY01)
++            ql::B10_B1m_B10<TOutput, TMass, TScale>(res, Y, mu2, i);
++        else if (zY12) {
++            Kokkos::Array<Kokkos::Array<TMass, 4>, 4> Yalt;
++            ql::Ycalc<TOutput, TMass, TScale>(Y, Yalt, 1);
++            ql::B10_B1m_B10<TOutput, TMass, TScale>(res, Yalt, mu2, i);
++        } else 
++            ql::BIN1<TOutput, TMass, TScale>(res, Y, i);
++    }           
++
++// ===== AMP-FANOUT-END =====
+ }
+diff --git a/boxGPU.h b/boxGPU.h
+index 17fc62a..fcba718 100644
+--- a/boxGPU.h
++++ b/boxGPU.h
+@@ -37,6 +37,7 @@
+ #include "box/B2m.h"
+ #include "box/B3m.h"
+ #include "box/B4m.h"
++#include "ql_shim_float.h"
+ 
+ 
+ namespace ql
+@@ -126,7 +127,7 @@ namespace ql
+         if (massive == 0) {
+             ql::B0m<TOutput, TMass, TScale>(res, xpi, musq, i);
+         } else if (massive == 1) {
+-            ql::B1m<TOutput, TMass, TScale>(res, xpi, musq, i);
++            ql::B1m_B10<TOutput, TMass, TScale>(res, xpi, musq, i);
+         } else if (massive == 2) {
+             ql::B2m<TOutput, TMass, TScale>(res, xpi, musq, i);
+         } else if (massive == 3) {
+@@ -136,7 +137,11 @@ namespace ql
+         }
+         
+         // Normalize results
+-        const TScale scalefac2 = scalefac * scalefac;
++        float scalefac__ff = float(scalefac);  // Rule R1: promote region read to float
++        float scalefac__ff__ff = float(scalefac__ff);  // Rule R1: promote region read to float
++        const float scalefac2__ext__ext = scalefac__ff__ff * scalefac__ff__ff;
++        float scalefac2__ext = static_cast<float>(scalefac2__ext__ext);  // Rule R1: demote region write to float
++        TScale scalefac2 = static_cast<TScale>(scalefac2__ext);  // Rule R1: demote region write to TScale
+         res(i, 0) /= scalefac2;
+         res(i, 1) /= scalefac2;
+         res(i, 2) /= scalefac2;
+diff --git a/ql_shim_float.h b/ql_shim_float.h
+new file mode 100644
+index 0000000..4331796
+--- /dev/null
++++ b/ql_shim_float.h
+@@ -0,0 +1,30 @@
++#pragma once
++// SOURCE_HASH: aabbff83c75a37dfa60789f677ace3876c2c730a6b5444850bf93193f74049c8
++// Canonical merged regional shim — one definition per TU-global
++// symbol (Wave-3 dedup, agents/integrator_base/shim_merge.py).
++#include <complex>
++#include <cmath>
++
++// Canonical merged regional shim — one definition per TU-global
++// symbol (Wave-3 dedup, agents/integrator_base/shim_merge.py).
++
++// Canonical merged regional shim — one definition per TU-global
++// symbol (Wave-3 dedup, agents/integrator_base/shim_merge.py).
++
++// Canonical merged regional shim — one definition per TU-global
++// symbol (Wave-3 dedup, agents/integrator_base/shim_merge.py).
++
++// Canonical merged regional shim — one definition per TU-global
++// symbol (Wave-3 dedup, agents/integrator_base/shim_merge.py).
++
++// Canonical merged regional shim — one definition per TU-global
++// symbol (Wave-3 dedup, agents/integrator_base/shim_merge.py).
++
++// Canonical merged regional shim — one definition per TU-global
++// symbol (Wave-3 dedup, agents/integrator_base/shim_merge.py).
++
++// Region: box/B1m.h:227 — single-line construction of TOutput from float arithmetic.
++// The region performs only builtin float multiplies/subtracts and a TOutput(...) construction.
++// float is a native builtin; std::complex<float> / Kokkos::complex<float> already provide
++// the needed constructors and arithmetic. No named constants, no missing overloads.
++// (C1) No app-source headers required; (C2) only standard float ops used.
