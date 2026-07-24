@@ -42,22 +42,20 @@ from pathlib import Path
 import sys
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 from agents.shared.stability_reducer import merge_reports, finalize_report  # noqa: E402
+# Phase 2f: the first-order bound arithmetic + constants now live in a shared module
+# so the pipeline (solver.queue / strategy.ranking) uses the SAME math this script does.
+from agents.shared.bound_decomposition import (  # noqa: E402
+    U_FLOAT, U_FF, U_DOUBLE, U_DD,
+    DOUBLE_DIGITS, DD_DIGITS, DD_LIFT_ORDERS,
+    STABLE_FLOOR, BENIGN_FLOOR, TIGHT_LO, TIGHT_HI,
+    _predict, chain_row,
+)
 
 SHARD_DIR = Path("/vast/projects/pepper_hep/qcdloop_shards_5k")
 CACHE = Path(__file__).resolve().parent / ".merged_all_21.cache.json"
 
 # All 21 in-scope integrals.
 INTEGRALS = [f"B{i}" for i in range(1, 17)] + [f"BIN{i}" for i in range(5)]
-
-U_FLOAT = 2.0 ** -24     # ~5.96e-8
-U_FF = 2.0 ** -46        # ~1.42e-14  (reducer's empirical ff floor)
-U_DOUBLE = 2.0 ** -53    # ~1.11e-16
-U_DD = 2.0 ** -106       # ~1.23e-32
-
-DOUBLE_DIGITS = 15.95    # ~ -log10(U_double); double's working precision in digits
-DD_DIGITS = 31.9         # dd's working precision in digits
-DD_LIFT_ORDERS = 15.95   # U_double / U_dd = 2^53 -> whole-chain dd drops the
-                         # amplified error by this many orders (Item 6 §3).
 
 # ---- MEASURED per-integral solver floors (source of truth for these 5) -------
 # digits, whole-integral rel-err delta, provenance.  From the Phase-2b per-integral
@@ -71,43 +69,9 @@ MEASURED_FLOORS = {
     "B12": (3.691,  2.039e-4,  "solver Stage-1 / whole-app min (sample 3868, coeff0.imag)"),
 }
 
-# Verdict thresholds (documented in the report).
-STABLE_FLOOR = 12.0        # floor >= this => STABLE_ALREADY (prompt's bar)
-BENIGN_FLOOR = 10.0        # tight-chain integrals with floor in [BENIGN, STABLE)
-                           # are STABLE_ALREADY(benign): DD_TRIAGE measured B8
-                           # (10.14) / B9 (11.53) dd-inert, so a ~10-digit floor
-                           # here needs no lift.
-TIGHT_LO = 1e-3            # tightness in [TIGHT_LO, TIGHT_HI] => bound explains
-TIGHT_HI = 1e1             # the measured error => COMPUTED mechanism.
-
-
-def _predict(sens: float) -> dict:
-    return {
-        "predicted_rel_err_if_float": U_FLOAT * sens,
-        "predicted_rel_err_if_ff": U_FF * sens,
-        "predicted_rel_err_if_double": U_DOUBLE * sens,
-        "predicted_rel_err_if_dd": U_DD * sens,
-    }
-
-
-def chain_row(ch: dict) -> dict:
-    sens = ch.get("max_sensitivity", 0.0)
-    measured = ch.get("max_rel_err", 0.0)
-    pred = _predict(sens)
-    pd = pred["predicted_rel_err_if_double"]
-    return {
-        "chain_id": ch.get("chain_id"),
-        "signal_class": ch.get("signal_class"),
-        "n_contributors": ch.get("n", 0),
-        "chain_lines": [f"{s.get('file')}:{s.get('line_start')}"
-                        for s in ch.get("chain", [])],
-        "ops": ch.get("ops", {}),
-        "max_cond": ch.get("max_cond", 0.0),
-        "max_sensitivity": sens,
-        "measured_max_rel_err": measured,
-        **pred,
-        "tightness_double_over_measured": (pd / measured) if measured > 0 else None,
-    }
+# Verdict thresholds (STABLE_FLOOR / BENIGN_FLOOR / TIGHT_LO / TIGHT_HI) and the
+# bound arithmetic (_predict / chain_row) are imported from
+# agents.shared.bound_decomposition (Phase 2f — one source of truth).
 
 
 def _derive_floor(dom_chain_re: float, max_reg_re: float, has_chains: bool):
