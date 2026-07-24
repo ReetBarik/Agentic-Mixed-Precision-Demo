@@ -117,6 +117,10 @@ def _reduce_integral(name: str, n_samples: int, mapdir: str,
         "cascade_chains": [a["cascade_chains"][cid]
                            for cid in sorted(a["cascade_chains"])],
     }
+    # mirror finalize_report WI1: stamp the float-range flag on each chain from
+    # its contributor regions (chains carry no abs_val range of their own).
+    for ch in out["cascade_chains"]:
+        ch["value_range_ok_for_float"] = sr.chain_range_ok_for_float(ch, regions)
     outp = f"{mapdir}/out_{name}.json"
     Path(outp).write_bytes(_dumps(out))
     return name, outp
