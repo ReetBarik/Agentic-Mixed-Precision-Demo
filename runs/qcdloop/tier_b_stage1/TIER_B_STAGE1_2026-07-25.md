@@ -1,150 +1,87 @@
 # Tier-B Stage-1 — chain-scoped dd promotion (2026-07-25)
 
-Phase 2f coordinated whole-chain double-double promotion on the 4 measured Tier-B
-integrals (B10/B12/B13/B14). v1 promotes the dominant COMPUTED cascade chain per
-integral (one coordinated envelope). **STOP after Stage-1 — Reet reviews before Group B.**
+Phase 2f coordinated whole-chain double-double promotion on the 4 measured Tier-B integrals. v1 promotes the dominant COMPUTED cascade chain per integral (one coordinated envelope).
 
 - gate: positive lift >= 0.5 digits vs accumulated-min (chain_dd); tolerance 6.0 (reporting-only)
 - seed 12345, sample_count 5000, entry BO
-- starting_sha (headers repo): `6f21981a1402`
-- call_graph template-extent fix: `41f0391` (this landed BETWEEN the two runs)
 
-## TL;DR
+## Per-integral outcome (kernel-scoped gate)
 
-The `call_graph.py` template-extent fix **fully cleared the original blocker**. In
-the pre-fix run all 4 integrals fast-failed identically at ~35–52 s with
-`chain region kokkosUtils.h:<N> not inside any known function` — the coordinated
-chain-promote never ran. Post-fix, **all 4 chains resolve, splice, and run the full
-coordinated promote** (51–649 s of real work), and each reaches a *distinct,
-semantically meaningful* terminal state. No integral fails on graph resolution any
-more.
+The gate now scores each chain against ITS integral's own p100 floor (kernel-scope, Reet 2026-07-25), not the whole-app min pinned by the worst kernel (B12's hotspot). Whole-app columns are kept for cross-kernel visibility.
 
-But **zero chains were accepted**, for three different reasons — none of which is the
-graph bug, and two of which are downstream issues I was scoped to flag-and-stop on
-rather than fix:
+| I | kernel baseline | kernel final | kernel lift | predicted lift | app baseline | app final | outcome | chain | lines |
+|---|---|---|---|---|---|---|---|---|---|
+| B10 | — | — | — | +18.43 | — | — | apply_failed | cascade_B10_612f1391_494252c4 | 10 |
+| B12 | — | — | — | +17.10 | — | — | apply_failed | cascade_B12_65bb39c0_62ff5a3d | 5 |
+| B13 | — | — | — | +17.10 | — | — | apply_failed | cascade_B13_79fc5b8f_f080f240 | 8 |
+| B14 | — | — | — | +16.66 | — | — | apply_failed | cascade_B14_3429b1d4_01bf2ff3 | 3 |
 
-| I | pre-fix | post-fix outcome | wall | what it means |
-|---|---|---|---|---|
-| B10 | apply_failed (graph) | `write_truncation` (chain-scope 2d-B gate) | 280.5 s | chain built; gate fired BEFORE validate — **suspected false positive** |
-| B12 | apply_failed (graph) | `write_truncation` (chain-scope 2d-B gate) | 158.5 s | same as B10 |
-| B13 | apply_failed (graph) | `llm_gen_failed` (API timeout) | 649.1 s | **transient infra**, not a real result — re-runnable |
-| B14 | apply_failed (graph) | `rejected [chain_no_lift]` | 51.3 s | **first real measurement**: built + validated; lift 0.00 |
+## Predicted vs measured lift (kernel-scoped)
 
-## The one real precision measurement: B14
+- **B10** (cascade_B10_612f1391_494252c4): predicted +18.43, kernel-measured — (— -> —), whole-app lift —, tightness 0.003331756565344427, patcher_status=write_truncation, declared_dd=False
+    - lines: B1m.h:227, B1m.h:240, B1m.h:241, kokkosUtils.h:174, kokkosUtils.h:177, kokkosUtils.h:199, kokkosUtils.h:212, kokkosUtils.h:702, kokkosUtils.h:703, kokkosUtils.h:704
+- **B12** (cascade_B12_65bb39c0_62ff5a3d): predicted +17.10, kernel-measured — (— -> —), whole-app lift —, tightness 0.07075303644353668, patcher_status=llm_gen_failed, declared_dd=False
+    - lines: B2m.h:206, B2m.h:207, B2m.h:241, kokkosUtils.h:212, kokkosUtils.h:702
+- **B13** (cascade_B13_79fc5b8f_f080f240): predicted +17.10, kernel-measured — (— -> —), whole-app lift —, tightness 0.07080121254580928, patcher_status=write_truncation, declared_dd=False
+    - lines: B2m.h:300, B2m.h:301, B2m.h:305, B2m.h:306, B2m.h:355, B2m.h:533, kokkosUtils.h:212, kokkosUtils.h:702
+- **B14** (cascade_B14_3429b1d4_01bf2ff3): predicted +16.66, kernel-measured — (— -> —), whole-app lift —, tightness 0.19860180300800165, patcher_status=write_truncation, declared_dd=False
+    - lines: B2m.h:401, B2m.h:578, kokkosUtils.h:1208
 
-B14's chain is the only one that built cleanly (`patcher_status=ok`), was widened to
-dd, and got a full whole-app validate:
+## What the two fixes changed vs the prior run (87be92f)
 
-- **baseline p100 = 3.6906 → final p100 = 3.6906, measured lift = +0.00** (predicted +16.66)
-- rejected under the +0.5 lift gate (`3.6906 < 3.6906 + 0.5`)
-- **`baseline_hotspot` = B12 / sample 3868 / `coeff0.imag` / precise_digits 3.6906**
+Both fixes did exactly what they were designed to do — they moved every integral off its
+*prior* terminal state onto a *new, more-informative* one. None of the four reached the
+acceptance gate this time, but for reasons that are now diagnostic rather than spurious:
 
-That hotspot is the crux. The whole-app p100 is pinned by **B12's** cancellation
-floor — a *different integral* that B14's chain does not touch. So B14's dd promotion
-literally cannot move the number the gate reads, regardless of how much it helps B14's
-own coefficients. This is the **whole-app-gate-instrument problem** (documented for the
-greedy solver in `project_phase_2e_solver_stage1`) resurfacing at chain scope: a
-per-integral chain measured against a whole-app global min can only ever score a lift
-if it happens to own that global min. **Predicted-vs-measured for B14 is therefore not
-a real disagreement** — the +16.66 Item-7 prediction is about B14's *own* floor; the
-whole-app instrument never measured it.
+| I | prior run (87be92f) | this run (afd334c) | interpretation |
+|---|---|---|---|
+| B10 | chain-scope 2d-B false-positive (OUTERMOST region) | **interior** write_truncation | Fix 1 cleared the false-positive; a genuine interior region now trips |
+| B12 | chain-scope 2d-B false-positive (OUTERMOST region) | **llm_gen_failed** (build fail) | Fix 1 cleared the false-positive; chain now reaches the gen rung and fails there |
+| B13 | transient Argo timeout | **interior** write_truncation | Fix 3: timeout cleared; real outcome surfaced |
+| B14 | whole-app `chain_no_lift` (B12-pinned global min) | **interior** write_truncation | Fix 2 in place, but chain is gated by Fix 1 *upstream* of the acceptance gate |
 
-## The chain-scope 2d-B gate (B10, B12) — suspected false positive
+Fix 2 (kernel-scope gate) is wired and unit-tested but was **not exercised end-to-end** this
+run: every chain terminated at the Patcher (apply_failed) before a candidate reached the
+solver's acceptance gate, so no `kernel_baseline`/`kernel_final`/`kernel_lift` was ever
+measured (all `—` above). The kernel-scope path only runs once a chain builds and validates.
 
-Both B10 and B12 tripped `chain_write_truncation` and were denied a build+validate.
-The gate (`agents/patcher/chain_promote.py::chain_write_truncation`) applies the
-per-region 2d-B detector `boundary.write_truncation_inert` to the chain's **outermost**
-region (shallowest on the call graph — the last landing before the value returns to
-the driver). It fires when that region's writes land back at `double` with "no wider
-persistent sink."
+## Root causes (two open blockers for Reet — flag-and-stop)
 
-The outermost regions are exactly the integral's **output stores**:
+**Blocker A — interior write_truncation is a chain-EMISSION completeness limit, not a precision result (B10/B13/B14).**
+The interior gate fires because `chain_promote` widens only the chain's listed region
+*lines*, not the carrier *declarations* that thread values between links. Concretely on B14:
 
-- B10 outermost = `B1m.h:240/241` → `res(i,1) = wlog2mu + wlog4mu - wlogsmu - wlogtmu;`
-  and `res(i,0) = dilog4 - dilog5 - 2*dilog1 + 2*dilog2 + 2*dilog3 + …`
-- B12 outermost = `B2m.h:241` → `res(i,0) = -pi2o12 + 2*wlogsmu*wlogtmu - wlog4mu*wlog4mu + …`
+- `B2m.h:401` writes `fac`, declared `TOutput fac;` at `B2m.h:396` — OUTSIDE the promoted
+  line set, so it stays caller-precision → the interior write demotes (Case-B landing).
+- `B2m.h:578` writes `Y[1][3]=Y[3][1]`, a `Kokkos::Array<...,TMass,...>` parameter — a
+  caller-precision carrier the chain never widens.
+- `kokkosUtils.h:1208` writes `res[0]`, a `TOutput` array — same class.
 
-`res(i,0)` **is** the persistent sink — it's the coefficient array the shared driver
-reads. `res(i,0) = dilog4 - dilog5 - 2*dilog1 + …` is the catastrophic-cancellation
-line; widening the dilog terms to dd so the cancellation happens in dd *before* the
-single final round to `double` is the entire intended benefit of the chain. The
-per-region detector, which has no notion of "this store is the chain's output
-boundary," reads the final demotion-to-double as inert truncation and kills it
-pre-build.
+So the gate's *local* verdict is arguably correct for the patch **as emitted** (this exact
+region really does round back to double), but the *conclusion* it forces — "the chain is
+inert / breaks" — is wrong: the chain would carry precision if the shared carriers
+(`fac`, `Y[][]`, `res[]`) were promoted to dd along with the region lines. This is the
+chain-scope analogue of the outermost-region issue Fix 1 fixed: the per-region 2d-B
+detector cannot see a *cross-link* sink because the sink is a declaration the chain-emission
+step leaves at double. **The fix belongs in chain emission (widen carrier decls that are
+written by one interior link and read by another), NOT in the gate** — do not weaken the
+interior gate, which correctly rejects the currently-emitted (truncating) patch. Suggested
+Stage-2 work item: `chain_promote` should collect writes across all interior links and
+promote the enclosing declaration of any carrier that is both written and read within the
+chain envelope. Until then B10/B13/B14 are correctly *not accepted* (the emitted patch is
+genuinely lossy), just for an emission reason, not a numerical one.
 
-This is precisely the failure mode `chain_promote.py`'s own module docstring warns
-about ("this is exactly the reasoning 2d-B's per-region gate would get wrong at chain
-scope") — but the current `chain_write_truncation` still delegates to that per-region
-detector for the outermost region, so the warning's own case slips through. B14 passed
-the gate only because its outermost region (`B2m.h:401`, a local `TOutput fac`) is not
-an output store.
-
-**I did not change this** — it lives in `chain_promote.py`/`boundary.py`, and per the
-task's "flag and stop" boundary (do not extend into fanout/dispatch/chain_promote),
-reacting to it is a separate change for Reet to authorize. Flagging it here.
-
-## B13 — transient, re-runnable
-
-`llm_gen_failed` after 3 attempts on chain region `B2m.h:305`: the underlying error is
-`api_error` / "Request timed out or interrupted" from the Argo proxy, not a
-generation-logic failure. B13's 8-region chain is the largest dd shim-generation load
-of the four; a re-run (or a smaller per-attempt timeout budget) should get past it.
-Not a real precision result.
-
-## Per-integral detail
-
-| I | chain | lines | tightness | measured max_rel_err | predicted lift | measured lift | patcher_status | outcome |
-|---|---|---|---|---|---|---|---|---|
-| B10 | cascade_B10_612f1391_494252c4 | 10 | 3.33e-03 | 1.96e+01 | +18.43 | — (no build) | write_truncation | apply_failed |
-| B12 | cascade_B12_65bb39c0_62ff5a3d | 5 | 7.08e-02 | 1.62e+07 | +17.10 | — (no build) | write_truncation | apply_failed |
-| B13 | cascade_B13_79fc5b8f_f080f240 | 8 | 7.08e-02 | 1.85e+02 | +17.10 | — (infra) | llm_gen_failed | apply_failed |
-| B14 | cascade_B14_3429b1d4_01bf2ff3 | 3 | 1.99e-01 | 3.27e+05 | +16.66 | **+0.00** | ok | rejected (chain_no_lift) |
-
-### B10 — `cascade_B10_612f1391_494252c4`
-- lines: B1m.h:227, B1m.h:240, B1m.h:241, kokkosUtils.h:174, kokkosUtils.h:177,
-  kokkosUtils.h:199, kokkosUtils.h:212, kokkosUtils.h:702, kokkosUtils.h:703,
-  kokkosUtils.h:704 (spans B1m + `ddilog` + `Li2omx2`, all now resolved)
-- outermost region: `B1m.h:240/241` (output stores `res(i,1)`, `res(i,0)`)
-
-### B12 — `cascade_B12_65bb39c0_62ff5a3d`
-- lines: B2m.h:206, B2m.h:207, B2m.h:241, kokkosUtils.h:212, kokkosUtils.h:702
-- outermost region: `B2m.h:241` (output store `res(i,0)`)
-
-### B13 — `cascade_B13_79fc5b8f_f080f240`
-- lines: B2m.h:300/301/305/306/355/533, kokkosUtils.h:212, kokkosUtils.h:702
-- transient API timeout on B2m.h:305 shim gen
-
-### B14 — `cascade_B14_3429b1d4_01bf2ff3`
-- lines: B2m.h:401, B2m.h:578, kokkosUtils.h:1208 (`kfn`, now resolved)
-- built + validated; whole-app floor pinned by B12 hotspot → lift 0.00
-
-## What the graph fix proved (and did not)
-
-- **Proved:** the template-extent recovery works on the real header — `ddilog`,
-  `Li2omx2` (was truncated + mislabeled non-template), and `kfn` all resolve; every
-  Tier-B chain line lands inside its enclosing function; chains splice and (for B14)
-  build + validate end-to-end. defs 20→44 on standalone kokkosUtils.h (== 42 template
-  heads + 2 printDoubleBits overloads, exact). Full suite 623 green.
-- **Did NOT prove:** that dd chain promotion lifts these integrals' floors. Only B14
-  reached a measurement, and the whole-app instrument couldn't see B14's own floor
-  (pinned by B12). B10/B12 were gated pre-build; B13 timed out.
-
-## Recommended next steps (for Reet — none taken)
-
-1. **Chain-scope 2d-B gate fix** (blocks B10/B12, likely B13 too). Make
-   `chain_write_truncation` exempt the chain's designated OUTPUT boundary (the
-   outermost region's store into the driver-visible coefficient array) instead of
-   delegating to the per-region detector that treats it as inert. This is the
-   module-docstring's own stated intent; the delegation is the bug. Separate change,
-   inside chain_promote.py — flag-and-stop per task scope.
-2. **Gate instrument for chain acceptance** (blocks B14, and any integral not owning
-   the whole-app global min). The +0.5-lift-vs-whole-app-p100 gate cannot score a
-   per-integral chain whose target floor is not the global min. Same regression-relative
-   / per-integral-floor instrument decision already open for the greedy solver
-   (`project_phase_2e_solver_stage1`) applies here.
-3. **Re-run B13** once (1) lands, to convert the transient timeout into a real result.
+**Blocker B — B12 chain hits a Patcher/LLM gen-robustness failure (`llm_gen_failed`), unrelated to precision.**
+Build error (`B2m.h:768-771`): the LLM re-declared already-promoted locals
+(`redeclaration of 'quad::ddfun::ddouble p3sq__ff'`, `m3sq__ff`, `m4sq__ff`) and emitted a
+malformed unary `+` (`no match for 'operator+' (operand type is 'ddouble')`, 1 arg to a
+2-arg operator). Pure code-generation defect in the dd rung on this chain — same class as
+the residual gen gaps tracked in the 10k waves, not a gate or precision issue. Fix 1 is
+what let B12 reach this rung at all (previously masked by the outermost false-positive).
 
 ## Notes
+- Kernel-scope gate (Reet 2026-07-25): each chain gated against its own integral's p100 floor, not the whole-app min (which B12's hotspot pins). Wired + unit-tested; not exercised e2e this run (all chains failed at the Patcher upstream of the gate).
+- Chain-scope 2d-B (Fix 1): the gate now fires only on INTERIOR chain regions; the outermost region's exit-truncation is the designed output boundary and is exempt (was false-positiving B10/B12 pre-build). Confirmed working — B10/B12 moved off the outermost false-positive onto genuine interior/gen outcomes.
 - STOP after Stage-1 for review; Group B / all-21 not run.
 - v1 = dominant chain per integral; multi-chain union deferred to Stage-2.
-- Pre-fix (all-apply_failed) report preserved at `/tmp/TIER_B_prefix_apply_failed.md`.
+- Two open blockers above (A: carrier-decl promotion in chain emission; B: B12 dd-rung gen robustness) are for Reet to triage before Stage-2 / all-21.
