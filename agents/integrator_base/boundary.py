@@ -79,6 +79,13 @@ _NON_TYPE_LEADERS = frozenset({
     "new", "delete", "throw", "co_return", "co_await", "co_yield",
 })
 
+# Storage-class / cv qualifiers that may lead a declaration before its type token
+# (skipped by the bare/multi-declarator scanner so ``const TMass Y, S;`` is found).
+_DECL_QUALIFIERS = frozenset({
+    "const", "constexpr", "static", "volatile", "mutable", "register",
+    "inline", "thread_local", "extern",
+})
+
 
 class _Tok:
     """A code token with its char span in the scanned text."""
@@ -212,23 +219,163 @@ def _scan_decls(toks: list[_Tok]) -> list[_Decl]:
     return decls
 
 
+class _BareDecl:
+    """A statement-level declaration recovered by :func:`_scan_bare_decls`.
+
+    Unlike :class:`_Decl` (which requires the ``<type> <name> =`` init triple), this
+    also captures bare (``TMass Y;``) and bare multi-declarator (``TMass Y, S, A;``)
+    forms.  ``names`` are all declarators sharing the leading type token; ``type_idx``
+    is the token index of the leading (core) type token, ``type_text`` its spelling.
+    """
+
+    __slots__ = ("names", "type_idx", "type_text")
+
+    def __init__(self, names: list[str], type_idx: int, type_text: str):
+        self.names = names
+        self.type_idx = type_idx
+        self.type_text = type_text
+
+
+def _scan_bare_decls(toks: list[_Tok]) -> list[_BareDecl]:
+    """Find statement-level declarations, including bare / multi-declarator forms.
+
+    The existing :func:`_scan_decls` only recognizes ``<type> <name> =`` (an
+    initialized single declarator) and so misses ``TMass Y, S, A;`` (bare,
+    multi-declarator) — the exact shape a chain *carrier* takes at its declaration
+    (design §7/§8).  This scanner splits the region into statements at **paren depth
+    0** (so a ``;`` inside a ``(...)`` — a for-header, a call — does not split, and a
+    ``;`` inside a function body still does; same depth discipline as
+    :func:`_scan_decls`).  Braces ``{`` / ``}`` are themselves statement separators.
+    For each statement of the form ``<quals>* <type> <name> [, <name>]* ;`` (each
+    declarator optionally ``= init`` or ``[extent]``) it records every declared name
+    under the shared leading type.  Constructor-init / call shapes (``name(...)``)
+    and member accesses (``a.b``, ``a::b``) are rejected, mirroring
+    :func:`agents.patcher.chain_promote._local_decls`.
+    """
+    out: list[_BareDecl] = []
+    n = len(toks)
+    stmt_start = 0
+    paren = 0
+    for i in range(n + 1):
+        tx = toks[i].text if i < n else ";"
+        if tx == "(":
+            paren += 1
+            continue
+        if tx == ")":
+            paren = max(0, paren - 1)
+            continue
+        if paren != 0:
+            continue
+        if tx == ";" or tx in "{}":
+            rec = _parse_bare_decl_stmt(toks, stmt_start, i)
+            if rec is not None:
+                out.append(rec)
+            stmt_start = i + 1
+    return out
+
+
+def _parse_bare_decl_stmt(toks: list[_Tok], lo: int, hi: int) -> _BareDecl | None:
+    """Parse ``toks[lo:hi]`` (one ``;``-terminated statement) as a declaration.
+
+    Returns a :class:`_BareDecl` when the statement is ``<quals>* <type> <name>
+    [, <name>]*`` (each declarator optionally ``= init`` or ``[extent]``), else
+    ``None``.  Source-only, no type resolution — a leading control keyword or a
+    ``name(`` shape bails.
+    """
+    k = lo
+    # skip leading storage-class / cv qualifiers
+    while k < hi and toks[k].text in _DECL_QUALIFIERS:
+        k += 1
+    # a declaration must be preceded by a statement boundary, not a member access
+    # (``a.b`` / ``a::b`` / ``a->b``; the tokenizer emits ``::``/``->`` as two
+    # single-char tokens, so a trailing ``:`` / ``>`` also signals member access).
+    if k > 0 and toks[k - 1].text in (".", ":", ">"):
+        return None
+    if k >= hi or not _is_ident(toks[k].text) or toks[k].text in _NON_TYPE_LEADERS:
+        return None
+    type_idx, type_text = k, toks[k].text
+    j = k + 1
+    # skip a namespace-qualified type ``a::b::c`` (the boundary tokenizer emits
+    # ``::`` as two ``:`` punctuation tokens).  The retype target is the last
+    # segment's ident.
+    while j + 2 < hi and toks[j].text == ":" and toks[j + 1].text == ":" \
+            and _is_ident(toks[j + 2].text):
+        type_idx, type_text = j + 2, toks[j + 2].text
+        j += 3
+    # skip a template argument list ``<...>``
+    if j < hi and toks[j].text == "<":
+        d = 0
+        while j < hi:
+            if toks[j].text == "<":
+                d += 1
+            elif toks[j].text == ">":
+                d -= 1
+            j += 1
+            if d <= 0:
+                break
+    while j < hi and toks[j].text in ("&", "*"):
+        j += 1
+    while j < hi and toks[j].text in _DECL_QUALIFIERS:
+        j += 1
+    # declarators: name [= init] [ [extent] ] (, name …)*
+    names: list[str] = []
+    while j < hi:
+        if not _is_ident(toks[j].text):
+            return None
+        nm = toks[j].text
+        nxt = toks[j + 1].text if j + 1 < hi else ";"
+        if nxt == "(":
+            return None                       # call / constructor-init / function decl
+        if nxt not in (",", ";", "=", "["):
+            return None                       # not a plain declarator (``a . b`` etc.)
+        names.append(nm)
+        j += 1
+        if nxt in ("=", "["):                 # skip initializer / array extent
+            d = 0
+            while j < hi:
+                tj = toks[j].text
+                if tj in "([{":
+                    d += 1
+                elif tj in ")]}":
+                    d -= 1
+                elif tj == "," and d == 0:
+                    break
+                j += 1
+        if j < hi and toks[j].text == ",":
+            j += 1
+            continue
+        break
+    if not names:
+        return None
+    return _BareDecl(names, type_idx, type_text)
+
+
 class _Promotion:
     """The region's promotion partition (reads / pre-declared writes / promoted
     local decls / full promoted-name set) — the shared dataflow both the boundary
-    patch and the Gap-A qualified-call lint key off."""
+    patch and the Gap-A qualified-call lint key off.
 
-    __slots__ = ("toks", "ident_texts", "pure_reads", "caseB", "decl_writes", "names")
+    ``carrier_writes`` (design §8) are the chain-carrier names actually written in
+    the region — the boundary layer counts each as a *landing* so the no-op guard
+    does not fire when the only region effect is a carrier write.
+    """
 
-    def __init__(self, toks, ident_texts, pure_reads, caseB, decl_writes, names):
+    __slots__ = ("toks", "ident_texts", "pure_reads", "caseB", "decl_writes",
+                 "names", "carrier_writes")
+
+    def __init__(self, toks, ident_texts, pure_reads, caseB, decl_writes, names,
+                 carrier_writes=frozenset()):
         self.toks = toks
         self.ident_texts = ident_texts
         self.pure_reads = pure_reads
         self.caseB = caseB
         self.decl_writes = decl_writes
         self.names = names
+        self.carrier_writes = carrier_writes
 
 
-def _compute_promotion(region_text: str, reads: list[str], writes: list[str]) -> _Promotion:
+def _compute_promotion(region_text: str, reads: list[str], writes: list[str],
+                       carrier_names: frozenset[str] = frozenset()) -> _Promotion:
     """Partition a region's identifiers into the extended-scalar promotion sets.
 
     Reads promote unconditionally (Rule R1); a region-local decl promotes iff its
@@ -236,6 +383,16 @@ def _compute_promotion(region_text: str, reads: list[str], writes: list[str]) ->
     R2); integer/bool locals never promote (Rule 1).  Factored out of
     :func:`synthesize_boundary_patch` so the lint can reuse the exact same
     dataflow the patch will apply.
+
+    ``carrier_names`` (design §8) are chain-carrier variables whose *declaration*
+    is widened to the extended type elsewhere (the emission layer, §7).  A carrier
+    is neither a read-only input nor a truncating sink at this region's boundary, so
+    it is **excluded** from ``pure_reads`` / ``caseB`` / ``decl_writes`` and **seeded
+    into the ``promoted`` dataflow set** (its extended value flows through region
+    locals that consume it).  It is *not* renamed and *not* given a ``r__``/``w__``
+    boundary alias — the widened decl already carries the extended type end-to-end.
+    Carrier names actually written in this region are recorded in ``carrier_writes``
+    so the no-op guard treats a carrier write as a landing.
     """
     toks = _tokenize(region_text)
     ident_texts = {t.text for t in toks if _is_ident(t.text)}
@@ -243,27 +400,42 @@ def _compute_promotion(region_text: str, reads: list[str], writes: list[str]) ->
     all_decls = _scan_decls(toks)
     decl_names = {d.name for d in all_decls}
 
-    # Case B: pre-declared writes (Fix C) re-assigned in the region.
-    caseB = [w for w in _dedupe(writes) if w in ident_texts and w not in decl_names]
+    # Case B: pre-declared writes (Fix C) re-assigned in the region.  Carrier names
+    # are excluded (§8): their decl is widened elsewhere, so they are neither seeded
+    # nor demoted at this boundary.
+    caseB = [w for w in _dedupe(writes)
+             if w in ident_texts and w not in decl_names and w not in carrier_names]
     # Reads: promoted unconditionally on entry (a name that is also a region-local
-    # decl is fundamentally a write — exclude it).
+    # decl is fundamentally a write — exclude it).  Carriers are excluded (§8).
     pure_reads = [r for r in _dedupe(reads)
-                  if r in ident_texts and r not in decl_names and r not in caseB]
+                  if r in ident_texts and r not in decl_names and r not in caseB
+                  and r not in carrier_names]
 
-    promoted: set[str] = set(pure_reads) | set(caseB)
+    # Carriers actually referenced-as-written in this region (a landing for §8's
+    # no-op guard).  A carrier's decl is outside the region, so it appears here as a
+    # re-assignment reported in ``writes``.
+    carrier_writes = frozenset(w for w in _dedupe(writes)
+                               if w in carrier_names and w in ident_texts)
+
+    # Seed carriers into the promoted set so a region-local decl whose RHS consumes a
+    # carrier chains to promotion (Rule R2), even though the carrier itself is never
+    # renamed/aliased.
+    promoted: set[str] = set(pure_reads) | set(caseB) | set(carrier_names)
     decl_writes: list[_Decl] = []
     changed = True
     while changed:
         changed = False
         for d in all_decls:
-            if d.name in promoted or d.type_text in _INT_TYPES:
+            if d.name in promoted or d.type_text in _INT_TYPES \
+                    or d.name in carrier_names:
                 continue
             if d.rhs_idents & promoted:
                 promoted.add(d.name)
                 decl_writes.append(d)
                 changed = True
 
-    return _Promotion(toks, ident_texts, pure_reads, caseB, decl_writes, promoted)
+    return _Promotion(toks, ident_texts, pure_reads, caseB, decl_writes, promoted,
+                      carrier_writes)
 
 
 def compute_promoted_names(region_text: str, reads: list[str], writes: list[str]) -> set[str]:
@@ -397,6 +569,7 @@ def promote_region_block(
     complex_tokens=frozenset(),
     complex_names=frozenset(),
     caller_complex: str | None = None,
+    carrier_names=frozenset(),
 ) -> tuple[list[str], bool]:
     """Promote a region's source to ``scalar_type``; return ``(block_lines, promoted)``.
 
@@ -429,7 +602,8 @@ def promote_region_block(
     promoted block into a copied function variant) build on it, so the two realizations
     of "promote this region" stay bit-identical.
     """
-    prom = _compute_promotion(region_text, reads, writes)
+    carrier_names = frozenset(carrier_names)
+    prom = _compute_promotion(region_text, reads, writes, carrier_names)
     toks = prom.toks
     pure_reads = prom.pure_reads
     caseB = prom.caseB
@@ -455,7 +629,13 @@ def promote_region_block(
     #
     # So the guard fires when the promotion cannot land AND either the rung is an upcast
     # or there is nothing to promote; only a downcast-with-reads falls through.
-    if not decl_writes and not caseB and (two_limb or not pure_reads):
+    #
+    # A carrier write is a genuine landing (§8): the region writes a value into a
+    # decl the emission layer has widened to the extended type, so the widened value
+    # persists past this region — the promotion is NOT a no-op even when the region
+    # declares/re-assigns nothing else.
+    if (not decl_writes and not caseB and not prom.carrier_writes
+            and (two_limb or not pure_reads)):
         return region_text.split("\n"), False
 
     complex_tokens = frozenset(complex_tokens)
@@ -545,6 +725,7 @@ def write_truncation_inert(
     caller_type: str = "double",
     complex_tokens=frozenset(),
     caller_complex: str | None = None,
+    carrier_names=frozenset(),
 ) -> bool:
     """Phase 2d-B — provably-inert *write-boundary truncation* detector.
 
@@ -580,12 +761,22 @@ def write_truncation_inert(
     :func:`promote_region_block`'s no-op guard but for the *landed-but-truncated*
     case rather than the *nothing-promotes* case; the two are mutually exclusive by
     construction (this needs a landing, that fires only when none exists).
+
+    ``carrier_names`` (design §8) are chain carriers whose decl is widened to the
+    extended type by the emission layer.  They are excluded from the ``caseB`` /
+    ``decl_writes`` sets this gate inspects (the exclusion happens inside
+    :func:`_compute_promotion`), so a region whose only "truncating" writes are
+    now-widened carriers is no longer read as inert — the extended value survives in
+    the widened carrier decl.  The gate reasoning for every non-carrier write is
+    unchanged; the change is strictly additive.
     """
     if not two_limb:
         return False
 
-    prom = _compute_promotion(region_text, reads, writes)
-    if not prom.pure_reads and not prom.caseB and not prom.decl_writes:
+    carrier_names = frozenset(carrier_names)
+    prom = _compute_promotion(region_text, reads, writes, carrier_names)
+    if (not prom.pure_reads and not prom.caseB and not prom.decl_writes
+            and not prom.carrier_writes):
         return False  # empty payload → promotion_no_op territory, not truncation
 
     recognized = {caller_type}

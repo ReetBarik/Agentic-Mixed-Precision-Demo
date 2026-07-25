@@ -380,3 +380,164 @@ def test_integer_local_not_promoted():
     patched = _apply(file_text, diff)
     assert "    int n = 2;" in patched                       # int untouched
     assert f"{_SCALAR} r__ext = a__ff * 2.0;" in patched     # double promoted
+
+
+# --------------------------------------------------------------------------- #
+# Blocker A §8 — carrier_names awareness in the boundary transform.
+# A carrier is a chain variable declared OUTSIDE the region whose decl the emission
+# layer widens to the extended type.  The boundary transform must treat it as
+# already-promoted: excluded from pure_reads/caseB/decl_writes, no r__/w__ alias,
+# and a carrier write counts as a landing for the no-op guard.
+# --------------------------------------------------------------------------- #
+
+_DD = "quad::ddfun::ddouble"
+
+
+def test_carrier_write_only_region_is_not_a_no_op():
+    # The ONLY landing in this region is the carrier write ``Y`` (declared
+    # elsewhere, widened by emission).  Excluding Y from caseB (as a carrier must be)
+    # empties decl_writes AND caseB — so WITHOUT the carrier-write landing the no-op
+    # guard would fire and report promoted=False.  Counting the carrier write as a
+    # landing keeps promoted=True.
+    region = "    Y = a + b;"
+    block, promoted = boundary.promote_region_block(
+        region, reads=["a", "b"], writes=["Y"], scalar_type=_DD,
+        caller_type="double", two_limb=True, carrier_names={"Y"},
+    )
+    assert promoted is True
+    body = "\n".join(block)
+    # reads still promoted at entry …
+    assert f"{_DD} a__ff = {_DD}(a);" in body
+    assert f"{_DD} b__ff = {_DD}(b);" in body
+    # … but the carrier itself is NOT renamed and NOT seeded/demoted as w__ext.
+    assert "Y__ext" not in body
+    assert "Y__ff" not in body
+    assert "Y = a__ff + b__ff;" in body          # carrier write, un-aliased
+
+
+def test_carrier_write_excluded_from_caseB_caller_write_gate_unchanged():
+    # A region with a genuine caller-precision Case-B write (``acc``) AND a carrier
+    # write (``Y``).  ``Y`` must be excluded from caseB (no w__ext seed/demote);
+    # ``acc``'s boundary treatment is exactly what it would be without any carrier.
+    region = (
+        "    acc = acc + a;\n"
+        "    Y = acc * a;"
+    )
+    block_carrier, _ = boundary.promote_region_block(
+        region, reads=["a"], writes=["acc", "Y"], scalar_type=_DD,
+        caller_type="double", two_limb=True, carrier_names={"Y"},
+    )
+    body_c = "\n".join(block_carrier)
+    # acc treated as Case-B exactly as usual: seeded + renamed + demoted.
+    assert f"{_DD} acc__ext = {_DD}(acc);" in body_c
+    assert "acc__ext = acc__ext + a__ff;" in body_c
+    assert ("acc = static_cast<double>(acc__ext.hi) + "
+            "static_cast<double>(acc__ext.lo);") in body_c
+    # Y is a carrier: never aliased, never demoted; written under its own name.
+    assert "Y__ext" not in body_c
+    assert "Y = acc__ext * a__ff;" in body_c
+
+    # The acc reasoning is identical when Y is NOT a carrier's difference — compare
+    # against the same region with Y absent from carrier_names but present as a plain
+    # Case-B write: acc's three boundary lines are unchanged either way.
+    region_acc_only = "    acc = acc + a;"
+    block_plain, _ = boundary.promote_region_block(
+        region_acc_only, reads=["a"], writes=["acc"], scalar_type=_DD,
+        caller_type="double", two_limb=True,
+    )
+    body_p = "\n".join(block_plain)
+    for line in (f"{_DD} acc__ext = {_DD}(acc);",
+                 "acc__ext = acc__ext + a__ff;",
+                 "acc = static_cast<double>(acc__ext.hi) + "
+                 "static_cast<double>(acc__ext.lo);"):
+        assert line in body_p and line in body_c
+
+
+def test_carrier_seeds_dataflow_for_dependent_local():
+    # A region-local decl whose RHS consumes a carrier promotes (Rule R2), even
+    # though the carrier itself is never aliased.
+    region = "    double h = Y + Y - one;"
+    block, promoted = boundary.promote_region_block(
+        region, reads=["one"], writes=[], scalar_type=_DD,
+        caller_type="double", two_limb=True, carrier_names={"Y"},
+    )
+    assert promoted is True
+    body = "\n".join(block)
+    # h promoted because Y (carrier, seeded into the promoted set) flows into it.
+    assert f"{_DD} h__ext = Y + Y - one__ff;" in body
+    assert "Y__ff" not in body and "Y__ext" not in body   # carrier un-aliased
+
+
+def test_write_truncation_inert_ignores_carrier_writes():
+    # A region whose only "truncating" write is a carrier (widened by emission) is
+    # NOT inert: the widened value survives in the widened carrier decl.
+    region = "    Y = a + b;"
+    # Without carrier awareness: Y is a Case-B write demoted to double → a provable
+    # truncating landing → the 2d-B gate would flag it inert.
+    assert boundary.write_truncation_inert(
+        region, reads=["a", "b"], writes=["Y"], two_limb=True,
+        caller_type="double") is True
+    # With Y as a carrier: excluded from caseB; no other landing → not inert.
+    assert boundary.write_truncation_inert(
+        region, reads=["a", "b"], writes=["Y"], two_limb=True,
+        caller_type="double", carrier_names={"Y"}) is False
+
+
+def test_write_truncation_inert_noncarrier_reasoning_unchanged():
+    # A genuine Case-B truncating write alongside a carrier still flags inert on the
+    # strength of the non-carrier write — the gate reasoning for non-carriers is
+    # unchanged (strictly additive).
+    region = (
+        "    acc = a + b;\n"
+        "    Y = acc + a;"
+    )
+    assert boundary.write_truncation_inert(
+        region, reads=["a", "b"], writes=["acc", "Y"], two_limb=True,
+        caller_type="double", carrier_names={"Y"}) is True
+
+
+def test_scan_bare_decls_multi_declarator():
+    # The worked example from the design doc: ``TMass Y, S, A;`` — a bare
+    # multi-declarator the init-only _scan_decls misses.
+    toks = boundary._tokenize("    TMass Y, S, A;\n")
+    decls = boundary._scan_bare_decls(toks)
+    assert len(decls) == 1
+    d = decls[0]
+    assert d.type_text == "TMass"
+    assert d.names == ["Y", "S", "A"]
+
+
+def test_scan_bare_decls_forms_and_rejections():
+    src = (
+        "void f() {\n"
+        "    const TMass H = Y + one;\n"   # init single (with qualifier)
+        "    TScale s2;\n"                 # bare single
+        "    TMass Y, S, A;\n"             # bare multi-declarator
+        "    Kokkos::complex<double> z, w;\n"  # qualified + template, multi
+        "    foo(x, y);\n"                 # call — not a decl
+        "    res(i, 0) = H;\n"            # subscript store — not a decl
+        "    obj.member = 1;\n"           # member access — not a decl
+        "}\n"
+    )
+    decls = {n: d for d in boundary._scan_bare_decls(boundary._tokenize(src))
+             for n in d.names}
+    assert decls["H"].type_text == "TMass"
+    assert decls["s2"].type_text == "TScale"
+    assert decls["Y"].names == ["Y", "S", "A"]
+    assert decls["z"].type_text == "complex" and decls["z"].names == ["z", "w"]
+    # calls / stores / member accesses are not declarations
+    assert "foo" not in decls and "res" not in decls
+    assert "obj" not in decls and "member" not in decls
+
+
+def test_carrier_names_default_empty_no_regression():
+    # With carrier_names defaulting to empty, the transform is byte-identical to the
+    # pre-carrier behavior (the whole existing suite already covers this; this pins
+    # the default explicitly).
+    region = "    double r = a + b;"
+    b1, p1 = boundary.promote_region_block(
+        region, reads=["a", "b"], writes=[], scalar_type=_DD, caller_type="double")
+    b2, p2 = boundary.promote_region_block(
+        region, reads=["a", "b"], writes=[], scalar_type=_DD, caller_type="double",
+        carrier_names=frozenset())
+    assert b1 == b2 and p1 == p2
