@@ -1,18 +1,26 @@
-"""Blocker A, Subtask 1 — carrier-closure analysis (BLOCKER_A_CARRIER_DESIGN.md §2/§4).
+"""Value-closure analysis (CLOSURE_SCOPED_CHAINS_DESIGN.md §2; Subtask 1a).
 
-Unit tests for :func:`agents.patcher.chain_promote.compute_carrier_closure`: the
-analysis pass that, given a chain's line set, classifies its carriers as widenable
-/ unwidenable / external.  A **carrier** is a variable declared OUTSIDE the chain's
-line set, written by one interior chain line and read by another — the value it
-carries crosses a chain-line boundary at caller precision, so the interior write
-truncates the widened (dd) value and the 2d-B gate spuriously rejects the patch.
+Unit tests for :func:`agents.patcher.chain_promote.compute_value_closure`, which
+carries two views of a chain's closure on one :class:`CarrierClosure`:
 
-The synthetic call graph is ``entry -> mid -> inner``; ``inner`` (the deepest,
-interior function) holds the carriers, ``mid``'s region is the chain's outermost
-(min-depth) exit boundary.  Line numbers are asserted against the header text so a
-future edit that shifts them fails loudly rather than silently mis-locating a
-carrier.  The real B10/B13/B14 chains are pinned against the committed
-``runs/qcdloop_headers_full`` tree.
+* the **Fix-A compat subset** (``widenable`` / ``unwidenable_reasons`` /
+  ``external_reasons`` / ``carrier_names``) — the Blocker-A strict-carrier test
+  (a variable declared OUTSIDE the chain line set, written by an interior chain line
+  and read by *another chain line*).  Every current consumer reads only this, so the
+  tests in the first two sections pin it byte-for-byte (the Fix-A regression guard);
+
+* the **enlarged value closure** (``closure_names`` / ``closure_decl_widens`` /
+  ``designed_exits`` / ``escape_reasons`` / ``return_widens``) — the least fixed
+  point of rule (a) [read on ANY frame line] and rule (b) [forward flow to a local /
+  out-param / return / kernel output], with ``chain_closure_escapes`` refusals at the
+  frontier.  Rule (c) (cross-frame return propagation) is Subtask 2a/2b, so
+  ``return_widens`` is empty and B10 stops at ``Li2omx2``'s return here.
+
+The ``entry -> mid -> inner`` synthetic (``CARRIER_H``) exercises the compat subset;
+``top -> mid2 -> leaf`` (``CLOSURE_H``) exercises rules (a)/(b), escapes, designed
+exits, and refusal precedence.  Line numbers are asserted against the header text so
+a future edit that shifts them fails loudly.  The real B10/B13/B14 chains are pinned
+against the committed ``runs/qcdloop_headers_full`` tree.
 """
 
 from __future__ import annotations
@@ -23,7 +31,7 @@ import pytest
 
 from agents.patcher import fanout
 from agents.patcher.chain_promote import (
-    CarrierClosure, ChainManifest, compute_carrier_closure,
+    CarrierClosure, ChainManifest, compute_value_closure,
 )
 from agents.patcher.fanout import FanoutError
 from tests.patcher.fanout.conftest import requires_libclang, requires_qcdloop_full
@@ -113,7 +121,7 @@ def carrier_graph(carrier_tree):
 def _closure(graph, lines, **kw):
     man = ChainManifest(chain_id="c", integral="B", entry_point="entry",
                         lines=[("app.h", ln, ln) for ln in lines])
-    return compute_carrier_closure(manifest=man, graph=graph, scalar_type="Ext", **kw)
+    return compute_value_closure(manifest=man, graph=graph, scalar_type="Ext", **kw)
 
 
 def _widen_names(cc: CarrierClosure) -> set[str]:
@@ -253,7 +261,7 @@ def test_complex_carrier_widens_to_complex_container(carrier_tree):
     graph = build_call_graph("entry", carrier_tree, tu_file=carrier_tree / "app.h")
     man = ChainManifest(chain_id="c", integral="B", entry_point="entry",
                         lines=[("app.h", ln, ln) for ln in (L_CARRY_W, L_CARRY_R, L_OUTER)])
-    cc = compute_carrier_closure(manifest=man, graph=graph, scalar_type="Ext",
+    cc = compute_value_closure(manifest=man, graph=graph, scalar_type="Ext",
                                  complex_type="ExtC", complex_tokens=frozenset({"CT"}))
     assert cc.widenable == [(str(carrier_tree / "app.h"), L_DECL_CARRY, "carry", "ExtC")]
 
@@ -267,8 +275,128 @@ def test_region_not_in_any_function_raises(carrier_graph):
 def test_empty_chain_returns_empty_closure(carrier_graph=None):
     # No graph access needed: an empty line set yields an empty closure.
     man = ChainManifest(chain_id="c", integral="B", entry_point="entry", lines=[])
-    cc = compute_carrier_closure(manifest=man, graph=None, scalar_type="Ext")
+    cc = compute_value_closure(manifest=man, graph=None, scalar_type="Ext")
     assert cc.widenable == [] and cc.unwidenable_reasons == [] and cc.external_reasons == []
+
+
+# --------------------------------------------------------------------------- #
+# enlarged value closure — synthetic rules-(a)/(b) fixture (termination +
+# refusal precedence).  top -> mid2 -> leaf; `ext` is external (∉ F), `sink`
+# is a module global.  Only `c` (:16) is a chain line.
+# --------------------------------------------------------------------------- #
+
+CLOSURE_H = """\
+#pragma once
+namespace app {
+
+double sink;
+
+template<class T>
+T ext(T x) {
+    return x + T(1);
+}
+
+template<class T>
+T leaf(T a, T& outp) {
+    T c;
+    T d;
+    T e;
+    c = a + T(1);
+    d = ext(c);
+    e = c + T(2);
+    outp = e;
+    sink = c;
+    return c;
+}
+
+template<class T>
+T mid2(T x) {
+    T r = x;
+    return leaf<T>(x, r);
+}
+
+template<class T>
+T top(T x) {
+    return mid2<T>(x);
+}
+
+}  // namespace app
+"""
+
+CL_DECL_C, CL_DECL_D, CL_DECL_E = 13, 14, 15   # `T c; T d; T e;`
+CL_C_W = 16                                    # `c = a + T(1);`  (the only chain line)
+CL_ESCAPE_EXT = 17                             # `d = ext(c);`    (b→local escapes at ext)
+CL_E_JOINS = 18                                # `e = c + T(2);`  (b→local joins)
+CL_OUT_PARAM = 19                              # `outp = e;`      (b→out-param exit)
+CL_GLOBAL_W = 20                               # `sink = c;`      (b→global escape)
+CL_RETURN = 21                                 # `return c;`      (b→return exit)
+
+
+@pytest.fixture
+def closure_tree(tmp_path) -> Path:
+    (tmp_path / "app.h").write_text(CLOSURE_H)
+    return tmp_path
+
+
+@pytest.fixture
+def closure_graph(closure_tree):
+    from agents.patcher.call_graph import build_call_graph
+    fanout.clear_graph_cache()
+    return build_call_graph("top", closure_tree, tu_file=closure_tree / "app.h")
+
+
+def _closure_h(graph, lines, **kw):
+    man = ChainManifest(chain_id="c", integral="B", entry_point="top",
+                        lines=[("app.h", ln, ln) for ln in lines])
+    return compute_value_closure(manifest=man, graph=graph, scalar_type="Ext", **kw)
+
+
+def test_closure_header_line_numbers_match_constants():
+    lines = CLOSURE_H.split("\n")
+    assert lines[CL_DECL_C - 1].strip() == "T c;"
+    assert lines[CL_DECL_D - 1].strip() == "T d;"
+    assert lines[CL_DECL_E - 1].strip() == "T e;"
+    assert lines[CL_C_W - 1].strip() == "c = a + T(1);"
+    assert lines[CL_ESCAPE_EXT - 1].strip() == "d = ext(c);"
+    assert lines[CL_E_JOINS - 1].strip() == "e = c + T(2);"
+    assert lines[CL_OUT_PARAM - 1].strip() == "outp = e;"
+    assert lines[CL_GLOBAL_W - 1].strip() == "sink = c;"
+    assert lines[CL_RETURN - 1].strip() == "return c;"
+
+
+@requires_libclang
+def test_closure_reaches_fixed_point_forward_flow(closure_graph):
+    # Rule (a) seeds `c` (written on the chain line :16, read on frame lines :17-:21,
+    # decl :13).  Rule (b) forwards to the local `e` (:18) whose decl :15 then widens
+    # by rule (a).  The iteration converges to exactly {c, e}; the compat view is empty
+    # (no strict Fix-A carrier), proving the enlarged closure is a superset that does
+    # not leak into consumers.
+    cc = _closure_h(closure_graph, [CL_C_W])
+    assert cc.closure_names == {"c", "e"}
+    assert {(ln, n) for _f, ln, n, _t in cc.closure_widenable} == {
+        (CL_DECL_C, "c"), (CL_DECL_E, "e")}
+    assert cc.carrier_names == set()
+    # designed exits: the out-param write (:19) and the return (:21)
+    exits = {(ln, kind, dst) for _f, ln, kind, dst in cc.designed_exits}
+    assert exits == {(CL_OUT_PARAM, "out_param", "outp"), (CL_RETURN, "return", "c")}
+
+
+@requires_libclang
+def test_closure_refusal_precedence_blocks_destination_not_source(closure_graph):
+    # `d = ext(c)` (:17) reads carried `c` and passes it into ext ∉ F → the destination
+    # `d` is refused (chain_closure_escapes) and never joins, while the rule-(a) source
+    # `c` stays widened (refusal wins for the destination, not the source).  `sink = c`
+    # (:20) is a shared-global write → a second escape.  Neither `d` nor `sink` widens.
+    cc = _closure_h(closure_graph, [CL_C_W])
+    assert "d" not in cc.closure_names
+    assert "sink" not in cc.closure_names
+    esc = {n for n, _r in cc.escape_reasons}
+    assert esc == {"c", "sink"}
+    reasons = {n: r for n, r in cc.escape_reasons}
+    assert "ext" in reasons["c"]                 # callee-∉-F escape
+    assert "global" in reasons["sink"] or "shared" in reasons["sink"]
+    # the rule-(a) source survives the escape of its rule-(b) destination
+    assert "c" in cc.closure_names
 
 
 # --------------------------------------------------------------------------- #
@@ -291,7 +419,7 @@ def _real_closure(graph, integral):
              for c in _REAL_CHAINS[integral]]
     man = ChainManifest(chain_id=f"cascade_{integral}", integral=integral,
                         entry_point="BO", lines=lines)
-    return compute_carrier_closure(manifest=man, graph=graph,
+    return compute_value_closure(manifest=man, graph=graph,
                                    scalar_type="quad::ddfun::ddouble")
 
 
@@ -312,9 +440,10 @@ def test_real_b10_finds_YSA_carriers_on_ddilog(qcdloop_full_graph):
 
 @requires_libclang
 @requires_qcdloop_full
-def test_real_b13_has_no_carriers(qcdloop_full_graph):
-    # B13's interior writes (ga34*/ga43*) are read only on their own write lines /
-    # the output stores — none crosses a chain-line boundary → no carrier.
+def test_real_b13_has_no_compat_carriers(qcdloop_full_graph):
+    # COMPAT (Fix-A) view: B13's ga34*/ga43* are read only on the NON-chain extracts,
+    # never on another chain line → strict condition 2 fails → no Fix-A carrier.  The
+    # enlarged rule (a) DOES capture them (see test_real_b13_closure_widens_ga34).
     cc = _real_closure(qcdloop_full_graph, "B13")
     assert cc.widenable == []
     assert cc.unwidenable_reasons == []
@@ -323,10 +452,83 @@ def test_real_b13_has_no_carriers(qcdloop_full_graph):
 
 @requires_libclang
 @requires_qcdloop_full
-def test_real_b14_has_no_carriers(qcdloop_full_graph):
-    # B14 `fac` is written on a chain line (:401) but read only at the NON-chain output
-    # stores (res(i,1)/res(i,0)) → fails carrier condition 2 → not a carrier (§3).
+def test_real_b14_has_no_compat_carriers(qcdloop_full_graph):
+    # COMPAT (Fix-A) view: B14 `fac` is read only at the NON-chain output stores
+    # (res(i,1)/res(i,0)) → strict condition 2 fails → not a Fix-A carrier.  The
+    # enlarged rule (a) DOES capture it (see test_real_b14_closure_widens_fac).
     cc = _real_closure(qcdloop_full_graph, "B14")
     assert cc.widenable == []
     assert cc.unwidenable_reasons == []
     assert cc.external_reasons == []
+
+
+# --------------------------------------------------------------------------- #
+# enlarged value closure — rules (a)+(b) on the real B10 / B13 / B14 chains
+# --------------------------------------------------------------------------- #
+
+@requires_libclang
+@requires_qcdloop_full
+def test_real_b13_closure_widens_ga34(qcdloop_full_graph):
+    # Rule (a) generalisation: ga34*/ga43* are written on chain lines and read on the
+    # (non-chain) extract lines, so their decls at :282/:283 enter the ENLARGED closure
+    # — empty under Fix A (test_real_b13_has_no_compat_carriers).  Widening the leading
+    # type token widens every same-type sibling, so the :282 declarator `root` rides
+    # along (an over-widened same-type sibling never truncates, §2).
+    cc = _real_closure(qcdloop_full_graph, "B13")
+    assert {"ga34m", "ga34pm1", "ga43m", "ga43pm1"} <= cc.closure_names
+    decl_lines = {ln for _f, ln, _n, _t in cc.closure_widenable}
+    assert decl_lines == {282, 283}
+    assert "root" in cc.closure_names          # :282 multi-declarator sibling
+    # compat view stays empty — the enlarged closure does not leak into what consumers see
+    assert cc.carrier_names == set()
+
+
+@requires_libclang
+@requires_qcdloop_full
+def test_real_b13_closure_escapes_at_ql_real(qcdloop_full_graph):
+    # Rule (b) → local at the frontier: `x34* = ql::Real(ga34*)` reads a carried ga34*
+    # and passes it into ql::Real, a callee NOT in the chain function set → the x34*
+    # destination is refused (chain_closure_escapes) and never joins the closure, while
+    # its source ga34* stays widened (refusal precedence blocks the destination, not the
+    # rule-(a) source).
+    cc = _real_closure(qcdloop_full_graph, "B13")
+    esc_names = {n for n, _r in cc.escape_reasons}
+    assert "ga34m" in esc_names
+    assert any("ql::Real" in r for _n, r in cc.escape_reasons)
+    # the escaping extract destinations never widen; the sources do
+    assert "ga34m" in cc.closure_names and "ga34pm1" in cc.closure_names
+
+
+@requires_libclang
+@requires_qcdloop_full
+def test_real_b14_closure_widens_fac_and_marks_output_store(qcdloop_full_graph):
+    # B14 clean within-frame case: rule (a) widens `fac` (decl :396, written :401, read
+    # at the output stores); rule (b) records the res(i,k) stores at :404/:405 as
+    # kernel-output designed exits (the chain's designed landing at caller precision).
+    cc = _real_closure(qcdloop_full_graph, "B14")
+    assert "fac" in cc.closure_names
+    assert {ln for _f, ln, _n, _t in cc.closure_widenable} == {396}
+    exits = {(ln, kind) for _f, ln, kind, _d in cc.designed_exits}
+    assert (404, "kernel_output") in exits
+    assert (405, "kernel_output") in exits
+    assert cc.carrier_names == set()           # compat view stays empty
+
+
+@requires_libclang
+@requires_qcdloop_full
+def test_real_b10_closure_extends_to_li2omx2_but_stops_at_return(qcdloop_full_graph):
+    # Rule (a) also widens Li2omx2's `prod, Li2omx2;` (decl :691; Li2omx2 written :704,
+    # read at the :707 return), on top of ddilog's Fix-A {Y,S,A}.  Rule (b) marks the
+    # :707 `return Li2omx2` as a designed-exit candidate but — with rule (c) OUT of
+    # scope — does NOT cross into B1m.h, so dilog4/dilog5 stay double and B10's headline
+    # cancellation is still unrecovered (the Subtask 2a/2b job).
+    cc = _real_closure(qcdloop_full_graph, "B10")
+    assert {"Y", "S", "A", "prod", "Li2omx2"} <= cc.closure_names
+    ret_exits = {ln for _f, ln, kind, _d in cc.designed_exits if kind == "return"}
+    assert 707 in ret_exits
+    # no rule (c): the cancellation operands never join under rules (a),(b) alone
+    assert "dilog4" not in cc.closure_names
+    assert "dilog5" not in cc.closure_names
+    assert cc.return_widens == frozenset()
+    # Fix-A compat subset unchanged (regression guard)
+    assert cc.carrier_names == {"Y", "S", "A"}

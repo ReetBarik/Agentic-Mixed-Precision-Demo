@@ -175,37 +175,68 @@ def chain_write_truncation(region_meta: list[dict], *, two_limb: bool,
 
 @dataclass
 class CarrierClosure:
-    """The carrier classification of one chain (BLOCKER_A_CARRIER_DESIGN.md §4).
+    """The value closure of one chain (CLOSURE_SCOPED_CHAINS_DESIGN.md §2).
 
-    * ``widenable`` — ``(file, decl_line, name, dd_type)`` per name whose
-      declaration the emission layer will widen to the chain's internal dd type.
-      A carrier's same-line multi-declarator siblings are included (§2: widening
-      ``TMass Y, S, A;`` widens ``S`` too — an over-widened same-type sibling never
-      truncates), so a name here need not itself be a strict carrier.
-    * ``unwidenable_reasons`` — ``(name, reason)`` per strict carrier whose decl is
-      a function parameter; v1 refuses to rewrite signatures (terminal
-      ``chain_carrier_unwidenable``, wired in Subtask 5).
+    This object carries BOTH views of the closure:
+
+    **The Fix-A-equivalent compat subset** (rule (a) restricted to reads on another
+    *chain* line — the Blocker-A strict-carrier test).  Every current consumer
+    (:func:`chain_promote`'s two terminals, the ``carrier_names`` threaded into every
+    region's boundary transform, the ``decl_widens`` attached to the variants) reads
+    ONLY these fields, so this subtask leaves their behaviour byte-identical.  Subtask
+    1b threads ``closure_names`` through the gate and retires this compat view.
+
+    * ``widenable`` — ``(file, decl_line, name, dd_type)`` per name whose declaration
+      the emission layer widens to the chain's internal dd type (carriers + their
+      same-line multi-declarator siblings, §2).
+    * ``unwidenable_reasons`` — ``(name, reason)`` per strict carrier whose decl is a
+      function parameter (terminal ``chain_carrier_unwidenable``).
     * ``external_reasons`` — ``(name, reason)`` per strict carrier whose decl is a
-      global / class member / output container; v1 refuses to widen shared state
-      (terminal ``chain_carrier_external``, wired in Subtask 5).
+      global / class member / output container (terminal ``chain_carrier_external``).
+    * ``decl_widens`` — one record PER widened decl LINE, ``(file, decl_line,
+      orig_type, dd_type, representative_name)`` (widening the leading type token
+      widens every same-type sibling in one edit, §2).
+
+    **The enlarged value closure** (rules (a) generalised to reads on *any* line in
+    the frame, plus (b) forward-flow — CLOSURE_SCOPED_CHAINS_DESIGN.md §2.3).  Not yet
+    consumed; Subtask 1b wires it into the interior gate.
+
+    * ``closure_widenable`` / ``closure_decl_widens`` — the enlarged analogues of
+      ``widenable`` / ``decl_widens`` (rule (a) local carriers + rule (b) locals).
+    * ``designed_exits`` — ``(file, line, kind, detail)`` rule (b) forward-flow that
+      terminates at the chain's designed landing at caller precision: ``kind`` is
+      ``"return"`` | ``"out_param"`` | ``"kernel_output"``.  These do NOT cross-frame
+      propagate — that is rule (c), Subtask 2a/2b.
+    * ``escape_reasons`` — ``(name, reason)`` per ``chain_closure_escapes`` refusal
+      (§2.4): a carried value that must enter a callee NOT in the chain's function set
+      as an argument (``x34* = ql::Real(ga34*)``), or a rule (b) write to a global /
+      class member / shared output container that is not a per-integral kernel output.
+    * ``return_widens`` — rule (c) variant-return-type widenings; empty in this
+      subtask (populated in Stage 2 / Subtask 2a/2b).
     """
 
     widenable: list[tuple[str, int, str, str]] = field(default_factory=list)
     unwidenable_reasons: list[tuple[str, str]] = field(default_factory=list)
     external_reasons: list[tuple[str, str]] = field(default_factory=list)
-    # One record PER widened decl LINE (not per name): ``(file, decl_line, orig_type,
-    # dd_type, representative_name)``.  Widening the leading type token widens every
-    # same-type sibling of a multi-declarator in one edit (§2), so the emission layer
-    # (Subtask 5) turns each of these — not each ``widenable`` name — into exactly one
-    # :class:`~agents.patcher.fanout.CarrierDecl`.  ``orig_type`` is the core type
-    # token the boundary bare-decl scanner matches; kept here so the closure stays the
-    # single source of the orig→dd type mapping.
     decl_widens: list[tuple[str, int, str, str, str]] = field(default_factory=list)
+    # --- enlarged value closure (rules (a)+(b), §2.3); not consumed until Subtask 1b -
+    closure_widenable: list[tuple[str, int, str, str]] = field(default_factory=list)
+    closure_decl_widens: list[tuple[str, int, str, str, str]] = field(default_factory=list)
+    designed_exits: list[tuple[str, int, str, str]] = field(default_factory=list)
+    escape_reasons: list[tuple[str, str]] = field(default_factory=list)
+    return_widens: frozenset = field(default_factory=frozenset)
 
     @property
     def carrier_names(self) -> set[str]:
-        """Every name whose decl the emission layer widens (carriers + siblings)."""
+        """Fix-A compat view: names the emission layer widens today (carriers +
+        siblings).  A filter of the enlarged closure to the strict-carrier subset —
+        every current consumer keeps receiving exactly this (Subtask 1b retires it)."""
         return {name for _f, _l, name, _t in self.widenable}
+
+    @property
+    def closure_names(self) -> set[str]:
+        """Every name in the ENLARGED value closure (rules (a) generalised + (b))."""
+        return {name for _f, _l, name, _t in self.closure_widenable}
 
 
 @dataclass
@@ -222,23 +253,32 @@ class _DeclStmt:
     names: list[str]
 
 
-def compute_carrier_closure(
+def compute_value_closure(
     *, manifest: ChainManifest, graph: CallGraph, scalar_type: str,
     complex_type: str | None = None, complex_tokens=frozenset(),
     max_paths: int = 1024,
 ) -> CarrierClosure:
-    """Classify a chain's carriers (BLOCKER_A_CARRIER_DESIGN.md §4, steps 1-6).
+    """Compute a chain's value closure (CLOSURE_SCOPED_CHAINS_DESIGN.md §2).
 
     Pure, source-only analysis over ``manifest.lines`` — no tree mutation, no new
     source-analysis machinery (reuses :mod:`agents.shared.region_scan` +
-    :class:`~agents.patcher.call_graph.CallGraph`).  A name is a **strict carrier**
-    iff (1) written by an interior chain line, (2) read by another chain line so the
-    value crosses a chain-line boundary, (3) its decl lies outside the chain's line
-    set, and (4) it is not a write target of the outermost (min-depth) region (the
-    designed exit boundary, §5).  Each surviving carrier's decl site is classified:
-    a local var in a single chain function → widenable (with its multi-declarator
-    siblings); a function parameter → unwidenable; a global / member / output
-    container (or a name visible across >1 chain function) → external.
+    :class:`~agents.patcher.call_graph.CallGraph`).  Produces two views on one
+    :class:`CarrierClosure` (see its docstring):
+
+    * the **Fix-A compat subset** (``widenable`` / ``unwidenable_reasons`` /
+      ``external_reasons`` / ``decl_widens``): the Blocker-A strict-carrier test — a
+      name (1) written by an interior chain line, (2) read by *another chain line*,
+      (3) declared outside the chain line set, (4) not a write target of the
+      outermost region.  Unchanged from Blocker A so every current consumer of this
+      object is byte-identical this subtask;
+
+    * the **enlarged value closure** (``closure_widenable`` / ``closure_decl_widens``
+      / ``designed_exits`` / ``escape_reasons`` / ``return_widens``): the least fixed
+      point of rules (a) [intra-frame carrier, generalised to a read on *any* line in
+      the frame] and (b) [forward flow to a local / out-param / return / kernel
+      output], with ``chain_closure_escapes`` refusals at the frontier (§2.3, §2.4).
+      Rule (c) (cross-frame return propagation) is Subtask 2a/2b — ``return_widens``
+      stays empty here.
 
     Raises :class:`~agents.patcher.fanout.FanoutError` if a chain region is not
     inside any known function or its function is unreachable from the entry point —
@@ -359,6 +399,17 @@ def compute_carrier_closure(
     out.decl_widens.sort(key=lambda w: (w[0], w[1]))
     out.unwidenable_reasons.sort()
     out.external_reasons.sort()
+
+    # -- enlarged value closure (rules (a)+(b) fixed point, §2.3) ----------------
+    # Computed alongside the Fix-A subset above and stored in the closure_* fields;
+    # no current consumer reads these, so the compat behaviour is untouched.
+    frames = {p["fkey"]: p["fd"] for p in per_line}
+    frame_names = {p["fd"].name for p in per_line}
+    _expand_value_closure(
+        out, frames=frames, frame_names=frame_names, func_src=func_src,
+        func_line_start=func_line_start, chain_lineset=chain_lineset,
+        scalar_type=scalar_type, complex_type=complex_type,
+        complex_tokens=complex_tokens)
     return out
 
 
@@ -526,6 +577,295 @@ def _local_decls(func_src: str, func_line_start: int) -> dict[str, _DeclStmt]:
     return out
 
 
+# --------------------------------------------------------------------------- #
+# Closure-scoped chains — enlarged value closure (CLOSURE_SCOPED_CHAINS_DESIGN.md §2)
+#
+# The Fix-A carrier analysis above is the strict special case (rule (a) restricted to
+# reads on another *chain* line).  These helpers compute the enlarged closure: the
+# least fixed point of rule (a) [intra-frame carrier, read on ANY frame line] and rule
+# (b) [forward flow to a local / out-param / return / kernel output], with
+# ``chain_closure_escapes`` refusals at the frontier.  Rule (c) (cross-frame return
+# propagation) is Subtask 2a/2b and is NOT computed here.
+# --------------------------------------------------------------------------- #
+
+
+def _scan_calls(line_text: str) -> list[tuple[str, str, set[str]]]:
+    """Calls on one source line: ``(qualified_callee, last_segment, arg_idents)``.
+
+    ``last_segment`` is the callee's final name token (``Real`` for ``ql::Real``),
+    matched against the chain function set and the type-token cast set by rule (b).
+    ``arg_idents`` is every identifier read inside the call's parentheses (any depth),
+    excluding member / qualified-reference leads and nested call targets — enough to
+    decide whether a carried value flows into the callee.
+    """
+    toks = region_scan._tokenize(line_text)
+    n = len(toks)
+    calls: list[tuple[str, str, set[str]]] = []
+    i = 0
+    while i < n:
+        t = toks[i]
+        if region_scan._is_ident_tok(t.text) and i + 1 < n and toks[i + 1].text == "(":
+            prefix: list[str] = []          # qualify: (ident ::)* ident
+            k = i - 1
+            while k - 1 >= 0 and toks[k].text == "::" \
+                    and region_scan._is_ident_tok(toks[k - 1].text):
+                prefix.insert(0, toks[k - 1].text)
+                k -= 2
+            last = t.text
+            qual = "::".join(prefix + [last]) if prefix else last
+            depth = 0
+            args: set[str] = set()
+            j = i + 1
+            while j < n:
+                tx = toks[j].text
+                if tx == "(":
+                    depth += 1
+                elif tx == ")":
+                    depth -= 1
+                    if depth == 0:
+                        break
+                elif region_scan._is_ident_tok(tx):
+                    prev = toks[j - 1].text
+                    nxt = toks[j + 1].text if j + 1 < n else ""
+                    if prev not in (".", "->", "::") and nxt not in ("(", "::"):
+                        args.add(tx)
+                j += 1
+            calls.append((qual, last, args))
+            i = j + 1
+            continue
+        i += 1
+    return calls
+
+
+def _scan_container_stores(line_text: str) -> list[tuple[str, set[str]]]:
+    """Indexed / functor stores on one line: ``(container_name, rhs_idents)``.
+
+    Matches a statement-leading ``name(...) = …`` or ``name[...] = …`` (the qcdloop
+    kernel-output form ``res(i,k) = …``) — an assignment, not a call statement or a
+    ``==`` comparison.  ``rhs_idents`` are the identifiers read on the right-hand side.
+    """
+    toks = region_scan._tokenize(line_text)
+    n = len(toks)
+    stores: list[tuple[str, set[str]]] = []
+    i = 0
+    while i < n:
+        t = toks[i]
+        if region_scan._is_ident_tok(t.text) and i + 1 < n \
+                and toks[i + 1].text in ("(", "["):
+            prev = toks[i - 1].text if i > 0 else ""
+            if prev not in ("", ";", "{", "}"):
+                i += 1
+                continue                    # not statement-leading -> a nested call/cast
+            depth = 0
+            j = i + 1
+            while j < n:
+                tx = toks[j].text
+                if tx in ("(", "["):
+                    depth += 1
+                elif tx in (")", "]"):
+                    depth -= 1
+                    if depth == 0:
+                        break
+                j += 1
+            a = j + 1
+            if a < n and toks[a].text == "=" \
+                    and (a + 1 >= n or toks[a + 1].text != "="):
+                rhs: set[str] = set()
+                m = a + 1
+                while m < n:
+                    tx = toks[m].text
+                    if region_scan._is_ident_tok(tx):
+                        p = toks[m - 1].text
+                        nx = toks[m + 1].text if m + 1 < n else ""
+                        if p not in (".", "->", "::") and nx not in ("(", "::"):
+                            rhs.add(tx)
+                    m += 1
+                stores.append((t.text, rhs))
+            i = j + 1
+            continue
+        i += 1
+    return stores
+
+
+def _expand_value_closure(out: CarrierClosure, *, frames, frame_names, func_src,
+                          func_line_start, chain_lineset, scalar_type,
+                          complex_type, complex_tokens) -> None:
+    """Populate ``out``'s enlarged-closure fields (rules (a)+(b) fixed point, §2.3).
+
+    ``frames`` maps each chain frame key ``(file, ls, le)`` to its function decl;
+    ``frame_names`` is the set of chain function names ``F`` (a call whose target is
+    in ``F`` is a chain-internal edge — rule (c) territory, not an escape).
+    """
+    # type tokens that, used as a call target, denote a cast rather than an escape
+    type_tokens: set[str] = set(complex_tokens) | {scalar_type}
+    decls_by_frame: dict = {}
+    param_by_frame: dict = {}
+    for fkey in frames:
+        d = _local_decls(func_src[fkey], func_line_start[fkey])
+        decls_by_frame[fkey] = d
+        for st in d.values():
+            type_tokens.add(st.core_type)
+        param_by_frame[fkey] = region_scan._param_name_core_types(
+            region_scan._tokenize(func_src[fkey]))
+
+    # -- per-frame, per-line scan (reads / writes / calls / stores / return) -----
+    line_reads: dict = {}
+    line_writes: dict = {}
+    line_calls: dict = {}
+    line_stores: dict = {}
+    line_return: dict = {}
+    frame_writes: dict = {}                 # fkey -> every name written in the frame
+    chain_lines_in_frame: dict = {}
+    for fkey in frames:
+        ls0 = func_line_start[fkey]
+        le0 = fkey[2]
+        src_lines = func_src[fkey].split("\n")
+        lr, lw, lc, lst, lret = {}, {}, {}, {}, {}
+        fw: set[str] = set()
+        for L in range(ls0, le0 + 1):
+            idx = L - ls0
+            txt = src_lines[idx] if 0 <= idx < len(src_lines) else ""
+            writes = set(region_scan.region_writes_from_source(txt))
+            lr[L] = _names_read_in_region(txt)
+            lw[L] = writes
+            lc[L] = _scan_calls(txt)
+            lst[L] = _scan_container_stores(txt)
+            lret[L] = any(tk.text == "return" for tk in region_scan._tokenize(txt))
+            fw |= writes
+        line_reads[fkey] = lr
+        line_writes[fkey] = lw
+        line_calls[fkey] = lc
+        line_stores[fkey] = lst
+        line_return[fkey] = lret
+        frame_writes[fkey] = fw
+        cl = chain_lineset.get(fkey[0], set())
+        chain_lines_in_frame[fkey] = {L for L in cl if ls0 <= L <= le0}
+
+    # -- seed (§2.2): names WRITTEN on a chain line -------------------------------
+    # A value merely READ on a chain line is an input (a constant / param, or a value
+    # whose dd-ness would require rule (c) — e.g. B10's dilog4/dilog5 from Li2omx2's
+    # return); under rules (a),(b) alone it is not yet carried, so the seed is the
+    # names the chain writes on its own lines (the a,b-only fixed point stops exactly
+    # where §2.7 says it must — at Li2omx2's return — without rule (c)).
+    W: dict = {}
+    for fkey in frames:
+        seed: set[str] = set()
+        for L in chain_lines_in_frame[fkey]:
+            seed |= line_writes[fkey].get(L, set())
+        W[fkey] = seed
+
+    widen_groups: dict = {}                 # (file, decl_line) -> _DeclStmt
+    designed: set = set()                    # (file, line, kind, detail)
+    escapes: dict = {}                       # name -> reason
+    MAX_ROUNDS = 64
+    changed = True
+    rounds = 0
+    while changed and rounds < MAX_ROUNDS:
+        changed = False
+        rounds += 1
+        for fkey in frames:
+            file = fkey[0]
+            decls = decls_by_frame[fkey]
+            params = param_by_frame[fkey]
+            cif = chain_lines_in_frame[fkey]
+            frame_lines = range(func_line_start[fkey], fkey[2] + 1)
+            wf = W[fkey]
+            # carried lines: chain lines + any line that writes a carried value
+            carried_lines = set(cif)
+            for L in frame_lines:
+                if line_writes[fkey].get(L, set()) & wf:
+                    carried_lines.add(L)
+
+            # ---- rule (a): intra-frame carrier decl widening -------------------
+            for v in sorted(wf):
+                stmt = decls.get(v)
+                if stmt is None:
+                    continue                # param / global: not a local decl to widen
+                if stmt.decl_line in cif:
+                    continue                # decl inside chain set -> body transform owns it
+                written_on_carried = any(
+                    v in line_writes[fkey].get(L, set()) for L in carried_lines)
+                read_lines = [L for L in frame_lines
+                              if v in line_reads[fkey].get(L, set())]
+                if not (written_on_carried and read_lines):
+                    continue
+                key = (file, stmt.decl_line)
+                if key not in widen_groups:
+                    widen_groups[key] = stmt
+                    changed = True
+
+            # ---- rule (b): forward flow ----------------------------------------
+            for L in frame_lines:
+                carried_here = line_reads[fkey].get(L, set()) & wf
+                if not carried_here:
+                    continue
+                # escape: a carried value passed into a callee NOT in F (not a cast)
+                escaped_line = False
+                for (qual, last, args) in line_calls[fkey].get(L, []):
+                    if last in frame_names or last in type_tokens:
+                        continue            # chain-internal edge (rule c) / a type cast
+                    esc = args & wf
+                    if esc:
+                        escaped_line = True
+                        for nm in sorted(esc):
+                            if nm not in escapes:
+                                escapes[nm] = (
+                                    f"carried value {nm!r} enters callee {qual!r} (not "
+                                    f"in the chain function set) as an argument at "
+                                    f"{Path(file).name}:{L} — v1 does not widen its "
+                                    f"signature")
+                                changed = True
+                # rule (b) -> out-param / local write
+                for w in line_writes[fkey].get(L, set()):
+                    if w in params:
+                        d = (file, L, "out_param", w)
+                        if d not in designed:
+                            designed.add(d)
+                            changed = True
+                        continue
+                    if decls.get(w) is None:
+                        # neither local nor param -> global / class member / shared
+                        # output container (§2.4): a chain_closure_escapes refusal.
+                        if w not in escapes:
+                            escapes[w] = (
+                                f"rule (b) writes shared global/member {w!r} at "
+                                f"{Path(file).name}:{L} — v1 does not widen shared state")
+                            changed = True
+                        continue
+                    if escaped_line:
+                        continue            # producer escaped -> destination blocked
+                    if w not in wf:
+                        wf.add(w)
+                        changed = True
+                # rule (b) -> indexed kernel-output store (res(i,k)) -> designed exit
+                for (container, rhs) in line_stores[fkey].get(L, []):
+                    if rhs & wf:
+                        d = (file, L, "kernel_output", container)
+                        if d not in designed:
+                            designed.add(d)
+                            changed = True
+                # rule (b) -> return -> designed exit
+                if line_return[fkey].get(L):
+                    d = (file, L, "return", ",".join(sorted(carried_here)))
+                    if d not in designed:
+                        designed.add(d)
+                        changed = True
+
+    # -- expand each widened decl line to all its declarators (siblings, §2) ------
+    for (dfile, dline), stmt in widen_groups.items():
+        dd_type = _carrier_dd_type(stmt.core_type, scalar_type,
+                                   complex_type, complex_tokens)
+        for nm in stmt.names:
+            out.closure_widenable.append((dfile, dline, nm, dd_type))
+        out.closure_decl_widens.append(
+            (dfile, dline, stmt.core_type, dd_type, stmt.names[0]))
+
+    out.closure_widenable.sort(key=lambda w: (w[0], w[1], w[2]))
+    out.closure_decl_widens.sort(key=lambda w: (w[0], w[1]))
+    out.designed_exits = sorted(designed)
+    out.escape_reasons = sorted(escapes.items())
+
+
 def chain_promote(*, manifest: ChainManifest, graph: CallGraph,
                   tree_root: str | Path, scalar_type: str, two_limb: bool,
                   shim_include: str | None, caller_type: str = "double",
@@ -551,7 +891,7 @@ def chain_promote(*, manifest: ChainManifest, graph: CallGraph,
     # widenable carrier's name is threaded into every region's boundary transform so it
     # is neither demoted at a region exit nor read as inert, and its declaration is
     # widened in the variant (VariantSpec.carrier_decls, applied per file below).
-    closure = compute_carrier_closure(
+    closure = compute_value_closure(
         manifest=manifest, graph=graph, scalar_type=scalar_type,
         complex_type=complex_type, complex_tokens=complex_tokens, max_paths=max_paths)
     if closure.unwidenable_reasons:
