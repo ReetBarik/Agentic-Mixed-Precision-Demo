@@ -14,6 +14,35 @@ def _row(region_id, rung, de, bde, status="measured", kind=None, intent="speedup
     }
 
 
+# --- Phase 2f kernel-scope: target_kernel population ---------------------------
+def test_target_kernel_from_explicit_integral_tag():
+    row = _row("A.h:10", "float", de=1e-7, bde=1e-13)
+    row["integral"] = "B14"
+    qb = build_queue([row])
+    assert qb.queue[0].target_kernel == "B14"
+
+
+def test_target_kernel_from_single_element_scope():
+    row = _row("A.h:10", "float", de=1e-7, bde=1e-13)
+    row["integrals_scope"] = ["B12"]
+    qb = build_queue([row])
+    assert qb.queue[0].target_kernel == "B12"
+
+
+def test_target_kernel_none_on_multi_integral_scope():
+    # A shared helper affecting several kernels -> whole-app gating (conservative).
+    row = _row("A.h:10", "float", de=1e-7, bde=1e-13)
+    row["integrals_scope"] = ["B12", "B14"]
+    qb = build_queue([row])
+    assert qb.queue[0].target_kernel is None
+
+
+def test_target_kernel_none_when_untagged():
+    row = _row("A.h:10", "float", de=1e-7, bde=1e-13)
+    qb = build_queue([row])
+    assert qb.queue[0].target_kernel is None
+
+
 # --- DISCRIM / INERT filtering -------------------------------------------------
 def test_measured_discrim_enters_queue():
     rows = [_row("A.h:10", "float", de=1e-7, bde=1e-13)]

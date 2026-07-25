@@ -126,7 +126,10 @@ def _run_one_integral(integral: str, args, out_root: Path, vanilla_headers: Path
         region_id=dom.chain_id, rung="chain_dd", kind="double-to-dd",
         intent="correctness", via="chain",
         delta_effective=1e-30, baseline_delta_effective=1e-4,   # placeholder DISCRIM
-        chain_lines=tuple(chain_lines), predicted_lift=dom.predicted_lift)
+        chain_lines=tuple(chain_lines), predicted_lift=dom.predicted_lift,
+        # Phase 2f kernel-scope: gate this chain against ITS integral's own floor, not
+        # the whole-app p100 (pinned by whichever kernel is worst — B12's hotspot).
+        target_kernel=integral)
 
     print(f"\n=== Tier-B Stage-1: {integral} ===", flush=True)
     print(f"  chains total/computed : {cmeta.get('n_chains',0)} / {n_computed}", flush=True)
@@ -196,12 +199,17 @@ def _run_one_integral(integral: str, args, out_root: Path, vanilla_headers: Path
                "gate_tree_hash": gate_tree_hash}
         t0 = time.monotonic()
         v = validator_fn(candidate_sha, ctx)
+        cand_stats = v.get("candidate") or {}
+        curr_stats = v.get("current") or {}
         if _diag["baseline_hotspot"] is None:
-            _diag["baseline_hotspot"] = (v.get("current") or {}).get("hotspot")
+            _diag["baseline_hotspot"] = curr_stats.get("hotspot")
         return ValidateResult(
-            cand_min=(v.get("candidate") or {}).get("min_precise_digits"),
-            curr_min=(v.get("current") or {}).get("min_precise_digits"),
+            cand_min=cand_stats.get("min_precise_digits"),
+            curr_min=curr_stats.get("min_precise_digits"),
             combined_cand_min=v.get("cand_min_precise_digits"),
+            # Phase 2f kernel-scope: per-integral floors for the kernel-scoped gate.
+            cand_per_kernel=cand_stats.get("per_integral_min_precise_digits") or {},
+            curr_per_kernel=curr_stats.get("per_integral_min_precise_digits") or {},
             verdict=v.get("verdict"), verdict_reason=v.get("verdict_reason"),
             wall_sec=round(time.monotonic() - t0, 1))
 
@@ -227,15 +235,26 @@ def _run_one_integral(integral: str, args, out_root: Path, vanilla_headers: Path
     diff_path = out_dir / "final.diff"
     repo.write_cumulative_diff(starting_sha, diff_path)
     o = res.outcomes[0] if res.outcomes else None
+    # Whole-app lift (pinned by the worst kernel — kept for continuity / cross-kernel
+    # visibility) and the kernel-scoped lift the gate actually decided on (Phase 2f).
     measured_lift = (
         (res.final_min - res.baseline_min)
         if (res.final_min is not None and res.baseline_min is not None) else None)
+    k_baseline = res.baseline_by_kernel.get(integral)
+    k_final = res.final_by_kernel.get(integral)
+    kernel_lift = (
+        (k_final - k_baseline)
+        if (k_final is not None and k_baseline is not None) else None)
     summary.update(
         chain_id=dom.chain_id, tightness=dom.tightness,
         measured_max_rel_err=dom.max_rel_err, predicted_lift=dom.predicted_lift,
         chain_lines=[f"{f}:{ls}" for f, ls, _ in chain_lines],
         baseline_min=res.baseline_min, final_min=res.final_min,
         measured_lift=measured_lift,
+        # Phase 2f kernel-scope: this integral's OWN floor + the lift the gate decided on.
+        kernel_baseline_min=k_baseline, kernel_final_min=k_final,
+        kernel_measured_lift=kernel_lift,
+        baseline_by_kernel=res.baseline_by_kernel, final_by_kernel=res.final_by_kernel,
         outcome=(o.outcome if o else "no_outcome"),
         reason_tag=(o.reason_tag if o else None),
         patcher_status=(o.patcher_status if o else None),
@@ -245,8 +264,10 @@ def _run_one_integral(integral: str, args, out_root: Path, vanilla_headers: Path
         baseline_hotspot=_diag["baseline_hotspot"],
         diff_path=str(diff_path), tree=str(tree))
     (out_dir / "tierb_result.json").write_text(json.dumps(summary, indent=2))
-    print(f"  -> baseline {res.baseline_min} final {res.final_min} "
-          f"lift {measured_lift} outcome {summary['outcome']}", flush=True)
+    print(f"  -> whole-app baseline {res.baseline_min} final {res.final_min} "
+          f"(lift {measured_lift}); kernel[{integral}] baseline {k_baseline} "
+          f"final {k_final} (lift {kernel_lift}) outcome {summary['outcome']}",
+          flush=True)
     return summary
 
 
@@ -260,37 +281,59 @@ def _write_report(path: Path, results: list[dict], args, today: str) -> None:
              f"(chain_dd); tolerance {args.tolerance} (reporting-only)",
              f"- seed {args.seed}, sample_count {args.sample_count}, entry {args.entry_point}",
              "",
-             "## Per-integral outcome", "",
-             "| I | baseline p100 | final p100 | measured lift | predicted lift | "
-             "outcome | chain | lines |",
-             "|---|---|---|---|---|---|---|---|"]
+             "## Per-integral outcome (kernel-scoped gate)", "",
+             "The gate now scores each chain against ITS integral's own p100 floor "
+             "(kernel-scope, Reet 2026-07-25), not the whole-app min pinned by the "
+             "worst kernel (B12's hotspot). Whole-app columns are kept for cross-kernel "
+             "visibility.",
+             "",
+             "| I | kernel baseline | kernel final | kernel lift | predicted lift | "
+             "app baseline | app final | outcome | chain | lines |",
+             "|---|---|---|---|---|---|---|---|---|---|"]
+
+    def _f(x):
+        return f"{x:.4f}" if isinstance(x, (int, float)) else "—"
+
+    def _lift(x):
+        return f"{x:+.2f}" if isinstance(x, (int, float)) else "—"
+
     for r in results:
         if r.get("outcome") == "no_computed_chain":
-            lines.append(f"| {r['integral']} | — | — | — | — | no_computed_chain | — | — |")
+            lines.append(f"| {r['integral']} | — | — | — | — | — | — | "
+                         f"no_computed_chain | — | — |")
             continue
-        ml = r.get("measured_lift")
-        ml_s = f"{ml:+.2f}" if isinstance(ml, (int, float)) else "—"
         pl = r.get("predicted_lift")
         pl_s = f"+{pl:.2f}" if isinstance(pl, (int, float)) else "—"
         oc = r.get("outcome", "?")
         if r.get("reason_tag"):
             oc = f"{oc} ({r['reason_tag']})"
         lines.append(
-            f"| {r['integral']} | {r.get('baseline_min')} | {r.get('final_min')} | "
-            f"{ml_s} | {pl_s} | {oc} | {r.get('chain_id','')} | "
-            f"{len(r.get('chain_lines',[]))} |")
-    lines += ["", "## Predicted vs measured lift", ""]
+            f"| {r['integral']} | {_f(r.get('kernel_baseline_min'))} | "
+            f"{_f(r.get('kernel_final_min'))} | {_lift(r.get('kernel_measured_lift'))} | "
+            f"{pl_s} | {_f(r.get('baseline_min'))} | {_f(r.get('final_min'))} | "
+            f"{oc} | {r.get('chain_id','')} | {len(r.get('chain_lines',[]))} |")
+    lines += ["", "## Predicted vs measured lift (kernel-scoped)", ""]
     for r in results:
         if r.get("outcome") == "no_computed_chain":
             continue
         lines.append(
             f"- **{r['integral']}** ({r.get('chain_id')}): predicted "
-            f"+{r.get('predicted_lift', 0):.2f}, measured "
-            f"{r.get('measured_lift')}, tightness {r.get('tightness')}, "
+            f"+{r.get('predicted_lift', 0):.2f}, kernel-measured "
+            f"{_lift(r.get('kernel_measured_lift'))} "
+            f"({_f(r.get('kernel_baseline_min'))} -> {_f(r.get('kernel_final_min'))}), "
+            f"whole-app lift {_lift(r.get('measured_lift'))}, "
+            f"tightness {r.get('tightness')}, "
             f"patcher_status={r.get('patcher_status')}, "
             f"declared_dd={r.get('declared_dd')}")
         lines.append(f"    - lines: {', '.join(r.get('chain_lines', []))}")
     lines += ["", "## Notes",
+              "- Kernel-scope gate (Reet 2026-07-25): each chain gated against its own "
+              "integral's p100 floor, not the whole-app min (which B12's hotspot pins). "
+              "The whole-app gate rejected B14 as chain_no_lift because it couldn't move "
+              "the global min; the kernel-scope gate measures B14's own coefficient lift.",
+              "- Chain-scope 2d-B (Fix 1): the gate now fires only on INTERIOR chain "
+              "regions; the outermost region's exit-truncation is the designed output "
+              "boundary and is exempt (was false-positiving B10/B12 pre-build).",
               "- STOP after Stage-1 for review; Group B / all-21 not run.",
               "- v1 = dominant chain per integral; multi-chain union deferred to Stage-2.",
               ""]
@@ -357,10 +400,11 @@ def main(argv: list[str] | None = None) -> int:
     _write_report(md, results, args, today)
     (out_root / "tierb_stage1_results.json").write_text(json.dumps(results, indent=2))
 
-    print("\n=== Tier-B Stage-1 summary ===", flush=True)
+    print("\n=== Tier-B Stage-1 summary (kernel-scoped) ===", flush=True)
     for r in results:
         print(f"  {r['integral']:5s} {r.get('outcome','?'):28s} "
-              f"lift={r.get('measured_lift')} (pred +{r.get('predicted_lift', 0)})",
+              f"kernel_lift={r.get('kernel_measured_lift')} "
+              f"(pred +{r.get('predicted_lift', 0)}) app_lift={r.get('measured_lift')}",
               flush=True)
     print(f"  wrote {md}", flush=True)
     print("  STOP after Stage-1 — Reet reviews before Group B / all 21.", flush=True)

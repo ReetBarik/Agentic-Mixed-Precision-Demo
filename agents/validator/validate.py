@@ -398,6 +398,10 @@ def _score(cand: runner.CoeffArrays, ref: runner.CoeffArrays, label: str,
     hot = None
     zeroed = 0
     total_components = 0
+    # Phase 2f kernel-scope: the per-integral min_precise_digits (a candidate targeting
+    # kernel K is gated against K's own floor, not the whole-app min pinned by whichever
+    # kernel is worst).  A pure by-product of the same per-component sweep — no extra run.
+    per_integral_min: dict[str, float] = {}
 
     writer = None
     if out_dir is not None:
@@ -414,6 +418,7 @@ def _score(cand: runner.CoeffArrays, ref: runner.CoeffArrays, label: str,
                 raise ValueError(
                     f"{label}: {integ} length {len(c_hi)} != DD ref {len(r_hi)} "
                     "(sample-count mismatch)")
+            integ_min = MAX_DIGITS_F
             n_samples = len(r_hi) // N_COMPONENTS
             for s in range(n_samples):
                 base = s * N_COMPONENTS
@@ -435,6 +440,8 @@ def _score(cand: runner.CoeffArrays, ref: runner.CoeffArrays, label: str,
                     true = abs(r_hi[j] + r_lo[j])
                     if err != 0.0 and effectively_zero(true, ref_scale):
                         zeroed += 1
+                    if d < integ_min:
+                        integ_min = d
                     if d < best_min:
                         best_min = d
                         hot = {
@@ -450,6 +457,7 @@ def _score(cand: runner.CoeffArrays, ref: runner.CoeffArrays, label: str,
                         "integral": integ, "sample_idx": s,
                         "digits": [round(x, 4) for x in row_digits],
                     }) + "\n")
+            per_integral_min[integ] = round(integ_min, 4)
     finally:
         if writer is not None:
             writer.close()
@@ -458,6 +466,7 @@ def _score(cand: runner.CoeffArrays, ref: runner.CoeffArrays, label: str,
         hot["precise_digits"] = round(hot["precise_digits"], 4)
     return {
         "min_precise_digits": round(best_min, 4),
+        "per_integral_min_precise_digits": per_integral_min,   # Phase 2f kernel-scope
         "hotspot": hot,
         "zeroed_components": zeroed,
         "total_components": total_components,

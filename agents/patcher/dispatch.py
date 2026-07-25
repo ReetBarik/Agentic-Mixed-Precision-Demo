@@ -540,9 +540,11 @@ def _gen_chain(intent: RemediationIntent, deps: PatchDeps, attempt: int) -> Gen:
                    f"across all {len(chain_lines)} regions (empty whole-chain payload)")
     if cr.write_truncation:
         return Gen(False, R.WRITE_TRUNCATION, R.ERR_TRUNCATION,
-                   f"chain write_truncation: chain {manifest.chain_id}'s outermost region "
-                   f"truncates every landing back to double (no wider persistent sink) — "
-                   f"the chain output boundary is numerically inert")
+                   f"chain write_truncation: an INTERIOR region of chain "
+                   f"{manifest.chain_id} truncates every landing back to double (no wider "
+                   f"persistent sink) — an intra-chain write injects double roundoff "
+                   f"between links, breaking the chain (the outermost region's "
+                   f"exit-truncation is the designed boundary and is exempt)")
 
     return Gen(True, shim_paths=all_shims, llm_tokens=total_tokens,
                declared_variants=list(cr.declared_variants),

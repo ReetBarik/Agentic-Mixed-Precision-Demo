@@ -28,11 +28,12 @@ def _cand(region_id, rung, de=1e-7, bde=1e-13):
                      delta_effective=de, baseline_delta_effective=bde)
 
 
-def _chain_cand(chain_id, predicted_lift=10.0, de=1e-30, bde=1e-4):
+def _chain_cand(chain_id, predicted_lift=10.0, de=1e-30, bde=1e-4, target_kernel=None):
     return Candidate(region_id=chain_id, rung="chain_dd", kind="double-to-dd",
                      intent="correctness", via="chain",
                      delta_effective=de, baseline_delta_effective=bde,
-                     chain_lines=(("f.h", 10, 10),), predicted_lift=predicted_lift)
+                     chain_lines=(("f.h", 10, 10),), predicted_lift=predicted_lift,
+                     target_kernel=target_kernel)
 
 
 class FakeHarness:
@@ -295,3 +296,121 @@ def test_single_region_gate_unchanged_by_chain_addition():
     assert len(res.accepted) == 1
     assert res.accepted[0].reason_tag is None
     assert "baseline" in res.accepted[0].reason and "margin" in res.accepted[0].reason
+
+
+# --- Phase 2f: kernel-scope acceptance gate -----------------------------------
+class KernelHarness:
+    """Apply/validate/revert/head with per-kernel p100 arrays.
+
+    ``cand_per_kernel[(region_id, rung)]`` is the whole per-kernel dict the validator
+    reports for the accumulated-tree-with-that-candidate; ``baseline_per_kernel`` is the
+    unpatched per-kernel dict.  The whole-app ``cand_min`` is the min across kernels."""
+
+    def __init__(self, cand_per_kernel, baseline_per_kernel):
+        self.cand_per_kernel = cand_per_kernel
+        self.baseline_per_kernel = baseline_per_kernel
+        self._head = "sha0"
+        self._n = 0
+        self.applied = []
+        self.reverted = []
+
+    def head(self):
+        return self._head
+
+    def apply(self, cand, parent):
+        self.applied.append((cand.region_id, cand.rung))
+        self._n += 1
+        self._head = f"sha{self._n}"
+        return ApplyResult(ok=True, candidate_sha=self._head, patcher_status="ok",
+                           gate_binary="/b", gate_tree_hash="h")
+
+    def validate(self, candidate_sha, gate_binary, gate_tree_hash):
+        key = self.applied[-1]
+        cpk = self.cand_per_kernel.get(key, {})
+        bpk = self.baseline_per_kernel
+        return ValidateResult(
+            cand_min=(min(cpk.values()) if cpk else None),
+            curr_min=(min(bpk.values()) if bpk else None),
+            combined_cand_min=(min(cpk.values()) if cpk else None),
+            cand_per_kernel=dict(cpk), curr_per_kernel=dict(bpk),
+            verdict="?", verdict_reason="?")
+
+    def revert(self, parent):
+        self.reverted.append(parent)
+        self._head = parent
+
+    def run(self, queue, margin=MARGIN):
+        return solve(queue, apply_fn=self.apply, validate_fn=self.validate,
+                     revert_fn=self.revert, head_fn=self.head, margin=margin)
+
+
+def test_kernel_scope_gate_reads_per_kernel_baseline():
+    # Whole-app min is pinned by B12 (3.0), far below B14's floor.  A B14 chain that
+    # lifts B14 8.0 -> 12.0 accepts on B14's OWN scope even though whole-app min never
+    # moves (still 3.0, pinned by B12).  The whole-app gate would reject as no_lift.
+    baseline = {"B12": 3.0, "B14": 8.0}
+    q = [_chain_cand("cascadeB14", target_kernel="B14")]
+    h = KernelHarness(
+        cand_per_kernel={("cascadeB14", "chain_dd"): {"B12": 3.0, "B14": 12.0}},
+        baseline_per_kernel=baseline)
+    res = h.run(q)
+    assert len(res.accepted) == 1
+    o = res.accepted[0]
+    assert o.target_kernel == "B14"
+    assert o.min_before == 8.0 and o.min_after == 12.0     # B14's own floor, not 3.0
+    assert res.baseline_by_kernel == {"B12": 3.0, "B14": 8.0}
+    assert res.final_by_kernel["B14"] == 12.0
+
+
+def test_kernel_scope_none_uses_whole_app():
+    # target_kernel=None keeps the whole-app min gate (existing behaviour).
+    q = [_chain_cand("cascade", target_kernel=None)]
+    h = KernelHarness(
+        cand_per_kernel={("cascade", "chain_dd"): {"B12": 3.0, "B14": 12.0}},
+        baseline_per_kernel={"B12": 3.0, "B14": 8.0})
+    res = h.run(q)
+    # whole-app cand_min = 3.0, accumulated baseline = 3.0 -> bar 3.5 -> no lift.
+    assert len(res.rejected) == 1
+    assert res.rejected[0].reason_tag == "chain_no_lift"
+    assert res.rejected[0].target_kernel is None
+
+
+def test_per_kernel_accumulated_mins_do_not_cross():
+    # A B14 chain accepts and lifts B14; a subsequent B12 chain must be gated against
+    # B12's OWN accumulated floor (still 3.0), NOT B14's lifted 12.0 — no free ride.
+    q = [_chain_cand("cascadeB14", target_kernel="B14"),
+         _chain_cand("cascadeB12", target_kernel="B12")]
+    h = KernelHarness(
+        cand_per_kernel={
+            ("cascadeB14", "chain_dd"): {"B12": 3.0, "B14": 12.0},
+            # B12 chain lifts B12 3.0 -> 5.0 (>= 3.0 + 0.5); B14 stays lifted.
+            ("cascadeB12", "chain_dd"): {"B12": 5.0, "B14": 12.0}},
+        baseline_per_kernel={"B12": 3.0, "B14": 8.0})
+    res = h.run(q)
+    assert {o.candidate.region_id for o in res.accepted} == {"cascadeB14", "cascadeB12"}
+    b12 = [o for o in res.accepted if o.candidate.region_id == "cascadeB12"][0]
+    assert b12.min_before == 3.0 and b12.min_after == 5.0   # B12's own floor, not 12.0
+
+
+def test_kernel_scope_chain_regression_on_own_kernel():
+    # A B14 chain that WORSENS B14 below baseline - margin is a chain_regression at
+    # kernel scope, even though the whole-app min (B12=3.0) is untouched.
+    q = [_chain_cand("cascadeB14", target_kernel="B14")]
+    h = KernelHarness(
+        cand_per_kernel={("cascadeB14", "chain_dd"): {"B12": 3.0, "B14": 6.0}},
+        baseline_per_kernel={"B12": 3.0, "B14": 8.0})    # 6.0 < 8.0 - 0.5
+    res = h.run(q)
+    assert res.rejected[0].reason_tag == "chain_regression"
+    assert res.rejected[0].target_kernel == "B14"
+
+
+def test_kernel_scope_unmeasured_kernel_rejects_and_flags():
+    # A candidate targeting a kernel absent from the per-kernel arrays cannot be gated;
+    # reject-and-flag (visible gap), never a silent whole-app fall-back.
+    q = [_chain_cand("cascadeBX", target_kernel="BX")]
+    h = KernelHarness(
+        cand_per_kernel={("cascadeBX", "chain_dd"): {"B12": 3.0, "B14": 12.0}},
+        baseline_per_kernel={"B12": 3.0, "B14": 8.0})   # no "BX"
+    res = h.run(q)
+    assert res.rejected[0].reason_tag == "kernel_scope_unmeasured"
+    assert h.reverted == ["sha0"]

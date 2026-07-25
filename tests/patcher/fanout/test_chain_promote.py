@@ -87,22 +87,54 @@ def test_chain_promotion_no_op_fires_only_when_all_empty():
     assert chain_promotion_no_op([True]) is False
 
 
-def test_chain_write_truncation_delegates_to_boundary(monkeypatch):
-    captured = {}
+def test_chain_write_truncation_skips_outermost_region(monkeypatch):
+    # A chain whose OUTERMOST region (min depth) truncates to caller precision but whose
+    # INTERIOR regions all widen cleanly must NOT fire — the outermost store is the
+    # chain's designed exit boundary, not evidence of inertness.
+    checked = []
 
     def fake(region_text, reads, writes, two_limb, *, caller_type="double",
              complex_tokens=frozenset(), caller_complex=None):
-        captured.update(region_text=region_text, reads=reads, writes=writes,
-                        two_limb=two_limb, caller_type=caller_type)
-        return True
+        checked.append(region_text)
+        # Only the outermost region ("OUT") would trip the per-region detector.
+        return region_text == "OUT"
 
     monkeypatch.setattr("agents.patcher.chain_promote.boundary.write_truncation_inert", fake)
-    out = chain_write_truncation(
-        outermost_region_text="R", outermost_reads=["a"], outermost_writes=["b"],
-        two_limb=True, caller_type="double")
-    assert out is True
-    assert captured == dict(region_text="R", reads=["a"], writes=["b"],
-                            two_limb=True, caller_type="double")
+    region_meta = [
+        dict(depth=0, region_text="OUT", reads=["a"], writes=["res"], promoted=True),
+        dict(depth=1, region_text="MID", reads=["c"], writes=["d"], promoted=True),
+        dict(depth=2, region_text="INNER", reads=["e"], writes=["f"], promoted=True),
+    ]
+    out = chain_write_truncation(region_meta, two_limb=True, caller_type="double")
+    assert out is False                       # outermost truncation is exempt
+    assert "OUT" not in checked               # outermost never handed to the detector
+    assert set(checked) == {"MID", "INNER"}   # only interior regions checked
+
+
+def test_chain_write_truncation_fires_on_interior_truncation(monkeypatch):
+    # An INTERIOR write that truncates back to caller precision injects double roundoff
+    # between links -> the chain is genuinely broken -> gate fires.
+    def fake(region_text, reads, writes, two_limb, *, caller_type="double",
+             complex_tokens=frozenset(), caller_complex=None):
+        return region_text == "MID"           # an interior region trips it
+
+    monkeypatch.setattr("agents.patcher.chain_promote.boundary.write_truncation_inert", fake)
+    region_meta = [
+        dict(depth=0, region_text="OUT", reads=["a"], writes=["res"], promoted=True),
+        dict(depth=1, region_text="MID", reads=["c"], writes=["d"], promoted=True),
+    ]
+    assert chain_write_truncation(region_meta, two_limb=True, caller_type="double") is True
+
+
+def test_chain_write_truncation_single_region_never_fires(monkeypatch):
+    # A single-region chain has no interior region — the lone region IS the designed
+    # exit boundary, so the gate is a no-op even if the per-region detector would trip.
+    monkeypatch.setattr(
+        "agents.patcher.chain_promote.boundary.write_truncation_inert",
+        lambda *a, **k: True)
+    region_meta = [dict(depth=0, region_text="ONLY", reads=["a"], writes=["res"],
+                        promoted=True)]
+    assert chain_write_truncation(region_meta, two_limb=True) is False
 
 
 # --------------------------------------------------------------------------- #

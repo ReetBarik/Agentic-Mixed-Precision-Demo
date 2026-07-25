@@ -62,6 +62,14 @@ class Candidate:
     # and the bound-decomposition predicted dd floor lift (ranks the Tier-1 chain queue).
     chain_lines: tuple = ()
     predicted_lift: float | None = None
+    # Phase 2f kernel-scope gate (Reet 2026-07-25): the kernel/integral this candidate
+    # targets.  ``None`` => whole-app scope (existing behaviour — the candidate is gated
+    # against the whole-app p100).  When set, the solver reads the per-kernel baseline
+    # and accumulated-min for THIS kernel only, so a candidate targeting kernel K is not
+    # gated by a hotspot that lives in a different kernel (e.g. B12's global-min floor
+    # pinning a B14 chain).  Chain-dd candidates carry the integral their chain belongs
+    # to; single-region candidates carry their containing integral.
+    target_kernel: str | None = None
 
     @property
     def rank(self) -> int:
@@ -105,7 +113,26 @@ def _candidate_from_row(row: dict) -> Candidate | None:
         intent_id=row.get("intent_id"),
         chain_lines=chain_lines,
         predicted_lift=row.get("predicted_lift"),
+        target_kernel=_target_kernel_from_row(row),
     )
+
+
+def _target_kernel_from_row(row: dict) -> str | None:
+    """Kernel this candidate is gated against (Phase 2f kernel-scope).
+
+    Prefers the explicit per-integral tag (Phase A schema v2's ``integral``); falls
+    back to a SINGLE-element ``integrals_scope`` (a region attributed to exactly one
+    integral).  A multi-integral scope (a shared helper affecting several kernels) or
+    an empty scope leaves ``target_kernel=None`` => whole-app gating, the conservative
+    default for candidates that legitimately span kernels.
+    """
+    integral = row.get("integral")
+    if integral:
+        return str(integral)
+    scope = row.get("integrals_scope") or []
+    if len(scope) == 1:
+        return str(scope[0])
+    return None
 
 
 @dataclass

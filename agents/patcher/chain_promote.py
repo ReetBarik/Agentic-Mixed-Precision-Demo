@@ -28,12 +28,18 @@ Chain-scope gates (the envelope, not individual links):
 * ``chain_promotion_no_op`` — fires iff NO region in the chain promotes anything.
   A single empty-payload link is NOT gated (its neighbours may promote, and its
   intra-chain writes stay wide for the next link to read).
-* ``chain_write_truncation`` — fires iff the chain's OUTERMOST region (shallowest
-  enclosing function on the call graph — the last landing before the value returns
-  to the shared driver) truncates every widened write back to caller precision with
-  no wider persistent sink.  Intra-chain widened writes are EXEMPT (consumed by the
-  next link) — this is exactly the reasoning 2d-B's per-region gate would get wrong
-  at chain scope.
+* ``chain_write_truncation`` — fires iff any INTERIOR region of the chain truncates
+  every widened write back to caller precision with no wider persistent sink.  The
+  chain's OUTERMOST region(s) — those at the shallowest depth on the call graph, the
+  last landing before the value returns to the shared driver — are EXEMPT: their
+  store to the caller-precision output IS the chain's *designed* exit boundary (the
+  final dd result rounded down to caller precision after the chain has done its work
+  at dd), not evidence of inertness.  An interior write that truncates back to caller
+  precision, by contrast, injects double roundoff *between* chain links and genuinely
+  breaks the chain — that is what this gate catches.  Applying 2d-B's per-region gate
+  to the outermost region is exactly the reasoning it would get wrong at chain scope:
+  the per-region detector reads the exit-boundary rounding as inertness, when at chain
+  scope it is the intended output handoff (Reet 2026-07-25, Fix 1).
 """
 
 from __future__ import annotations
@@ -87,9 +93,10 @@ class ChainFanoutResult:
     # Chain-scope 2c: True iff ANY region in the chain retyped something.  False =>
     # the whole chain's promotable payload is empty -> terminal promotion_no_op.
     promotion_applied: bool = False
-    # Chain-scope 2d-B: True iff the OUTERMOST region widens but truncates every
-    # landing back to caller precision with no wider persistent sink -> the chain's
-    # output boundary is numerically inert -> terminal write_truncation.
+    # Chain-scope 2d-B: True iff some INTERIOR region widens but truncates every
+    # landing back to caller precision with no wider persistent sink -> an intra-chain
+    # write injecting double roundoff between links -> terminal write_truncation.  The
+    # chain's OUTERMOST region is EXEMPT (its truncation is the designed exit boundary).
     write_truncation: bool = False
     # Entry-point body reroutes applied (child -> variant), for silent-bypass telemetry.
     reroutes: dict[str, str] = field(default_factory=dict)
@@ -107,22 +114,38 @@ def chain_promotion_no_op(per_region_promoted: list[bool]) -> bool:
     return not any(per_region_promoted)
 
 
-def chain_write_truncation(*, outermost_region_text: str, outermost_reads: list[str],
-                           outermost_writes: list[str], two_limb: bool,
+def chain_write_truncation(region_meta: list[dict], *, two_limb: bool,
                            caller_type: str = "double",
                            complex_tokens=frozenset(), caller_complex=None) -> bool:
-    """Chain-scope 2d-B gate: applied to the chain's OUTERMOST region only.
+    """Chain-scope 2d-B gate: applied to the chain's INTERIOR regions only.
 
-    Reuses the per-region :func:`agents.integrator_base.boundary.write_truncation_inert`
-    on the last landing before the value returns to the shared driver.  Intra-chain
-    regions are deliberately NOT checked — their widened writes are consumed by the
-    next link (a wider persistent sink exists), which is exactly the condition that
-    flips the per-region gate's reasoning at chain scope.
+    ``region_meta`` is the per-region list built by :func:`chain_promote`, each entry
+    carrying ``depth`` (hops from the entry point — shallower = outer), ``region_text``,
+    ``reads`` and ``writes``.  The chain's OUTERMOST region(s) — those at the minimum
+    depth — are SKIPPED: their store to the caller-precision output is the chain's
+    *designed* exit boundary (round the final dd result down to caller precision after
+    the chain has done its work at dd), not evidence of inertness.  Every INTERIOR
+    region is checked with the per-region
+    :func:`agents.integrator_base.boundary.write_truncation_inert`; the gate fires iff
+    ANY interior region trips it — an intra-chain write truncating back to caller
+    precision injects double roundoff between chain links and genuinely breaks the
+    chain.
+
+    Returns ``False`` for a single-region chain (nothing is interior) — a lone region
+    is its own designed exit boundary; the outermost exemption covers it.
     """
-    return boundary.write_truncation_inert(
-        outermost_region_text, outermost_reads, outermost_writes, two_limb,
-        caller_type=caller_type, complex_tokens=complex_tokens,
-        caller_complex=caller_complex)
+    if not region_meta:
+        return False
+    outermost_depth = min(m["depth"] for m in region_meta)
+    for m in region_meta:
+        if m["depth"] == outermost_depth:
+            continue  # designed exit boundary — the exit-truncation is the design
+        if boundary.write_truncation_inert(
+                m["region_text"], m["reads"], m["writes"], two_limb,
+                caller_type=caller_type, complex_tokens=complex_tokens,
+                caller_complex=caller_complex):
+            return True
+    return False
 
 
 def chain_promote(*, manifest: ChainManifest, graph: CallGraph,
@@ -230,14 +253,13 @@ def chain_promote(*, manifest: ChainManifest, graph: CallGraph,
         root_edited = True
 
     # --- chain-scope gates ----------------------------------------------------
+    # 2d-B fires only on INTERIOR regions (an intra-chain truncation breaks the chain);
+    # the outermost region's truncation is the chain's designed exit boundary (Fix 1).
     promotion_applied = any(per_region_promoted)
     write_truncation = False
     if promotion_applied and region_meta:
-        outer = min(region_meta, key=lambda m: m["depth"])
         write_truncation = chain_write_truncation(
-            outermost_region_text=outer["region_text"],
-            outermost_reads=outer["reads"], outermost_writes=outer["writes"],
-            two_limb=two_limb, caller_type=caller_type,
+            region_meta, two_limb=two_limb, caller_type=caller_type,
             complex_tokens=frozenset(complex_tokens), caller_complex=caller_complex)
 
     return ChainFanoutResult(

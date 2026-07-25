@@ -87,12 +87,31 @@ class ApplyResult:
 @dataclass
 class ValidateResult:
     """What ``validate_fn`` returns after building + scoring the whole app."""
-    cand_min: float                 # random-battery p100 (the GATE metric)
-    curr_min: float                 # unpatched baseline p100 (== vanilla, constant)
+    cand_min: float                 # whole-app random-battery p100 (the GATE metric)
+    curr_min: float                 # unpatched whole-app baseline p100 (== vanilla, constant)
     combined_cand_min: Optional[float] = None   # random+tail worst-case (telemetry)
     verdict: Optional[str] = None               # validator's own accept/reject
     verdict_reason: Optional[str] = None
     wall_sec: float = 0.0
+    # Phase 2f kernel-scope: per-integral p100 for the candidate and current baseline
+    # ({integral: min_precise_digits}).  When a candidate carries ``target_kernel=K``
+    # the solver gates on ``cand_per_kernel[K]`` vs ``curr_per_kernel[K]`` — the
+    # candidate's own kernel floor — instead of the whole-app min.  Empty/None => the
+    # whole-app gate (existing behaviour) is used.
+    cand_per_kernel: dict = field(default_factory=dict)
+    curr_per_kernel: dict = field(default_factory=dict)
+
+    def cand_scope_min(self, kernel: Optional[str]) -> Optional[float]:
+        """Candidate p100 at ``kernel`` scope (``None`` => whole-app ``cand_min``)."""
+        if kernel is None:
+            return self.cand_min
+        return self.cand_per_kernel.get(kernel)
+
+    def curr_scope_min(self, kernel: Optional[str]) -> Optional[float]:
+        """Baseline p100 at ``kernel`` scope (``None`` => whole-app ``curr_min``)."""
+        if kernel is None:
+            return self.curr_min
+        return self.curr_per_kernel.get(kernel)
 
 
 # ---------------------------------------------------------------------------
@@ -118,21 +137,33 @@ class CandidateOutcome:
     combined_min_after: Optional[float] = None
     wall_sec: float = 0.0
     # Phase 2f: chain_dd rejection sub-classification ("chain_no_lift" |
-    # "chain_regression"), None for single-region candidates + all accepts.
+    # "chain_regression" | "kernel_scope_unmeasured"), None for single-region
+    # candidates gated whole-app + all accepts.
     reason_tag: Optional[str] = None
+    # Phase 2f kernel-scope: the kernel this candidate was gated against (None =>
+    # whole-app).  ``min_before``/``min_after`` are reported at THIS scope, so the
+    # per-kernel lift is ``min_after - min_before`` when ``target_kernel`` is set.
+    target_kernel: Optional[str] = None
 
 
 @dataclass
 class SolveResult:
     outcomes: list[CandidateOutcome] = field(default_factory=list)
     baseline_min: Optional[float] = None      # vanilla whole-app p100 (the reference)
-    final_min: Optional[float] = None         # accumulated p100 at the end
+    final_min: Optional[float] = None         # accumulated whole-app p100 at the end
     final_head: Optional[str] = None
     # region_id -> landed rung ("double" for regions that never accepted a rung)
     region_final: dict = field(default_factory=dict)
     margin: float = DEFAULT_MARGIN            # regression-relative accept margin (digits)
     stopped: Optional[str] = None             # non-None => hard stop reason
     stop_detail: str = ""
+    # Phase 2f kernel-scope: per-kernel baseline + final p100, captured once at solve
+    # start (baseline) and updated as candidates on that kernel accept (final).  A
+    # candidate targeting kernel K is gated against K's own floor here, not the
+    # whole-app min pinned by whichever kernel is worst.  Empty when no candidate
+    # carried a ``target_kernel`` (pure whole-app run — existing behaviour).
+    baseline_by_kernel: dict = field(default_factory=dict)
+    final_by_kernel: dict = field(default_factory=dict)
 
     @property
     def accept_threshold(self) -> Optional[float]:
@@ -182,7 +213,12 @@ def solve(queue: list[Candidate], *,
         result.region_final.setdefault(c.region_id, BASELINE_PRECISION)
 
     resolved: set = set()
-    accumulated_min: Optional[float] = None   # p100 at current HEAD
+    accumulated_min: Optional[float] = None   # whole-app p100 at current HEAD
+    # Phase 2f kernel-scope: per-kernel accumulated p100 at current HEAD (seeded from
+    # the per-kernel baseline the first successful validate reports).  A candidate
+    # targeting kernel K rides only K's own accumulated lift — chains on different
+    # kernels never ride each other's lifts.
+    accumulated_by_kernel: dict = {}
 
     def emit(o: CandidateOutcome) -> None:
         result.outcomes.append(o)
@@ -221,6 +257,10 @@ def solve(queue: list[Candidate], *,
         if result.baseline_min is None:
             result.baseline_min = vr.curr_min
             accumulated_min = vr.curr_min
+            # Seed per-kernel baselines from the same validate (whole-app run already
+            # scored every integral; this is a free by-product of _score).
+            result.baseline_by_kernel = dict(vr.curr_per_kernel or {})
+            accumulated_by_kernel = dict(vr.curr_per_kernel or {})
             if not _scoreable(vr.curr_min):
                 revert_fn(parent)
                 result.stopped = STOPPED_GATE_UNIMPLEMENTABLE
@@ -238,55 +278,95 @@ def solve(queue: list[Candidate], *,
                     wall_sec=ar.wall_sec + vr.wall_sec))
                 break
 
-        min_before = accumulated_min
-        # Phase 2f: chain_dd uses a POSITIVE-lift gate vs the accumulated-min BEFORE
-        # this candidate (each chain must earn its own dd cost); every other rung uses
-        # the regression-relative gate vs the fixed baseline (unchanged, byte-for-byte).
+        # Phase 2f kernel-scope: gate a candidate carrying ``target_kernel=K`` against
+        # K's own floor (baseline + accumulated) — not the whole-app min pinned by
+        # whichever kernel is worst.  ``kernel is None`` => whole-app scope, and every
+        # scoped value below collapses to its whole-app counterpart, so the gate,
+        # reason strings, and reported minima are byte-for-byte the pre-2f behaviour.
+        kernel = cand.target_kernel
+        cand_scope = vr.cand_scope_min(kernel)
+        baseline_scope = (result.baseline_by_kernel.get(kernel)
+                          if kernel is not None else result.baseline_min)
+        before_scope = (accumulated_by_kernel.get(kernel)
+                        if kernel is not None else accumulated_min)
+        min_before = before_scope
+
+        # A kernel-scoped candidate whose kernel floor could not be measured (kernel
+        # absent from the per-kernel arrays) has no scoped reference; reject-and-flag —
+        # a visible measurement gap, non-fatal so the walk continues (Stage-1's job is
+        # to surface these), never a silent fall-back to whole-app gating.
+        if kernel is not None and (baseline_scope is None or not _scoreable(cand_scope)):
+            revert_fn(parent)
+            reason = (f"kernel_scope_unmeasured: kernel {kernel!r} min_precise_digits "
+                      f"unavailable (cand={cand_scope!r}, baseline={baseline_scope!r}) — "
+                      f"cannot gate at kernel scope")
+            emit(CandidateOutcome(
+                candidate=cand, outcome=REJECTED,
+                min_before=min_before, min_after=cand_scope,
+                reason=reason, reason_tag="kernel_scope_unmeasured",
+                target_kernel=kernel,
+                candidate_sha=ar.candidate_sha, patcher_status=ar.patcher_status,
+                validator_verdict=vr.verdict,
+                combined_min_after=vr.combined_cand_min,
+                wall_sec=ar.wall_sec + vr.wall_sec))
+            continue
+
+        ktag = f"[kernel={kernel}] " if kernel is not None else ""
+        # chain_dd uses a POSITIVE-lift gate vs the accumulated-min BEFORE this
+        # candidate (each chain must earn its own dd cost); every other rung uses the
+        # regression-relative gate vs the fixed baseline.
         if cand.is_chain:
-            lift_bar = (min_before if min_before is not None
-                        else result.baseline_min) + LIFT_MARGIN
-            accept = _scoreable(vr.cand_min) and vr.cand_min >= lift_bar
-            accept_reason = (f"chain lift: p100 {vr.cand_min:.4f} >= accumulated "
+            lift_bar = (before_scope if before_scope is not None
+                        else baseline_scope) + LIFT_MARGIN
+            accept = _scoreable(cand_scope) and cand_scope >= lift_bar
+            accept_reason = (f"{ktag}chain lift: p100 {cand_scope:.4f} >= accumulated "
                              f"{min_before:.4f} + lift {LIFT_MARGIN} = {lift_bar:.4f}")
         else:
-            threshold = result.accept_threshold   # baseline_min - margin (fixed)
-            accept = _scoreable(vr.cand_min) and vr.cand_min >= threshold
-            accept_reason = (f"p100 {vr.cand_min:.4f} >= baseline "
-                             f"{result.baseline_min:.4f} - margin {margin} = {threshold:.4f}"
-                             if _scoreable(vr.cand_min) else "")
+            threshold = baseline_scope - margin   # scoped baseline - margin
+            accept = _scoreable(cand_scope) and cand_scope >= threshold
+            accept_reason = (f"{ktag}p100 {cand_scope:.4f} >= baseline "
+                             f"{baseline_scope:.4f} - margin {margin} = {threshold:.4f}"
+                             if _scoreable(cand_scope) else "")
 
         if accept:
             resolved.add(cand.region_id)
             result.region_final[cand.region_id] = cand.rung
             accumulated_min = vr.cand_min
+            # A patch shifts the whole app's per-kernel mins; refresh from the measured
+            # candidate arrays so a later same-kernel candidate rides only this kernel's
+            # own lift (and cross-kernel candidates keep their untouched floors).
+            if vr.cand_per_kernel:
+                accumulated_by_kernel = dict(vr.cand_per_kernel)
+            elif kernel is not None:
+                accumulated_by_kernel[kernel] = cand_scope
             emit(CandidateOutcome(
                 candidate=cand, outcome=ACCEPTED,
-                min_before=min_before, min_after=vr.cand_min,
-                reason=accept_reason,
+                min_before=min_before, min_after=cand_scope,
+                reason=accept_reason, target_kernel=kernel,
                 candidate_sha=ar.candidate_sha,
                 patcher_status=ar.patcher_status, validator_verdict=vr.verdict,
                 combined_min_after=vr.combined_cand_min,
                 wall_sec=ar.wall_sec + vr.wall_sec))
         else:
             revert_fn(parent)  # drop this one patch; HEAD stays at `parent`
-            shown = f"{vr.cand_min:.4f}" if _scoreable(vr.cand_min) else repr(vr.cand_min)
+            shown = f"{cand_scope:.4f}" if _scoreable(cand_scope) else repr(cand_scope)
             reason_tag = None
             if cand.is_chain:
-                # regression vs baseline -> chain_regression; otherwise merely no lift.
+                # regression vs (scoped) baseline -> chain_regression; else merely no lift.
                 reason_tag = ("chain_regression"
-                              if _scoreable(vr.cand_min)
-                              and vr.cand_min < result.baseline_min - margin
+                              if _scoreable(cand_scope)
+                              and cand_scope < baseline_scope - margin
                               else "chain_no_lift")
-                reason = (f"chain {reason_tag}: p100 {shown} < accumulated "
+                reason = (f"{ktag}chain {reason_tag}: p100 {shown} < accumulated "
                           f"{min_before:.4f} + lift {LIFT_MARGIN} = {lift_bar:.4f}")
             else:
-                threshold = result.accept_threshold
-                reason = (f"p100 {shown} < baseline {result.baseline_min:.4f} "
+                threshold = baseline_scope - margin
+                reason = (f"{ktag}p100 {shown} < baseline {baseline_scope:.4f} "
                           f"- margin {margin} = {threshold:.4f}")
             emit(CandidateOutcome(
                 candidate=cand, outcome=REJECTED,
-                min_before=min_before, min_after=vr.cand_min,
-                reason=reason, reason_tag=reason_tag,
+                min_before=min_before, min_after=cand_scope,
+                reason=reason, reason_tag=reason_tag, target_kernel=kernel,
                 candidate_sha=ar.candidate_sha, patcher_status=ar.patcher_status,
                 validator_verdict=vr.verdict,
                 combined_min_after=vr.combined_cand_min,
@@ -294,6 +374,7 @@ def solve(queue: list[Candidate], *,
 
     result.final_head = head_fn()
     result.final_min = accumulated_min if accumulated_min is not None else result.baseline_min
+    result.final_by_kernel = dict(accumulated_by_kernel)
     return result
 
 
