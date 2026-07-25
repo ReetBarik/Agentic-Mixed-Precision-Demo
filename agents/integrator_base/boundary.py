@@ -865,6 +865,33 @@ def insert_shim_include(lines: list[str], shim_include: str) -> list[str]:
     return _insert_shim_include(lines, shim_include)
 
 
+def widen_decl_type_line(line: str, orig_type: str, dd_type: str) -> str | None:
+    """Rewrite the leading (core) type token of a bare declaration on ``line``.
+
+    A **carrier** declaration (Blocker A, design §7) is a bare / bare
+    multi-declarator statement (``TMass Y, S, A;``) whose type must be widened so
+    the interior chain writes land in a dd carrier instead of truncating.  This
+    reuses the Subtask-3 bare-decl scanner (:func:`_scan_bare_decls` /
+    :func:`_parse_bare_decl_stmt`) to locate the leading type token and swaps its
+    text for ``dd_type`` — widening every same-type sibling of a multi-declarator
+    in one edit (§2 conservative policy).
+
+    Returns the rewritten line, or ``None`` when the line does not parse as a bare
+    declaration whose leading type is ``orig_type`` (caller treats ``None`` as "no
+    change" — an idempotent re-render of an already-widened decl, or a
+    coordinate/type mismatch, leaves the line verbatim).  Uses the token span so
+    only the type token is replaced; qualifiers, ``const``, siblings, and trailing
+    initializers are preserved byte-for-byte.
+    """
+    toks = _tokenize(line)
+    for rec in _scan_bare_decls(toks):
+        if rec.type_text != orig_type:
+            continue
+        tok = toks[rec.type_idx]
+        return line[:tok.start] + dd_type + line[tok.end:]
+    return None
+
+
 def _insert_shim_include(lines: list[str], shim_include: str) -> list[str]:
     """Insert ``#include "<shim>"`` into a target header (idempotent).
 

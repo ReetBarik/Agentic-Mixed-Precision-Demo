@@ -222,12 +222,39 @@ class Promote:
 
 
 @dataclass
+class CarrierDecl:
+    """One carrier declaration widened in a variant (Blocker A, design §7).
+
+    A **carrier** is a variable declared OUTSIDE a chain's line set but written by
+    one chain link and read by another; its declaration lives at caller precision,
+    so the widened (dd) value written by the interior link truncates back at the
+    decl.  Widening the type token on the decl line to the chain's internal dd type
+    closes that truncation.
+
+    Coordinates are in ORIGINAL/file line numbers (1-based), scoped to the
+    variant's ``file``.  ``orig_type`` is the leading (core) type token as the
+    boundary bare-decl scanner spells it (last namespace segment of a qualified
+    type); ``dd_type`` the extended replacement (``quad::ddfun::ddouble`` /
+    ``ddcomplex``).  Rewriting the leading type token widens every same-type
+    sibling of a multi-declarator (``TMass Y, S, A;``) per the §2 conservative
+    policy.  ``name`` is the carrier that motivated the record (a sibling may ride
+    along); kept for forensics only.
+    """
+
+    decl_line: int
+    orig_type: str
+    dd_type: str
+    name: str | None = None
+
+
+@dataclass
 class VariantSpec:
     """The deterministic recipe for one variant function.
 
     A variant is rebuilt from scratch on every merge by copying the original
     function's source (``orig_start..orig_end`` in ``file``), applying every
-    :class:`Promote` (region → extended scalar) and every reroute (call to a child
+    :class:`Promote` (region → extended scalar), every :class:`CarrierDecl`
+    (carrier decl line → widened type token) and every reroute (call to a child
     function → the child's variant name), and renaming the definition (and any
     self-calls) ``orig_name -> variant_name``.  Being a pure function of this spec
     makes fan-out idempotent across retries and mergeable across intents.
@@ -241,6 +268,10 @@ class VariantSpec:
     promotes: list[Promote] = field(default_factory=list)
     reroutes: dict[str, str] = field(default_factory=dict)
     shim_includes: list[str] = field(default_factory=list)
+    # Blocker A (design §7): carrier declarations widened to the chain's dd type at
+    # emission time.  Defaults empty so a pre-Blocker-A manifest re-renders
+    # identically; populated by the chain coordinator in Subtask 5.
+    carrier_decls: list[CarrierDecl] = field(default_factory=list)
 
     def to_json(self) -> dict:
         d = asdict(self)
@@ -249,15 +280,18 @@ class VariantSpec:
     @classmethod
     def from_json(cls, d: dict) -> "VariantSpec":
         promotes = [Promote(**p) for p in d.get("promotes", [])]
+        carrier_decls = [CarrierDecl(**c) for c in d.get("carrier_decls", [])]
         return cls(
             variant_name=d["variant_name"], orig_name=d["orig_name"],
             file=d["file"], orig_start=d["orig_start"], orig_end=d["orig_end"],
             promotes=promotes, reroutes=dict(d.get("reroutes", {})),
-            shim_includes=list(d.get("shim_includes", [])))
+            shim_includes=list(d.get("shim_includes", [])),
+            carrier_decls=carrier_decls)
 
     def merge(self, other: "VariantSpec") -> None:
         """Fold ``other`` (same variant) into this spec: union reroutes / shim
-        includes and append any region promotion not already present."""
+        includes and append any region promotion or carrier decl-widen not already
+        present."""
         self.reroutes.update(other.reroutes)
         for inc in other.shim_includes:
             if inc not in self.shim_includes:
@@ -266,6 +300,11 @@ class VariantSpec:
         for p in other.promotes:
             if (p.region_start, p.region_end) not in have:
                 self.promotes.append(p)
+        have_cd = {(c.decl_line, c.orig_type, c.dd_type) for c in self.carrier_decls}
+        for c in other.carrier_decls:
+            if (c.decl_line, c.orig_type, c.dd_type) not in have_cd:
+                self.carrier_decls.append(c)
+                have_cd.add((c.decl_line, c.orig_type, c.dd_type))
 
 
 @dataclass
@@ -498,24 +537,54 @@ def _original_text(fd_file: str, start: int, end: int) -> list[str]:
 def render_variant(spec: VariantSpec) -> str:
     """Render a variant definition's C++ text from its spec (deterministic).
 
-    Copies the original function, applies every region promotion (descending by
-    line so earlier edits do not shift later coordinates), reroutes calls to child
-    variants, and renames the definition + self-calls ``orig_name -> variant_name``.
+    Copies the original function, applies every region promotion and every carrier
+    decl-widen (descending by line so earlier edits do not shift later
+    coordinates), reroutes calls to child variants, and renames the definition +
+    self-calls ``orig_name -> variant_name``.
+
+    Region promotions (:class:`Promote`, a multi-line block replacement) and
+    carrier decl-widens (:class:`CarrierDecl`, a single-line type-token rewrite,
+    Blocker A §7) share ONE descending-line-order pass.  Sorting both by their
+    starting line, highest first, guarantees each edit's file coordinates are still
+    valid when it runs regardless of the length delta an earlier (lower-line) edit
+    would introduce — a carrier decl above a promoted region is rewritten after the
+    region has already been replaced, so its ``decl_line`` never shifts.
     """
     lines = _original_text(spec.file, spec.orig_start, spec.orig_end)
-    for p in sorted(spec.promotes, key=lambda q: q.region_start, reverse=True):
-        local_s = p.region_start - spec.orig_start
-        local_e = p.region_end - spec.orig_start
-        if local_s < 0 or local_e >= len(lines) or local_s > local_e:
-            raise FanoutError(
-                f"promote region {p.region_start}-{p.region_end} out of range for "
-                f"{spec.orig_name} [{spec.orig_start}-{spec.orig_end}]")
-        region_text = "\n".join(lines[local_s:local_e + 1])
-        block, _ = boundary.promote_region_block(
-            region_text, p.reads, p.writes, p.scalar_type, p.caller_type, p.two_limb,
-            complex_type=p.complex_type, complex_tokens=frozenset(p.complex_tokens),
-            complex_names=frozenset(p.complex_names), caller_complex=p.caller_complex)
-        lines = lines[:local_s] + block + lines[local_e + 1:]
+    # Descending by start line; both edit kinds carry a file-absolute start.  Promote
+    # is tagged 0 and CarrierDecl 1 so that, in the degenerate case of a decl line
+    # equal to a region start (should not occur — a widened carrier is by definition
+    # outside the chain line set), the region replacement runs first deterministically.
+    edits = ([(p.region_start, 0, p) for p in spec.promotes]
+             + [(c.decl_line, 1, c) for c in spec.carrier_decls])
+    for start, kind, e in sorted(edits, key=lambda t: (t[0], t[1]), reverse=True):
+        if kind == 0:
+            p = e
+            local_s = p.region_start - spec.orig_start
+            local_e = p.region_end - spec.orig_start
+            if local_s < 0 or local_e >= len(lines) or local_s > local_e:
+                raise FanoutError(
+                    f"promote region {p.region_start}-{p.region_end} out of range for "
+                    f"{spec.orig_name} [{spec.orig_start}-{spec.orig_end}]")
+            region_text = "\n".join(lines[local_s:local_e + 1])
+            block, _ = boundary.promote_region_block(
+                region_text, p.reads, p.writes, p.scalar_type, p.caller_type,
+                p.two_limb, complex_type=p.complex_type,
+                complex_tokens=frozenset(p.complex_tokens),
+                complex_names=frozenset(p.complex_names),
+                caller_complex=p.caller_complex)
+            lines = lines[:local_s] + block + lines[local_e + 1:]
+        else:
+            c = e
+            local = c.decl_line - spec.orig_start
+            if local < 0 or local >= len(lines):
+                raise FanoutError(
+                    f"carrier decl line {c.decl_line} out of range for "
+                    f"{spec.orig_name} [{spec.orig_start}-{spec.orig_end}]")
+            widened = boundary.widen_decl_type_line(lines[local], c.orig_type,
+                                                    c.dd_type)
+            if widened is not None:
+                lines[local] = widened
 
     text = "\n".join(lines)
     rename_map = {spec.orig_name: spec.variant_name}
