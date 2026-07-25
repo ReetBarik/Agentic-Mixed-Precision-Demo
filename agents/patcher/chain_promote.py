@@ -148,6 +148,360 @@ def chain_write_truncation(region_meta: list[dict], *, two_limb: bool,
     return False
 
 
+# --------------------------------------------------------------------------- #
+# Blocker A — carrier closure (BLOCKER_A_CARRIER_DESIGN.md §2, §4)
+#
+# A *carrier* is a variable declared OUTSIDE a chain's line set, written by one
+# interior chain line and read by another — the value it carries crosses a
+# chain-line boundary at caller precision, so the interior write truncates the
+# widened (dd) value back to double and the 2d-B :func:`chain_write_truncation`
+# gate correctly rejects the patch.  The fix (Subtasks 3-7) widens the carrier's
+# DECLARATION alongside the line bodies.  This module owns only the *analysis*:
+# given a chain's line set, classify its carriers as widenable / unwidenable /
+# external.  It computes nothing that mutates the tree.
+# --------------------------------------------------------------------------- #
+
+
+@dataclass
+class CarrierClosure:
+    """The carrier classification of one chain (BLOCKER_A_CARRIER_DESIGN.md §4).
+
+    * ``widenable`` — ``(file, decl_line, name, dd_type)`` per name whose
+      declaration the emission layer will widen to the chain's internal dd type.
+      A carrier's same-line multi-declarator siblings are included (§2: widening
+      ``TMass Y, S, A;`` widens ``S`` too — an over-widened same-type sibling never
+      truncates), so a name here need not itself be a strict carrier.
+    * ``unwidenable_reasons`` — ``(name, reason)`` per strict carrier whose decl is
+      a function parameter; v1 refuses to rewrite signatures (terminal
+      ``chain_carrier_unwidenable``, wired in Subtask 5).
+    * ``external_reasons`` — ``(name, reason)`` per strict carrier whose decl is a
+      global / class member / output container; v1 refuses to widen shared state
+      (terminal ``chain_carrier_external``, wired in Subtask 5).
+    """
+
+    widenable: list[tuple[str, int, str, str]] = field(default_factory=list)
+    unwidenable_reasons: list[tuple[str, str]] = field(default_factory=list)
+    external_reasons: list[tuple[str, str]] = field(default_factory=list)
+
+    @property
+    def carrier_names(self) -> set[str]:
+        """Every name whose decl the emission layer widens (carriers + siblings)."""
+        return {name for _f, _l, name, _t in self.widenable}
+
+
+@dataclass
+class _DeclStmt:
+    """One statement-level local declaration recovered from a function body.
+
+    ``names`` are all declarators sharing the leading type token (so a bare
+    multi-declarator ``TMass Y, S, A;`` yields one ``_DeclStmt`` with three names);
+    widening rewrites that one type token, widening every sibling (§2).
+    """
+
+    decl_line: int          # 1-based absolute file line of the leading type token
+    core_type: str          # outermost type-name token (``TMass`` / ``TOutput``)
+    names: list[str]
+
+
+def compute_carrier_closure(
+    *, manifest: ChainManifest, graph: CallGraph, scalar_type: str,
+    complex_type: str | None = None, complex_tokens=frozenset(),
+    max_paths: int = 1024,
+) -> CarrierClosure:
+    """Classify a chain's carriers (BLOCKER_A_CARRIER_DESIGN.md §4, steps 1-6).
+
+    Pure, source-only analysis over ``manifest.lines`` — no tree mutation, no new
+    source-analysis machinery (reuses :mod:`agents.shared.region_scan` +
+    :class:`~agents.patcher.call_graph.CallGraph`).  A name is a **strict carrier**
+    iff (1) written by an interior chain line, (2) read by another chain line so the
+    value crosses a chain-line boundary, (3) its decl lies outside the chain's line
+    set, and (4) it is not a write target of the outermost (min-depth) region (the
+    designed exit boundary, §5).  Each surviving carrier's decl site is classified:
+    a local var in a single chain function → widenable (with its multi-declarator
+    siblings); a function parameter → unwidenable; a global / member / output
+    container (or a name visible across >1 chain function) → external.
+
+    Raises :class:`~agents.patcher.fanout.FanoutError` if a chain region is not
+    inside any known function or its function is unreachable from the entry point —
+    the same fail-loud contract as :func:`chain_promote`.
+    """
+    # -- 1/2. per-line read/write/depth, derived from source (region_scan) -------
+    per_line: list[dict] = []
+    func_src: dict[tuple[str, int, int], str] = {}   # (file, ls, le) -> source text
+    func_line_start: dict[tuple[str, int, int], int] = {}
+    chain_lineset: dict[str, set[int]] = {}          # file -> {chain line numbers}
+
+    for (file, ls, le) in manifest.lines:
+        fd = graph.enclosing_function(file, ls)
+        if fd is None:
+            raise FanoutError(
+                f"carrier closure for chain {manifest.chain_id}: region "
+                f"{file}:{ls}-{le} is not inside any known function "
+                f"(call graph rooted at {graph.root!r})")
+        fkey = (fd.file, fd.line_start, fd.line_end)
+        if fkey not in func_src:
+            func_src[fkey] = "\n".join(_original_text(fd.file, fd.line_start, fd.line_end))
+            func_line_start[fkey] = fd.line_start
+        region_text = "\n".join(_original_text(fd.file, ls, le))
+        for ln in range(ls, le + 1):
+            chain_lineset.setdefault(fd.file, set()).add(ln)
+        per_line.append(dict(
+            file=fd.file, line=ls, fd=fd, fkey=fkey,
+            depth=_region_depth(graph, fd, manifest.chain_id, max_paths),
+            reads=_names_read_in_region(region_text),
+            writes=set(region_scan.region_writes_from_source(region_text))))
+
+    if not per_line:
+        return CarrierClosure()
+
+    outermost_depth = min(p["depth"] for p in per_line)
+
+    # -- 3. candidate carriers: written on an interior line AND read across lines -
+    interior_writes: dict[str, set[int]] = {}    # name -> interior chain lines writing it
+    all_writes: dict[str, set[int]] = {}         # name -> every chain line writing it
+    all_reads: dict[str, set[int]] = {}          # name -> every chain line reading it
+    outer_write_targets: set[str] = set()        # names written by the outermost region
+    name_funcs: dict[str, set[tuple[str, int, int]]] = {}  # name -> chain funcs touching it
+
+    for p in per_line:
+        interior = p["depth"] != outermost_depth
+        for w in p["writes"]:
+            all_writes.setdefault(w, set()).add(p["line"])
+            name_funcs.setdefault(w, set()).add(p["fkey"])
+            if interior:
+                interior_writes.setdefault(w, set()).add(p["line"])
+            else:
+                outer_write_targets.add(w)
+        for r in p["reads"]:
+            all_reads.setdefault(r, set()).add(p["line"])
+            name_funcs.setdefault(r, set()).add(p["fkey"])
+
+    out = CarrierClosure()
+    widen_groups: dict[tuple[str, int], _DeclStmt] = {}   # (file, decl_line) -> stmt
+
+    for name in sorted(interior_writes):
+        wlines = interior_writes[name]                    # cond 1: interior write ✓
+        rlines = all_reads.get(name, set())
+        # cond 2: read by a chain line so the value crosses a chain-line boundary —
+        # a strict write→read on different lines, or a same-line read-write plus at
+        # least one other touching line (the OR clause of §2).
+        touched = rlines | all_writes.get(name, set())
+        if not (rlines and len(touched) >= 2):
+            continue
+        # cond 4: a write target of the outermost region is the designed exit
+        # boundary (demoted on purpose) — excluded from the closure entirely (§5).
+        if name in outer_write_targets:
+            continue
+
+        # a carrier local lives in ONE function; a name visible across >1 chain
+        # function is not a plain local → global / class member / output container.
+        funcs = name_funcs.get(name, set())
+        if len(funcs) > 1:
+            out.external_reasons.append((
+                name, f"declared outside a single chain function (touched by "
+                f"{len(funcs)} chain functions) — global / class member / output "
+                f"container; v1 refuses to widen shared state"))
+            continue
+
+        fkey = next(iter(funcs))
+        decls = _local_decls(func_src[fkey], func_line_start[fkey])
+        param_cores = region_scan._param_name_core_types(
+            region_scan._tokenize(func_src[fkey]))
+
+        stmt = decls.get(name)
+        if stmt is not None:
+            # cond 3: a decl INSIDE the chain line set is already widened by the body
+            # transform — out of scope (not returned).
+            if stmt.decl_line in chain_lineset.get(fkey[0], set()):
+                continue
+            widen_groups.setdefault((fkey[0], stmt.decl_line), stmt)
+        elif name in param_cores:
+            out.unwidenable_reasons.append((
+                name, f"declared as a parameter of the chain function at "
+                f"{fkey[0]}:{fkey[1]} — v1 refuses to rewrite function signatures"))
+        else:
+            out.external_reasons.append((
+                name, f"no local or parameter declaration found in the enclosing "
+                f"chain function — global / class member / output container; v1 "
+                f"refuses to widen shared state"))
+
+    # -- 6/7. expand each widened decl line to ALL its declarators (siblings, §2) --
+    for (dfile, dline), stmt in widen_groups.items():
+        dd_type = _carrier_dd_type(stmt.core_type, scalar_type,
+                                   complex_type, complex_tokens)
+        for nm in stmt.names:
+            out.widenable.append((dfile, dline, nm, dd_type))
+
+    out.widenable.sort(key=lambda w: (w[0], w[1], w[2]))
+    out.unwidenable_reasons.sort()
+    out.external_reasons.sort()
+    return out
+
+
+def _region_depth(graph: CallGraph, fd, chain_id: str, max_paths: int) -> int:
+    """Hops from the entry point to ``fd`` (shallower = outer), mirroring the depth
+    :func:`chain_promote` records in ``region_meta``.  A region in the entry point is
+    depth 0; any other function's depth is ``min(len(path)) - 1`` over the caller
+    paths.  Raises :class:`FanoutError` for a function unreachable from the root."""
+    if fd.name == graph.root:
+        return 0
+    paths, _ = graph.enumerate_paths(fd.name, max_paths=max_paths)
+    if not paths:
+        raise FanoutError(
+            f"carrier closure for chain {chain_id}: function {fd.name!r} is "
+            f"unreachable from entry point {graph.root!r}")
+    return min(len(p) for p in paths) - 1
+
+
+def _carrier_dd_type(core_type: str, scalar_type: str,
+                     complex_type: str | None, complex_tokens) -> str:
+    """The chain-internal dd type a carrier decl widens to: the complex container
+    when the carrier's core type is a complex-bound token, else the scalar dd type
+    (§7 — ``quad::ddfun::ddouble`` / ``ddcomplex``)."""
+    if complex_type and core_type in complex_tokens:
+        return complex_type
+    return scalar_type
+
+
+def _names_read_in_region(region_text: str) -> set[str]:
+    """Identifiers *read* in a region — a raw token scan (not filtered to any
+    scalar-name universe, so a carrier whose declared type is unrecognized, e.g.
+    ``TMass``, is still detected).
+
+    Excludes pure ``name =`` write targets (a compound ``name +=`` reads and the
+    tokenizer emits ``+=`` whole, so it is kept), call targets (``name (``), and
+    member / namespace-qualified references (``a.b`` / ``a->b`` / ``ql::x``).
+    Over-inclusion is harmless: a name only becomes a carrier candidate if it is
+    ALSO written on an interior chain line, so a stray type/constant read never
+    promotes to a false carrier.
+    """
+    toks = region_scan._tokenize(region_text)
+    n = len(toks)
+    reads: set[str] = set()
+    for i, t in enumerate(toks):
+        if not region_scan._is_ident_tok(t.text):
+            continue
+        prev = toks[i - 1].text if i > 0 else ""
+        nxt = toks[i + 1].text if i + 1 < n else ""
+        if prev in (".", "->", "::"):
+            continue                       # member / qualified reference lead
+        if nxt in ("=", "(", "::"):
+            continue                       # write target, call, or qualifier lead
+        reads.add(t.text)
+    return reads
+
+
+def _local_decls(func_src: str, func_line_start: int) -> dict[str, _DeclStmt]:
+    """Map each statement-level local name to its :class:`_DeclStmt`.
+
+    Recognizes init (``T a = …``), bare (``T a;``) and bare multi-declarator
+    (``TMass Y, S, A;``) forms — the last of which the boundary transform's
+    ``_scan_decls`` (which requires ``<type> <name> =``) misses, so a dedicated
+    scanner is needed (design §7).  A pure token scan over the enclosing function,
+    consistent with :mod:`agents.shared.region_scan`; source-only, no AST type
+    resolution (libclang cannot resolve a template region's types without its
+    include context — it mislabels ``ddilog`` itself as a ``VAR_DECL``).
+    """
+    toks = region_scan._tokenize(func_src)
+    out: dict[str, _DeclStmt] = {}
+    stmt: list = []
+    paren = 0
+
+    def handle(stmt: list) -> None:
+        if not stmt:
+            return
+        # skip leading storage/cv qualifiers
+        k = 0
+        while k < len(stmt) and stmt[k].text in region_scan._TYPE_QUALIFIERS:
+            k += 1
+        if k >= len(stmt) or not region_scan._is_ident_tok(stmt[k].text):
+            return
+        # tokenizer lines are 1-based within func_src; map to the absolute file line.
+        type_line = func_line_start + stmt[k].line - 1
+        # core type: leading ident, then (:: ident)* — reduced to its last segment
+        j = k
+        parts = [stmt[j].text]
+        j += 1
+        while j + 1 < len(stmt) and stmt[j].text == "::" \
+                and region_scan._is_ident_tok(stmt[j + 1].text):
+            parts.append(stmt[j + 1].text)
+            j += 2
+        core = parts[-1]
+        # skip a template argument list ``<...>`` on the type
+        if j < len(stmt) and stmt[j].text == "<":
+            d = 0
+            while j < len(stmt):
+                tx = stmt[j].text
+                if tx == "<":
+                    d += 1
+                elif tx == ">":
+                    d -= 1
+                elif tx == ">>":
+                    d -= 2
+                j += 1
+                if d <= 0:
+                    break
+        while j < len(stmt) and stmt[j].text in ("&", "*"):
+            j += 1
+        while j < len(stmt) and stmt[j].text in region_scan._TYPE_QUALIFIERS:
+            j += 1
+        # declarators: name [= init] [ [extent] ] (, name …)* — bail on any shape
+        # that is not a plain variable declaration (``name(`` = call/ctor/func decl).
+        names: list[str] = []
+        while j < len(stmt):
+            if not region_scan._is_ident_tok(stmt[j].text):
+                break
+            nm = stmt[j].text
+            nxt = stmt[j + 1].text if j + 1 < len(stmt) else ";"
+            if nxt == "(":
+                return                     # call / constructor-init / function decl
+            if nxt not in (",", ";", "=", "["):
+                return                     # not a plain declarator (e.g. ``a . b``)
+            names.append(nm)
+            j += 1
+            if nxt in ("=", "["):          # skip initializer / array extent
+                d = 0
+                while j < len(stmt):
+                    tx = stmt[j].text
+                    if tx in "([{":
+                        d += 1
+                    elif tx in ")]}":
+                        d -= 1
+                    elif tx == "," and d == 0:
+                        break
+                    j += 1
+            if j < len(stmt) and stmt[j].text == ",":
+                j += 1
+                continue
+            break
+        if not names or len(parts) < 1:
+            return
+        rec = _DeclStmt(decl_line=type_line, core_type=core, names=names)
+        for nm in names:
+            out.setdefault(nm, rec)
+
+    for t in toks:
+        tx = t.text
+        if tx == "(":
+            paren += 1
+            stmt.append(t)
+            continue
+        if tx == ")":
+            paren = max(0, paren - 1)
+            stmt.append(t)
+            continue
+        if tx in "{}":
+            handle(stmt)
+            stmt = []
+            continue
+        if tx == ";" and paren == 0:
+            handle(stmt)
+            stmt = []
+            continue
+        stmt.append(t)
+    return out
+
+
 def chain_promote(*, manifest: ChainManifest, graph: CallGraph,
                   tree_root: str | Path, scalar_type: str, two_limb: bool,
                   shim_include: str | None, caller_type: str = "double",

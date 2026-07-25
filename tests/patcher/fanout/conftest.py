@@ -124,6 +124,29 @@ def kokkos_utils_graph(kokkos_utils_tree):
                             tu_file=kokkos_utils_tree / "kokkosUtils.h")
 
 
+# The committed full qcdloop header tree (byte-identical to the Tier-B run trees for
+# the chain files) — used to pin the Blocker-A carrier closure against the real
+# B10/B13/B14 chains without depending on the untracked ``runs/qcdloop/tier_b_stage1``
+# working trees.
+_QCDLOOP_FULL = Path(__file__).resolve().parents[3] / "runs" / "qcdloop_headers_full"
+requires_qcdloop_full = pytest.mark.skipif(
+    not (_QCDLOOP_FULL / "boxGPU.h").is_file(),
+    reason=f"{_QCDLOOP_FULL} not present")
+
+
+@pytest.fixture
+def qcdloop_full_graph():
+    """Call graph rooted at the box entry point ``BO`` over the full qcdloop tree."""
+    if not LIBCLANG:
+        pytest.skip("libclang bindings unavailable")
+    if not (_QCDLOOP_FULL / "boxGPU.h").is_file():
+        pytest.skip(f"{_QCDLOOP_FULL} not present")
+    from agents.patcher.call_graph import build_call_graph
+    from agents.patcher import fanout
+    fanout.clear_graph_cache()
+    return build_call_graph("BO", _QCDLOOP_FULL, tu_file=_QCDLOOP_FULL / "boxGPU.h")
+
+
 def gxx_compile(src: Path, out: Path) -> subprocess.CompletedProcess:
     """Compile ``src`` to object ``out`` with g++ (C++17), returning the result."""
     return subprocess.run([_GXX, "-std=c++17", "-c", str(src), "-o", str(out)],
