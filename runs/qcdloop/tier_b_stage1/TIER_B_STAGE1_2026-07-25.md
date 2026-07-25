@@ -1,87 +1,145 @@
 # Tier-B Stage-1 — chain-scoped dd promotion (2026-07-25)
 
-Phase 2f coordinated whole-chain double-double promotion on the 4 measured Tier-B integrals. v1 promotes the dominant COMPUTED cascade chain per integral (one coordinated envelope).
+Phase 2f coordinated whole-chain double-double promotion on the Tier-B integrals.
+v1 promotes the dominant COMPUTED cascade chain per integral (one coordinated
+envelope). This document records the **Blocker A carrier-widening re-run**
+(Subtask 5, @e1971d0) on **B10 / B13 / B14** (B12 **skipped** — its separate
+gen defect, Blocker B, is out of scope for this handback).
 
 - gate: positive lift >= 0.5 digits vs accumulated-min (chain_dd); tolerance 6.0 (reporting-only)
-- seed 12345, sample_count 5000, entry BO
+- seed 12345, sample_count 5000, entry BO, kernel-scope gate
+- run log: `runs/qcdloop/tierb_stage1_subtask5_rerun.log`
 
 ## Per-integral outcome (kernel-scoped gate)
 
-The gate now scores each chain against ITS integral's own p100 floor (kernel-scope, Reet 2026-07-25), not the whole-app min pinned by the worst kernel (B12's hotspot). Whole-app columns are kept for cross-kernel visibility.
+| I | outcome | patcher_status | solve_wall | predicted lift | chain | lines |
+|---|---|---|---|---|---|---|
+| B10 | apply_failed | write_truncation (**new, deeper seam**) | 286.9s | +18.43 | cascade_B10_612f1391_494252c4 | 10 |
+| B13 | apply_failed | write_truncation (confirmed non-carrier) | 76.6s | +17.10 | cascade_B13_79fc5b8f_f080f240 | 8 |
+| B14 | apply_failed | write_truncation (confirmed non-carrier) | 117.7s | +16.66 | cascade_B14_3429b1d4_01bf2ff3 | 3 |
 
-| I | kernel baseline | kernel final | kernel lift | predicted lift | app baseline | app final | outcome | chain | lines |
-|---|---|---|---|---|---|---|---|---|---|
-| B10 | — | — | — | +18.43 | — | — | apply_failed | cascade_B10_612f1391_494252c4 | 10 |
-| B12 | — | — | — | +17.10 | — | — | apply_failed | cascade_B12_65bb39c0_62ff5a3d | 5 |
-| B13 | — | — | — | +17.10 | — | — | apply_failed | cascade_B13_79fc5b8f_f080f240 | 8 |
-| B14 | — | — | — | +16.66 | — | — | apply_failed | cascade_B14_3429b1d4_01bf2ff3 | 3 |
+No integral reached the acceptance gate — but per the design success criterion
+(BLOCKER_A_CARRIER_DESIGN.md §12, *"NOT all 3 accept"*), each now reaches a
+**real, well-diagnosed terminal state**. The carrier fix removed the *spurious*
+`write_truncation` rejection wherever a strict carrier existed; the residual
+`write_truncation` verdicts are now genuine emission-completeness results, and
+one of them (B10) is a **newly-surfaced, deeper** seam the carrier fix exposed.
 
-## Predicted vs measured lift (kernel-scoped)
+## What the carrier fix changed — the headline result (B10)
 
-- **B10** (cascade_B10_612f1391_494252c4): predicted +18.43, kernel-measured — (— -> —), whole-app lift —, tightness 0.003331756565344427, patcher_status=write_truncation, declared_dd=False
-    - lines: B1m.h:227, B1m.h:240, B1m.h:241, kokkosUtils.h:174, kokkosUtils.h:177, kokkosUtils.h:199, kokkosUtils.h:212, kokkosUtils.h:702, kokkosUtils.h:703, kokkosUtils.h:704
-- **B12** (cascade_B12_65bb39c0_62ff5a3d): predicted +17.10, kernel-measured — (— -> —), whole-app lift —, tightness 0.07075303644353668, patcher_status=llm_gen_failed, declared_dd=False
-    - lines: B2m.h:206, B2m.h:207, B2m.h:241, kokkosUtils.h:212, kokkosUtils.h:702
-- **B13** (cascade_B13_79fc5b8f_f080f240): predicted +17.10, kernel-measured — (— -> —), whole-app lift —, tightness 0.07080121254580928, patcher_status=write_truncation, declared_dd=False
-    - lines: B2m.h:300, B2m.h:301, B2m.h:305, B2m.h:306, B2m.h:355, B2m.h:533, kokkosUtils.h:212, kokkosUtils.h:702
-- **B14** (cascade_B14_3429b1d4_01bf2ff3): predicted +16.66, kernel-measured — (— -> —), whole-app lift —, tightness 0.19860180300800165, patcher_status=write_truncation, declared_dd=False
-    - lines: B2m.h:401, B2m.h:578, kokkosUtils.h:1208
+**The carrier fix works.** B10's chain carries the blocker's worked example:
+`ddilog`'s `TMass Y, S, A;` at `kokkosUtils.h:157`, where `Y` (write :174 / read
+:199) and `A` (write :177 / read :212) are strict carriers. The re-run:
 
-## What the two fixes changed vs the prior run (87be92f)
+- **Carrier closure fired correctly**: `carrier_names = {Y, S, A}` (the whole
+  multi-declarator, §2), `chain_carrier_unwidenable=False`,
+  `chain_carrier_external=False`.
+- **The decl was widened in the emitted variant** and the original left intact
+  (direct re-emission check on a fresh clone):
+  - ORIGINAL `ddilog`: `TMass Y, S, A;` — untouched.
+  - VARIANT `ddilog_*_B10`: `quad::ddfun::ddouble Y, S, A;` — widened.
+- **The Y/A interior seam no longer trips.** Per-region 2d-B with
+  `carrier_names={Y,S,A}` reports `kokkosUtils.h:174` (writes Y) and `:177`
+  (writes A) both **not inert** — the exact spurious rejections removed.
+- **Behavioral proof**: the chain moved from `105.8s` (prior run, terminated at
+  the Y/A pre-build gate) to `286.9s` — it now generates all 13 dd shims and
+  runs the full emission before a *different* region trips. The carrier fix
+  advanced the chain past the seam it was built to clear.
 
-Both fixes did exactly what they were designed to do — they moved every integral off its
-*prior* terminal state onto a *new, more-informative* one. None of the four reached the
-acceptance gate this time, but for reasons that are now diagnostic rather than spurious:
+### The new, deeper seam B10 now trips (`kokkosUtils.h:704`, `Li2omx2`)
 
-| I | prior run (87be92f) | this run (afd334c) | interpretation |
+With Y/S/A widened, the chain-scope interior gate now fires on a **distinct**
+region one level up the call graph:
+
+```
+kokkosUtils.h:688  TOutput Li2omx2(TScale v, w, x, y) {
+kokkosUtils.h:691      TOutput prod, Li2omx2;          // <-- decl OUTSIDE chain lines
+...
+kokkosUtils.h:704      Li2omx2 = -TOutput(... - ql::ddilog<...>(arg2)) + lnarg*lnomarg - ...;  // chain line: WRITES Li2omx2
+kokkosUtils.h:707      return Li2omx2;                 // NON-chain line: reads Li2omx2
+```
+
+This is the **design §3 `fac` tension, one level deeper**: `Li2omx2` (the
+function's own return accumulator, declared at :691 outside the chain line set)
+is written on a chain line (:704) but read only at the **non-chain** `return`
+(:707) — it fails carrier **condition 2** (not read by *another chain line*), so
+Fix A correctly leaves it alone. Its fate is then decided by the existing 2d-B
+machinery. Because `Li2omx2` sits at **interior** depth 3 (its callee `ddilog`
+is depth 4), it is NOT covered by the outermost-region exemption, so its
+caller-precision store (`Li2omx2` is `TOutput`, a recognized caller-complex
+type) reads as a genuine truncating landing → interior `write_truncation`.
+
+**Interpretation**: this is not a carrier bug and not a spurious gate — the
+emitted patch really does round the dd `ddilog` result back to `TOutput` at
+`:704` before the value leaves `Li2omx2` at `:707`. The chain, as currently
+scoped, does not include the `return Li2omx2;` line, so `:704`'s write has no
+wider persistent sink. This is a **chain-SCOPING** limit distinct from Blocker A:
+the dominant-chain selector stopped the chain line set at `:704` (the write) and
+did not extend it to `:707` (the return), so the function's own return value is
+truncated at an interior seam.
+
+## B13 / B14 — confirmed non-carrier write_truncation (as the closure predicted)
+
+Both B13 and B14 have **no widenable carriers** (`carrier_names = frozenset()`,
+no unwidenable/external), matching the committed closure unit tests
+(`test_real_b13_has_no_carriers`, `test_real_b14_has_no_carriers`). Their
+`write_truncation` is therefore **confirmed genuine**, not a carrier artifact —
+we have now *proven* there is no carrier to widen:
+
+- **B13** (`B2m.h`): the interior writes `ga34pm1/ga34m/ga43pm1/ga43m` at
+  :300/:301/:305/:306 are declared at :282–283 (outside the chain lines) but read
+  only at the **non-chain** lines :310–:317 via `x34* = ql::Real(ga34*)` — an
+  extract-to-`double`. They are written on a chain line but not read by another
+  chain line → not carriers (condition 2). The store truncates → genuine
+  interior `write_truncation`.
+- **B14** (`B2m.h`): `fac` at :401 — the design's canonical §3 example: declared
+  `TOutput fac;` at :396 (outside the chain lines), written on chain line :401,
+  read only at the non-chain output stores `res(i,1)=fac/...` / `res(i,0)=fac*...`.
+  Not a carrier → genuine interior `write_truncation`.
+
+## Summary of failure classes after Blocker A
+
+| I | prior run (afd334c) | this run (e1971d0) | what the carrier fix proved |
 |---|---|---|---|
-| B10 | chain-scope 2d-B false-positive (OUTERMOST region) | **interior** write_truncation | Fix 1 cleared the false-positive; a genuine interior region now trips |
-| B12 | chain-scope 2d-B false-positive (OUTERMOST region) | **llm_gen_failed** (build fail) | Fix 1 cleared the false-positive; chain now reaches the gen rung and fails there |
-| B13 | transient Argo timeout | **interior** write_truncation | Fix 3: timeout cleared; real outcome surfaced |
-| B14 | whole-app `chain_no_lift` (B12-pinned global min) | **interior** write_truncation | Fix 2 in place, but chain is gated by Fix 1 *upstream* of the acceptance gate |
+| B10 | interior write_truncation @ Y/A carrier (:174/:177) | interior write_truncation @ `Li2omx2` return (:704), **all shims generated, 105s→287s** | carrier fix WORKS (Y/S/A widened, seam cleared); a deeper **chain-scoping** seam surfaced |
+| B13 | interior write_truncation | interior write_truncation @ `ga34*` (:300/:301/:305/:306) | **confirmed non-carrier** (closure = ∅); genuine truncation, not artifact |
+| B14 | interior write_truncation | interior write_truncation @ `fac` (:401) | **confirmed non-carrier** (design §3); genuine truncation, not artifact |
 
-Fix 2 (kernel-scope gate) is wired and unit-tested but was **not exercised end-to-end** this
-run: every chain terminated at the Patcher (apply_failed) before a candidate reached the
-solver's acceptance gate, so no `kernel_baseline`/`kernel_final`/`kernel_lift` was ever
-measured (all `—` above). The kernel-scope path only runs once a chain builds and validates.
+## Two follow-ups for Reet (flag-and-stop; STOP after Stage-1)
 
-## Root causes (two open blockers for Reet — flag-and-stop)
+**Follow-up 1 — B10 chain-SCOPING (new): the dominant-chain selector truncates a
+function's own return.** The residual B10 seam is `Li2omx2`'s return accumulator
+written at `:704` but with the chain ending there rather than at `:707` (`return
+Li2omx2;`). This is NOT a carrier (correctly left alone by Fix A) and NOT a gate
+bug (the store genuinely truncates). It is a **chain line-set completeness**
+question: should the dominant-chain selector, when a chain line writes a
+function-local that the function then `return`s, extend the chain to cover that
+return so the value stays dd until the function's own boundary? That would let
+the outermost-exemption apply to the return (the designed exit of `Li2omx2`),
+exactly as it does for the top-level driver store. This is a Stage-2 selector /
+chain-definition refinement, orthogonal to Blocker A. Do **not** weaken the
+interior gate — it correctly rejects the currently-emitted (truncating) patch.
 
-**Blocker A — interior write_truncation is a chain-EMISSION completeness limit, not a precision result (B10/B13/B14).**
-The interior gate fires because `chain_promote` widens only the chain's listed region
-*lines*, not the carrier *declarations* that thread values between links. Concretely on B14:
-
-- `B2m.h:401` writes `fac`, declared `TOutput fac;` at `B2m.h:396` — OUTSIDE the promoted
-  line set, so it stays caller-precision → the interior write demotes (Case-B landing).
-- `B2m.h:578` writes `Y[1][3]=Y[3][1]`, a `Kokkos::Array<...,TMass,...>` parameter — a
-  caller-precision carrier the chain never widens.
-- `kokkosUtils.h:1208` writes `res[0]`, a `TOutput` array — same class.
-
-So the gate's *local* verdict is arguably correct for the patch **as emitted** (this exact
-region really does round back to double), but the *conclusion* it forces — "the chain is
-inert / breaks" — is wrong: the chain would carry precision if the shared carriers
-(`fac`, `Y[][]`, `res[]`) were promoted to dd along with the region lines. This is the
-chain-scope analogue of the outermost-region issue Fix 1 fixed: the per-region 2d-B
-detector cannot see a *cross-link* sink because the sink is a declaration the chain-emission
-step leaves at double. **The fix belongs in chain emission (widen carrier decls that are
-written by one interior link and read by another), NOT in the gate** — do not weaken the
-interior gate, which correctly rejects the currently-emitted (truncating) patch. Suggested
-Stage-2 work item: `chain_promote` should collect writes across all interior links and
-promote the enclosing declaration of any carrier that is both written and read within the
-chain envelope. Until then B10/B13/B14 are correctly *not accepted* (the emitted patch is
-genuinely lossy), just for an emission reason, not a numerical one.
-
-**Blocker B — B12 chain hits a Patcher/LLM gen-robustness failure (`llm_gen_failed`), unrelated to precision.**
-Build error (`B2m.h:768-771`): the LLM re-declared already-promoted locals
-(`redeclaration of 'quad::ddfun::ddouble p3sq__ff'`, `m3sq__ff`, `m4sq__ff`) and emitted a
-malformed unary `+` (`no match for 'operator+' (operand type is 'ddouble')`, 1 arg to a
-2-arg operator). Pure code-generation defect in the dd rung on this chain — same class as
-the residual gen gaps tracked in the 10k waves, not a gate or precision issue. Fix 1 is
-what let B12 reach this rung at all (previously masked by the outermost false-positive).
+**Follow-up 2 — B13/B14 are genuinely dd-insufficient AS CURRENTLY SCOPED.**
+Their cancellation carriers (`ga34*`, `fac`) are read only at non-chain
+extract/store sites, so a chain that promotes only the listed lines truncates at
+the write regardless of carrier-widening. Same root shape as Follow-up 1 (chain
+scope stops before the value's real consumer), but here the consumer is an output
+store (`ql::Real(...)` / `res(i,k)=...`), not a `return`. If Stage-2 extends the
+chain scope to the consumer, the outermost-exemption would cover it; otherwise
+these remain correctly not-accepted.
 
 ## Notes
-- Kernel-scope gate (Reet 2026-07-25): each chain gated against its own integral's p100 floor, not the whole-app min (which B12's hotspot pins). Wired + unit-tested; not exercised e2e this run (all chains failed at the Patcher upstream of the gate).
-- Chain-scope 2d-B (Fix 1): the gate now fires only on INTERIOR chain regions; the outermost region's exit-truncation is the designed output boundary and is exempt (was false-positiving B10/B12 pre-build). Confirmed working — B10/B12 moved off the outermost false-positive onto genuine interior/gen outcomes.
-- STOP after Stage-1 for review; Group B / all-21 not run.
-- v1 = dominant chain per integral; multi-chain union deferred to Stage-2.
-- Two open blockers above (A: carrier-decl promotion in chain emission; B: B12 dd-rung gen robustness) are for Reet to triage before Stage-2 / all-21.
+- **Carrier fix validated**: closure fires on B10 (Y/S/A → dd), decl widened in
+  the emitted variant, original untouched, Y/A seam cleared, 671 tests green
+  (incl. new e2e integration test asserting body-promotion + carrier-decl-widen
+  and that the interior gate stays silent with carrier awareness).
+- **No gate weakened.** Every `write_truncation` this run is a true
+  round-back-to-double in the emitted patch; the fix only removed the *spurious*
+  ones (carrier writes now land in a widened dd decl).
+- **B12 skipped** (Blocker B, separate gen defect — out of scope).
+- Kernel-scope path (Reet 2026-07-25) still **not exercised e2e**: every chain
+  terminated at the Patcher (apply_failed) upstream of the solver acceptance
+  gate, so no `kernel_baseline`/`final`/`lift` was measured (all —).
+- STOP after Stage-1 for Reet review; Group B / all-21 not run. v1 = dominant
+  chain per integral; multi-chain union deferred to Stage-2.

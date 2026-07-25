@@ -25,7 +25,7 @@
   "reason": "patcher write_truncation (truncation): chain write_truncation: an INTERIOR region of chain cascade_B14_3429b1d4_01bf2ff3 truncates every landing back to double (no wider persistent sink) \u2014 an intra-chain write injects double roundoff betwe",
   "declared_dd": false,
   "stopped": null,
-  "solve_wall_sec": 105.8,
+  "solve_wall_sec": 117.7,
   "baseline_hotspot": null,
   "diff_path": "/home/rbarik/Agentic-Mixed-Precision-Demo/runs/qcdloop/tier_b_stage1/B14/final.diff",
   "tree": "/home/rbarik/Agentic-Mixed-Precision-Demo/runs/qcdloop/tier_b_stage1/B14/tree_B14"
