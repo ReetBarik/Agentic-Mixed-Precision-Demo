@@ -12,6 +12,7 @@ def test_all_statuses_present():
         "llm_gen_failed", "patch_apply_failed", "timeout", "commit_failed",
         "empty_candidate", "patch_inapplicable", "promotion_no_op",
         "write_truncation", "awaiting_algorithmic_rewrite",
+        "chain_carrier_unwidenable", "chain_carrier_external",
     }
 
 
@@ -96,6 +97,21 @@ def test_awaiting_algorithmic_rewrite_is_terminal_and_free():
     assert e.counts_budget is False
     assert e.is_reject is True
     assert e.dd_untested is True
+
+
+def test_chain_carrier_statuses_are_terminal_and_free():
+    # Blocker A: a chain's strict carrier variable whose decl the emission layer cannot
+    # widen (function parameter → unwidenable; global/member/output → external).  The dd
+    # value re-narrows between links so the fix is inert — deterministic + rung-fixed, so
+    # like write_truncation both are terminal for the intent, git-only (free vs budget), a
+    # real reject, and dd_untested (skipped, not measured, at the dd rung).
+    for status in ("chain_carrier_unwidenable", "chain_carrier_external"):
+        e = dispatch(status)
+        assert e.action == "advance_terminal"
+        assert e.log_tag == status
+        assert e.counts_budget is False
+        assert e.is_reject is True
+        assert e.dd_untested is True
 
 
 def test_patch_apply_failed_is_strategy_bug_and_free():

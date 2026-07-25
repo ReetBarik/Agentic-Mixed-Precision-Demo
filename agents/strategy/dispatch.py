@@ -110,6 +110,20 @@ DISPATCH: dict[str, DispatchEntry] = {
     "awaiting_algorithmic_rewrite": DispatchEntry(
         action="advance_terminal", log_tag="awaiting_algorithmic_rewrite",
         counts_budget=False, is_reject=True, dd_untested=True),
+    # Blocker A: a chain's strict carrier variable (written by one link, read by another)
+    # whose decl the emission layer cannot widen — so the dd value re-narrows between links
+    # and the chain fix is inert.  Detected at gen time (source-derived, upstream of any
+    # build), rung-fixed (a wider rung re-narrows identically) → terminal for the intent,
+    # git-only so free vs budget, a real reject, dd_untested (skipped, not measured).
+    # `chain_carrier_unwidenable` — the carrier's decl is a function parameter (v1 refuses
+    # to rewrite signatures); `chain_carrier_external` — the carrier's decl is global / a
+    # class member / an output container (v1 refuses to widen shared state).
+    "chain_carrier_unwidenable": DispatchEntry(
+        action="advance_terminal", log_tag="chain_carrier_unwidenable",
+        counts_budget=False, is_reject=True, dd_untested=True),
+    "chain_carrier_external": DispatchEntry(
+        action="advance_terminal", log_tag="chain_carrier_external",
+        counts_budget=False, is_reject=True, dd_untested=True),
 }
 
 

@@ -74,12 +74,26 @@ WRITE_TRUNCATION = "write_truncation"
 # the signal_class analogue of the 2c/2d ``promotion_no_op`` / ``write_truncation``
 # terminal gates: deterministic, source-derived, upstream of any build.
 AWAITING_ALGORITHMIC_REWRITE = "awaiting_algorithmic_rewrite"
+# Blocker A (chain-emission carrier under-widening) — a strict carrier variable (one
+# declared OUTSIDE a chain's line set, written by one chain link and read by another)
+# whose decl the emission layer cannot widen.  A carrier that stays double silently
+# re-narrows the dd value flowing between links, so the chain's precision fix is inert.
+# Two terminal sub-cases, both deterministic + source-derived (detected at gen time,
+# upstream of any build), and both rung-fixed (a wider rung re-narrows identically):
+#
+#   CHAIN_CARRIER_UNWIDENABLE — the strict carrier's decl is a FUNCTION PARAMETER; v1
+#   refuses to rewrite signatures, so the carrier cannot be widened in place.
+CHAIN_CARRIER_UNWIDENABLE = "chain_carrier_unwidenable"
+#   CHAIN_CARRIER_EXTERNAL — the strict carrier's decl is GLOBAL / a class member / an
+#   output container (e.g. ``res(i,0)``); v1 refuses to widen shared/persistent state.
+CHAIN_CARRIER_EXTERNAL = "chain_carrier_external"
 
 STATUSES = frozenset({
     OK, LLM_GEN_FAILED, PATCH_APPLY_FAILED, COMMIT_FAILED,
     BUILD_FAILED, RUNTIME_CRASHED, RUNTIME_NAN, TIMEOUT, EMPTY_CANDIDATE,
     PATCH_INAPPLICABLE, PROMOTION_NO_OP, WRITE_TRUNCATION,
     AWAITING_ALGORITHMIC_REWRITE,
+    CHAIN_CARRIER_UNWIDENABLE, CHAIN_CARRIER_EXTERNAL,
 })
 
 # error.kind vocabulary (design §P2).
@@ -94,6 +108,8 @@ ERR_TIMEOUT = "timeout"
 ERR_EMPTY = "empty"
 ERR_TRUNCATION = "truncation"   # Phase 2d-B write-boundary truncation
 ERR_AWAITING_REWRITE = "awaiting_rewrite"   # Phase 2e signal_class filter
+ERR_CARRIER_UNWIDENABLE = "carrier_unwidenable"   # Blocker A: carrier decl is a param
+ERR_CARRIER_EXTERNAL = "carrier_external"          # Blocker A: carrier decl is shared state
 
 
 def _artifacts(shim_paths=None, boundary_patch_path=None,

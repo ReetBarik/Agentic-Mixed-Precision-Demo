@@ -174,7 +174,9 @@ class _Patcher:
                                                     R.PATCH_INAPPLICABLE,
                                                     R.PROMOTION_NO_OP,
                                                     R.WRITE_TRUNCATION,
-                                                    R.AWAITING_ALGORITHMIC_REWRITE):
+                                                    R.AWAITING_ALGORITHMIC_REWRITE,
+                                                    R.CHAIN_CARRIER_UNWIDENABLE,
+                                                    R.CHAIN_CARRIER_EXTERNAL):
                     gitops.reset_hard(repo_root, parent)
                     return R.failure(gen.status, parent, err_kind=gen.err_kind,
                                      detail=gen.detail,

@@ -96,6 +96,13 @@ _PATCHER_STATUS_TO_CELL_STATUS = {
     # other terminal gates; the finer ``awaiting_algorithmic_rewrite`` label survives in
     # the manifest failure_modes histogram (the Kahan/identity plumbing backlog).
     "awaiting_algorithmic_rewrite": STATUS_PATCHER_FAILED,
+    # Blocker A: a chain's strict carrier variable whose decl the emission layer cannot
+    # widen (a function parameter, or global/member/output-container shared state).  A
+    # codegen/precision gap, not a measurement → patcher_failed; the finer
+    # ``chain_carrier_unwidenable`` / ``chain_carrier_external`` label survives in the
+    # manifest failure_modes histogram.
+    "chain_carrier_unwidenable": STATUS_PATCHER_FAILED,
+    "chain_carrier_external": STATUS_PATCHER_FAILED,
     "timeout": STATUS_PATCHER_FAILED,
     "build_failed": STATUS_BUILD_FAILED,
     "call_graph_build_failed": STATUS_BUILD_FAILED,

@@ -41,6 +41,11 @@ _FANOUT_FAILURE_PREFIXES = (
     # Phase 2e: a precision rung declined on a cancellation-cascade / local-cancellation
     # region (signal_class filter; structurally inert, awaiting an algorithmic rewrite).
     "awaiting_algorithmic_rewrite",
+    # Blocker A: a chain's strict carrier variable whose decl the emission layer cannot
+    # widen — a function parameter (unwidenable) or global/member/output shared state
+    # (external).  The dd value re-narrows between chain links → the fix is inert.
+    "chain_carrier_unwidenable",
+    "chain_carrier_external",
 )
 
 

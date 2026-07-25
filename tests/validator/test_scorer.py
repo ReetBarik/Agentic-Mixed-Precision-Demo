@@ -298,6 +298,14 @@ def test_cell_status_map_covers_fanout_modes():
     assert sc.cell_status_for("call_graph_build_failed") == sc.STATUS_BUILD_FAILED
     assert sc.cell_status_for("ok", "silent_bypass") == sc.STATUS_WIRE_FAILED
     assert sc.cell_status_for("ok", "variant_name_collision") == sc.STATUS_WIRE_FAILED
+    # Blocker A: both carrier statuses fold to patcher_failed at the manifest layer, with
+    # the specific name preserved as the failure_mode (following the write_truncation /
+    # promotion_no_op pattern).  Recognized both as coarse patcher_status and as a
+    # fan-out failure_mode (which wins when both are present).
+    assert sc.cell_status_for("chain_carrier_unwidenable") == sc.STATUS_PATCHER_FAILED
+    assert sc.cell_status_for("chain_carrier_external") == sc.STATUS_PATCHER_FAILED
+    assert sc.cell_status_for("ok", "chain_carrier_unwidenable") == sc.STATUS_PATCHER_FAILED
+    assert sc.cell_status_for("ok", "chain_carrier_external") == sc.STATUS_PATCHER_FAILED
     # unknown -> conservative patcher_failed
     assert sc.cell_status_for("something_new") == sc.STATUS_PATCHER_FAILED
     assert sc.cell_status_for(None) == sc.STATUS_PATCHER_FAILED
