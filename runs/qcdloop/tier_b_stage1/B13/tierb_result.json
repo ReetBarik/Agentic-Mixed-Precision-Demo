@@ -1,0 +1,32 @@
+{
+  "integral": "B13",
+  "n_chains": 9962,
+  "n_computed": 9962,
+  "chain_id": "cascade_B13_79fc5b8f_f080f240",
+  "tightness": 0.07080121254580928,
+  "measured_max_rel_err": 184.8885025739084,
+  "predicted_lift": 17.10454907468422,
+  "chain_lines": [
+    "B2m.h:300",
+    "B2m.h:301",
+    "B2m.h:305",
+    "B2m.h:306",
+    "B2m.h:355",
+    "B2m.h:533",
+    "kokkosUtils.h:212",
+    "kokkosUtils.h:702"
+  ],
+  "baseline_min": null,
+  "final_min": null,
+  "measured_lift": null,
+  "outcome": "apply_failed",
+  "reason_tag": null,
+  "patcher_status": "llm_gen_failed",
+  "reason": "patcher llm_gen_failed (integrator): generation failed after 3 attempts: chain region B2m.h:305: LLM generation failed: {'type': 'error', 'error': {'type': 'api_error', 'message': 'Request timed out or interrupted. This could be due to a",
+  "declared_dd": false,
+  "stopped": null,
+  "solve_wall_sec": 649.1,
+  "baseline_hotspot": null,
+  "diff_path": "/home/rbarik/Agentic-Mixed-Precision-Demo/runs/qcdloop/tier_b_stage1/B13/final.diff",
+  "tree": "/home/rbarik/Agentic-Mixed-Precision-Demo/runs/qcdloop/tier_b_stage1/B13/tree_B13"
+}

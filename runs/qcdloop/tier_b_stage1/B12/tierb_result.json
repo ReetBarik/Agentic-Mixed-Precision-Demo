@@ -1,0 +1,29 @@
+{
+  "integral": "B12",
+  "n_chains": 9388,
+  "n_computed": 9386,
+  "chain_id": "cascade_B12_65bb39c0_62ff5a3d",
+  "tightness": 0.07075303644353668,
+  "measured_max_rel_err": 16199947.780924479,
+  "predicted_lift": 17.10484468737453,
+  "chain_lines": [
+    "B2m.h:206",
+    "B2m.h:207",
+    "B2m.h:241",
+    "kokkosUtils.h:212",
+    "kokkosUtils.h:702"
+  ],
+  "baseline_min": null,
+  "final_min": null,
+  "measured_lift": null,
+  "outcome": "apply_failed",
+  "reason_tag": null,
+  "patcher_status": "write_truncation",
+  "reason": "patcher write_truncation (truncation): chain write_truncation: chain cascade_B12_65bb39c0_62ff5a3d's outermost region truncates every landing back to double (no wider persistent sink) \u2014 the chain output boundary is numerically inert",
+  "declared_dd": false,
+  "stopped": null,
+  "solve_wall_sec": 158.5,
+  "baseline_hotspot": null,
+  "diff_path": "/home/rbarik/Agentic-Mixed-Precision-Demo/runs/qcdloop/tier_b_stage1/B12/final.diff",
+  "tree": "/home/rbarik/Agentic-Mixed-Precision-Demo/runs/qcdloop/tier_b_stage1/B12/tree_B12"
+}
