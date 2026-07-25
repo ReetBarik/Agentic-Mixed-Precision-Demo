@@ -219,6 +219,12 @@ class Promote:
     complex_tokens: list[str] = field(default_factory=list)
     complex_names: list[str] = field(default_factory=list)
     caller_complex: str | None = None
+    # Blocker A (design §8): chain-carrier names whose declaration the emission layer
+    # widens to the extended type (CarrierDecl below).  At THIS region's boundary a
+    # carrier is neither a read-only input nor a truncating sink, so promote_region_block
+    # must not seed / alias / demote it — the widened decl carries the extended value
+    # end-to-end.  Defaults empty so a pre-Blocker-A manifest re-renders identically.
+    carrier_names: list[str] = field(default_factory=list)
 
 
 @dataclass
@@ -470,6 +476,7 @@ def _accumulate_region_specs(
     caller_type: str, ckw: dict,
     new_specs: dict[str, dict[str, "VariantSpec"]],
     root_reroutes: dict[str, str], name_maps: list[dict[str, str]],
+    carrier_names=(),
 ) -> None:
     """Accumulate the variant specs + root reroutes for ONE region's caller paths.
 
@@ -514,7 +521,8 @@ def _accumulate_region_specs(
                     reads=list(reads), writes=list(writes),
                     scalar_type=scalar_type, two_limb=two_limb, caller_type=caller_type,
                     complex_type=complex_type, complex_tokens=list(complex_tokens),
-                    complex_names=list(complex_names), caller_complex=caller_complex))
+                    complex_names=list(complex_names), caller_complex=caller_complex,
+                    carrier_names=list(carrier_names)))
                 if shim_include and shim_include not in spec.shim_includes:
                     spec.shim_includes.append(shim_include)
 
@@ -572,7 +580,8 @@ def render_variant(spec: VariantSpec) -> str:
                 p.two_limb, complex_type=p.complex_type,
                 complex_tokens=frozenset(p.complex_tokens),
                 complex_names=frozenset(p.complex_names),
-                caller_complex=p.caller_complex)
+                caller_complex=p.caller_complex,
+                carrier_names=frozenset(p.carrier_names))
             lines = lines[:local_s] + block + lines[local_e + 1:]
         else:
             c = e
@@ -736,7 +745,8 @@ def _promote_in_place(tree: Path, fd: FuncDef, line_start: int, line_end: int,
         complex_type=ckw.get("complex_type"),
         complex_tokens=frozenset(ckw.get("complex_tokens", [])),
         complex_names=frozenset(ckw.get("complex_names", [])),
-        caller_complex=ckw.get("caller_complex"))
+        caller_complex=ckw.get("caller_complex"),
+        carrier_names=frozenset(ckw.get("carrier_names", [])))
     if promoted:
         lines = lines[:line_start - 1] + block + lines[line_end:]
     if shim_include:

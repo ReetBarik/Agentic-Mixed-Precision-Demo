@@ -57,7 +57,16 @@ _SPEC = regional.RegionalSpec(
         "by another link stay ddouble (do not truncate at the region exit); only the "
         "chain's outermost read/write converts to caller precision (the boundary patch "
         "does that). Any overload you supply for a function that is itself on the chain "
-        "MUST return ddouble, never a value narrowed to double."
+        "MUST return ddouble, never a value narrowed to double.\n"
+        "## Carrier-widening invariant (C10)\n"
+        "A carrier variable — declared outside the chain's line set but written by one "
+        "chain link and read by another — is widened to ddouble at its declaration by "
+        "the boundary/emission layer. Treat such a variable as ddouble end-to-end: "
+        "never re-narrow it to double at an assignment or overload return. A value one "
+        "link produces and a later link consumes stays ddouble across the whole chain, "
+        "so any overload/operator that assigns to or returns through a carrier must "
+        "produce ddouble, or the widened storage truncates at the write and undoes the "
+        "carrier fix."
     ),
 )
 

@@ -50,7 +50,7 @@ from pathlib import Path
 from agents.integrator_base import boundary
 from agents.patcher.call_graph import CallGraph
 from agents.patcher.fanout import (
-    FanoutError, Promote, VariantSpec,
+    CarrierDecl, FanoutError, Promote, VariantSpec,
     _accumulate_region_specs, _complex_reads, _merge_into_file, _original_text,
     _pick_def, _promote_in_place, _reroute_in_function, _resolve_complex_binding,
     _resolve_root_file,
@@ -102,6 +102,16 @@ class ChainFanoutResult:
     reroutes: dict[str, str] = field(default_factory=dict)
     # Per-region reads actually used (source-derived when not supplied), keyed by region.
     reads_used: dict[tuple[str, int, int], list[str]] = field(default_factory=dict)
+    # Blocker A carrier-closure terminals (BLOCKER_A_CARRIER_DESIGN.md §9).  Set BEFORE
+    # any tree mutation when a strict carrier's decl cannot be widened, so the chain is
+    # abandoned (no variants emitted) rather than emitted with a truncating interior
+    # seam that the 2d-B gate would then reject.  ``carrier_detail`` names the offending
+    # carrier(s) for the terminal Gen message.
+    chain_carrier_unwidenable: bool = False
+    chain_carrier_external: bool = False
+    carrier_detail: str = ""
+    # The widenable carrier names actually threaded into the promotion (forensics/tests).
+    carrier_names: list[str] = field(default_factory=list)
 
 
 def chain_promotion_no_op(per_region_promoted: list[bool]) -> bool:
@@ -116,7 +126,8 @@ def chain_promotion_no_op(per_region_promoted: list[bool]) -> bool:
 
 def chain_write_truncation(region_meta: list[dict], *, two_limb: bool,
                            caller_type: str = "double",
-                           complex_tokens=frozenset(), caller_complex=None) -> bool:
+                           complex_tokens=frozenset(), caller_complex=None,
+                           carrier_names=frozenset()) -> bool:
     """Chain-scope 2d-B gate: applied to the chain's INTERIOR regions only.
 
     ``region_meta`` is the per-region list built by :func:`chain_promote`, each entry
@@ -143,7 +154,7 @@ def chain_write_truncation(region_meta: list[dict], *, two_limb: bool,
         if boundary.write_truncation_inert(
                 m["region_text"], m["reads"], m["writes"], two_limb,
                 caller_type=caller_type, complex_tokens=complex_tokens,
-                caller_complex=caller_complex):
+                caller_complex=caller_complex, carrier_names=carrier_names):
             return True
     return False
 
@@ -182,6 +193,14 @@ class CarrierClosure:
     widenable: list[tuple[str, int, str, str]] = field(default_factory=list)
     unwidenable_reasons: list[tuple[str, str]] = field(default_factory=list)
     external_reasons: list[tuple[str, str]] = field(default_factory=list)
+    # One record PER widened decl LINE (not per name): ``(file, decl_line, orig_type,
+    # dd_type, representative_name)``.  Widening the leading type token widens every
+    # same-type sibling of a multi-declarator in one edit (§2), so the emission layer
+    # (Subtask 5) turns each of these — not each ``widenable`` name — into exactly one
+    # :class:`~agents.patcher.fanout.CarrierDecl`.  ``orig_type`` is the core type
+    # token the boundary bare-decl scanner matches; kept here so the closure stays the
+    # single source of the orig→dd type mapping.
+    decl_widens: list[tuple[str, int, str, str, str]] = field(default_factory=list)
 
     @property
     def carrier_names(self) -> set[str]:
@@ -331,8 +350,13 @@ def compute_carrier_closure(
                                    complex_type, complex_tokens)
         for nm in stmt.names:
             out.widenable.append((dfile, dline, nm, dd_type))
+        # one decl-widen record per decl LINE — widening the leading type token widens
+        # every same-type sibling in a single edit (§2), so the emission layer needs
+        # only the line + the orig→dd type map, not one edit per name.
+        out.decl_widens.append((dfile, dline, stmt.core_type, dd_type, stmt.names[0]))
 
     out.widenable.sort(key=lambda w: (w[0], w[1], w[2]))
+    out.decl_widens.sort(key=lambda w: (w[0], w[1]))
     out.unwidenable_reasons.sort()
     out.external_reasons.sort()
     return out
@@ -519,6 +543,29 @@ def chain_promote(*, manifest: ChainManifest, graph: CallGraph,
     complex_tokens, caller_complex = _resolve_complex_binding(
         app_source_roots, caller_type, complex_type)
 
+    # --- Blocker A: carrier closure (BLOCKER_A_CARRIER_DESIGN.md §4) -----------
+    # Classify the chain's carriers BEFORE any tree mutation.  A strict carrier whose
+    # decl cannot be widened (a function parameter, or shared state) is a terminal:
+    # emitting the chain would leave a truncating interior seam the 2d-B gate then
+    # rejects, so abandon the chain cleanly with the diagnostic status instead.  A
+    # widenable carrier's name is threaded into every region's boundary transform so it
+    # is neither demoted at a region exit nor read as inert, and its declaration is
+    # widened in the variant (VariantSpec.carrier_decls, applied per file below).
+    closure = compute_carrier_closure(
+        manifest=manifest, graph=graph, scalar_type=scalar_type,
+        complex_type=complex_type, complex_tokens=complex_tokens, max_paths=max_paths)
+    if closure.unwidenable_reasons:
+        names = ", ".join(f"{n} ({r})" for n, r in closure.unwidenable_reasons)
+        return ChainFanoutResult(
+            declared_variants=[], files_touched=[],
+            chain_carrier_unwidenable=True, carrier_detail=names)
+    if closure.external_reasons:
+        names = ", ".join(f"{n} ({r})" for n, r in closure.external_reasons)
+        return ChainFanoutResult(
+            declared_variants=[], files_touched=[],
+            chain_carrier_external=True, carrier_detail=names)
+    carrier_names = closure.carrier_names
+
     new_specs: dict[str, dict[str, VariantSpec]] = {}
     root_reroutes: dict[str, str] = {}
     name_maps: list[dict[str, str]] = []
@@ -554,12 +601,14 @@ def chain_promote(*, manifest: ChainManifest, graph: CallGraph,
 
         complex_names = _complex_reads(func_src, reads, complex_tokens) if complex_type else []
         ckw = dict(complex_type=complex_type, complex_tokens=list(complex_tokens),
-                   complex_names=complex_names, caller_complex=caller_complex)
+                   complex_names=complex_names, caller_complex=caller_complex,
+                   carrier_names=list(carrier_names))
 
         _, promoted = boundary.promote_region_block(
             region_text, reads, writes, scalar_type, caller_type, two_limb,
             complex_type=complex_type, complex_tokens=frozenset(complex_tokens),
-            complex_names=frozenset(complex_names), caller_complex=caller_complex)
+            complex_names=frozenset(complex_names), caller_complex=caller_complex,
+            carrier_names=frozenset(carrier_names))
         per_region_promoted.append(promoted)
 
         if fd.name == graph.root:
@@ -582,13 +631,32 @@ def chain_promote(*, manifest: ChainManifest, graph: CallGraph,
                 reads=reads, writes=writes, integral=manifest.integral, graph=graph,
                 scalar_type=scalar_type, two_limb=two_limb, shim_include=shim_include,
                 caller_type=caller_type, ckw=ckw,
-                new_specs=new_specs, root_reroutes=root_reroutes, name_maps=name_maps)
+                new_specs=new_specs, root_reroutes=root_reroutes, name_maps=name_maps,
+                carrier_names=carrier_names)
             depth = min(len(p) for p in paths) - 1     # hops from root (shallower = outer)
 
         region_meta.append(dict(depth=depth, region_text=region_text,
                                 reads=reads, writes=writes, promoted=promoted))
 
     assert_no_collisions(name_maps)
+
+    # --- Blocker A: attach carrier decl-widens to the variants that own them ----
+    # Each decl-widen record is (file, decl_line, orig_type, dd_type, name).  A carrier
+    # lives in exactly one interior (non-entry) chain function (§4: len(funcs)==1, its
+    # writes are interior so the function is never the in-place entry point), which the
+    # fan-out copied to one variant PER caller path — the widened decl must ride on
+    # EVERY such variant (the decl line is inside each copy's original extent).  The
+    # emission pass (render_variant) rewrites the leading type token, widening the whole
+    # multi-declarator in one edit (§2).
+    for (dfile, dline, orig_type, dd_type, name) in closure.decl_widens:
+        for spec in new_specs.get(dfile, {}).values():
+            if spec.orig_start <= dline <= spec.orig_end:
+                cd = CarrierDecl(decl_line=dline, orig_type=orig_type,
+                                 dd_type=dd_type, name=name)
+                key = (cd.decl_line, cd.orig_type, cd.dd_type)
+                if key not in {(c.decl_line, c.orig_type, c.dd_type)
+                               for c in spec.carrier_decls}:
+                    spec.carrier_decls.append(cd)
 
     # --- one merge per touched file (the whole chain's specs for that file) ----
     declared: list[str] = []
@@ -614,7 +682,8 @@ def chain_promote(*, manifest: ChainManifest, graph: CallGraph,
     if promotion_applied and region_meta:
         write_truncation = chain_write_truncation(
             region_meta, two_limb=two_limb, caller_type=caller_type,
-            complex_tokens=frozenset(complex_tokens), caller_complex=caller_complex)
+            complex_tokens=frozenset(complex_tokens), caller_complex=caller_complex,
+            carrier_names=frozenset(carrier_names))
 
     return ChainFanoutResult(
         declared_variants=sorted(set(declared)),
@@ -622,4 +691,4 @@ def chain_promote(*, manifest: ChainManifest, graph: CallGraph,
         in_place_regions=in_place_regions, paths_enumerated=paths_enumerated,
         truncated=truncated, promotion_applied=promotion_applied,
         write_truncation=write_truncation, reroutes=dict(root_reroutes),
-        reads_used=reads_used)
+        reads_used=reads_used, carrier_names=sorted(carrier_names))

@@ -94,7 +94,7 @@ def test_chain_write_truncation_skips_outermost_region(monkeypatch):
     checked = []
 
     def fake(region_text, reads, writes, two_limb, *, caller_type="double",
-             complex_tokens=frozenset(), caller_complex=None):
+             complex_tokens=frozenset(), caller_complex=None, carrier_names=frozenset()):
         checked.append(region_text)
         # Only the outermost region ("OUT") would trip the per-region detector.
         return region_text == "OUT"
@@ -115,7 +115,7 @@ def test_chain_write_truncation_fires_on_interior_truncation(monkeypatch):
     # An INTERIOR write that truncates back to caller precision injects double roundoff
     # between links -> the chain is genuinely broken -> gate fires.
     def fake(region_text, reads, writes, two_limb, *, caller_type="double",
-             complex_tokens=frozenset(), caller_complex=None):
+             complex_tokens=frozenset(), caller_complex=None, carrier_names=frozenset()):
         return region_text == "MID"           # an interior region trips it
 
     monkeypatch.setattr("agents.patcher.chain_promote.boundary.write_truncation_inert", fake)
@@ -263,3 +263,118 @@ def test_unreachable_region_raises(chain_tree, chain_graph):
             lines=[("app.h", 999, 999)]),          # no enclosing function
             graph=g, tree_root=chain_tree, scalar_type="Ext", two_limb=False,
             shim_include=None)
+
+
+# --------------------------------------------------------------------------- #
+# Blocker A end-to-end — a real carrier (Subtask 5 wiring)
+#
+# ``inner`` (interior, depth 2) declares a ``double`` carrier OUTSIDE the chain line
+# set, writes it on one interior chain line and reads it on another; ``mid`` (depth 1)
+# holds the chain's outermost/designed-exit region.  WITHOUT the carrier fix the carrier
+# write is a Case-B truncating landing at the recognized caller type ``double`` → the
+# interior 2d-B ``chain_write_truncation`` gate fires and the patch is (spuriously)
+# rejected.  WITH the fix the carrier's decl is widened to dd, so the write is no longer
+# a truncating landing, the gate stays silent, and the emitted variant carries BOTH the
+# body promotions and the carrier decl-widen.
+# --------------------------------------------------------------------------- #
+
+DD = "quad::ddfun::ddouble"
+
+CARRIER_CHAIN_H = """\
+#pragma once
+namespace app {
+
+template<class T>
+T inner(T x) {
+    double carry;
+    carry = x + T(1);
+    T d2 = carry + x;
+    return d2;
+}
+
+template<class T>
+T mid(T x) {
+    T c = inner<T>(x);
+    T d = c - T(3);
+    return d;
+}
+
+template<class T>
+T entry(T x) {
+    T e = mid<T>(x);
+    return e + T(4);
+}
+
+}  // namespace app
+"""
+
+
+@pytest.fixture
+def carrier_chain_tree(tmp_path) -> Path:
+    (tmp_path / "app.h").write_text(CARRIER_CHAIN_H)
+    return tmp_path
+
+
+@pytest.fixture
+def carrier_chain_graph(carrier_chain_tree):
+    from agents.patcher.call_graph import build_call_graph
+    fanout.clear_graph_cache()
+    return build_call_graph("entry", carrier_chain_tree,
+                            tu_file=carrier_chain_tree / "app.h")
+
+
+@requires_libclang
+def test_carrier_chain_widens_decl_and_gate_stays_silent(carrier_chain_tree,
+                                                         carrier_chain_graph):
+    from agents.integrator_base import boundary
+    g = carrier_chain_graph
+    a_line = _line(g, "inner", "carry = x + T(1);")   # interior: WRITES carrier
+    b_line = _line(g, "inner", "T d2 = carry + x;")    # interior: READS carrier
+    decl_line = _line(g, "inner", "double carry;")     # carrier decl (outside chain)
+    outer_line = _line(g, "mid", "T d = c - T(3);")    # outermost/designed exit
+
+    # Control: on the interior carrier-write region the per-region 2d-B detector FIRES
+    # without carrier awareness (the carrier write is a truncating double landing) and
+    # is SILENCED once the carrier is declared widened — this is exactly the spurious
+    # rejection the fix removes.
+    region_a = "    carry = x + T(1);"
+    assert boundary.write_truncation_inert(
+        region_a, ["x"], ["carry"], True, caller_type="double") is True
+    assert boundary.write_truncation_inert(
+        region_a, ["x"], ["carry"], True, caller_type="double",
+        carrier_names=frozenset({"carry"})) is False
+
+    res = chain_promote(manifest=ChainManifest(
+        chain_id="cascade_B10_x", integral="B10", entry_point="entry",
+        lines=[("app.h", a_line, a_line), ("app.h", b_line, b_line),
+               ("app.h", outer_line, outer_line)]),
+        graph=g, tree_root=carrier_chain_tree, scalar_type=DD, two_limb=True,
+        shim_include=None)
+
+    # carrier recognized as widenable — no terminal carrier refusal
+    assert res.chain_carrier_unwidenable is False
+    assert res.chain_carrier_external is False
+    assert res.carrier_names == ["carry"]
+
+    # the chain promotes AND the interior write_truncation gate does NOT fire (the
+    # carrier fix is what keeps it silent — see the control assertions above)
+    assert res.promotion_applied is True
+    assert res.write_truncation is False
+
+    # the inner variant carries BOTH body promotions AND the carrier decl-widen
+    specs = _manifest_specs(carrier_chain_tree)
+    inner_variant = specs["inner_mid_B10"]
+    assert len(inner_variant.promotes) >= 1
+    assert len(inner_variant.carrier_decls) == 1
+    cd = inner_variant.carrier_decls[0]
+    assert cd.decl_line == decl_line
+    assert cd.orig_type == "double"
+    assert cd.dd_type == DD
+    assert cd.name == "carry"
+
+    # rendered variant text: the carrier decl is widened to dd in the emitted copy,
+    # while the ORIGINAL inner (before the fan-out block) keeps its double decl.
+    txt = (carrier_chain_tree / "app.h").read_text()
+    before_block, after_block = txt.split(fanout._BLOCK_BEGIN)
+    assert "double carry;" in before_block           # original untouched
+    assert f"{DD} carry;" in after_block             # variant decl widened

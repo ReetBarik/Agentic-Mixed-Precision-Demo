@@ -533,7 +533,22 @@ def _gen_chain(intent: RemediationIntent, deps: PatchDeps, attempt: int) -> Gen:
     except fo.FanoutError as exc:
         return Gen(False, R.PATCH_APPLY_FAILED, R.ERR_APPLY, f"chain_fanout_failed: {exc}")
 
-    # 3. Chain-scope 2c / 2d-B gates (envelope, not individual links).
+    # 3a. Blocker A carrier terminals — a strict carrier whose decl v1 cannot widen
+    # (a function parameter, or shared global/member/output state).  chain_promote sets
+    # these BEFORE mutating the tree and emits no variants, so the chain is abandoned
+    # cleanly rather than emitted with a truncating interior seam the 2d-B gate rejects.
+    if cr.chain_carrier_unwidenable:
+        return Gen(False, R.CHAIN_CARRIER_UNWIDENABLE, R.ERR_CARRIER_UNWIDENABLE,
+                   f"chain_carrier_unwidenable: chain {manifest.chain_id} has a strict "
+                   f"carrier whose declaration is a function parameter (v1 refuses to "
+                   f"rewrite signatures): {cr.carrier_detail}")
+    if cr.chain_carrier_external:
+        return Gen(False, R.CHAIN_CARRIER_EXTERNAL, R.ERR_CARRIER_EXTERNAL,
+                   f"chain_carrier_external: chain {manifest.chain_id} has a strict "
+                   f"carrier whose declaration is global / a class member / an output "
+                   f"container (v1 refuses to widen shared state): {cr.carrier_detail}")
+
+    # 3b. Chain-scope 2c / 2d-B gates (envelope, not individual links).
     if not cr.promotion_applied:
         return Gen(False, R.PROMOTION_NO_OP, R.ERR_EMPTY,
                    f"chain promotion_no_op: chain {manifest.chain_id} promotes nothing "
