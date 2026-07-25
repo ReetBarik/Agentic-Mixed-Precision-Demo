@@ -20,8 +20,8 @@ the "silently missing call edges" failure the design warns about.
 So we split responsibilities:
 
 * **libclang owns the authoritative facts** it *does* recover reliably even with a
-  broken include context — every function/template **definition** and its source
-  **extent** (verified: ``BO`` @ boxGPU.h:69-143, ``B0m``/``B1``/... @ box/B0m.h).
+  broken include context — most function/template **definitions** and their source
+  **extents** (verified: ``BO`` @ boxGPU.h:69-143, ``B0m``/``B1``/... @ box/B0m.h).
   These drive region→function resolution.
 * **A comment/string-aware token scan over each function's body text** recovers the
   call **edges**: an identifier that (a) names a function in the definition universe
@@ -29,6 +29,17 @@ So we split responsibilities:
   template-id call) is an edge.  This sidesteps the dependent-call AST gap entirely
   and is the same "recover it from source, deterministically" strategy Fix C uses
   for region writes.
+* **The same token scan also recovers template-function DEFINITIONS + extents.**
+  In a broken-include parse libclang not only misses dependent *calls* — it also
+  drops some ``template<...>`` function definitions outright and truncates or
+  mislabels others (observed in the template-heavy ``kokkosUtils.h``: ``ddilog`` /
+  ``kfn`` dropped entirely; ``Lnrat`` / ``Li2omx2`` truncated / marked non-template).
+  A region intent landing inside such a definition would resolve to "no enclosing
+  function" and the fan-out / chain-promote would fail.  So a brace-matched scan for
+  ``template<...>`` function heads (:func:`_scan_template_funcdefs`) supplies the
+  extents libclang drops and *supersedes* the truncated ones it returns for the same
+  name+file.  The scan is strictly additive/corrective: genuine non-template defs
+  libclang already resolves are left untouched.
 
 If libclang comes up empty on the entry point (bindings missing, shared lib
 unloadable, or the parse resolved zero definitions) we raise :class:`CallGraphError`
@@ -38,6 +49,7 @@ fan-out relies on.
 
 from __future__ import annotations
 
+import bisect
 import subprocess
 from dataclasses import dataclass, field
 from functools import lru_cache
@@ -282,6 +294,7 @@ def build_call_graph(
         raise CallGraphError(f"libclang failed to parse {tu}: {exc}") from exc
 
     defs = _collect_defs(translation_unit, cindex, tree)
+    _merge_template_funcdefs(defs, tree)
     if not defs:
         # A real qcdloop header parses to >1000 defs; zero means a broken parse
         # (bad include context) — fail loud rather than emit an edgeless graph.
@@ -329,6 +342,235 @@ def _collect_defs(tu, cindex, tree: Path) -> dict[str, list[FuncDef]]:
 
     visit(tu.cursor)
     return out
+
+
+# --------------------------------------------------------------------------- #
+# template-function extent recovery (token/brace scan — symmetric to edges)
+# --------------------------------------------------------------------------- #
+
+# First word after a ``template<...>`` clause that means "this is NOT a function
+# template" — a class/alias/nested-template/variable template.  We skip these but
+# keep scanning INTO their bodies (so member function templates are still found).
+_NON_FUNC_TEMPLATE_HEADS = {
+    "class", "struct", "union", "enum", "using", "concept", "template",
+}
+
+
+def _mask_noncode(text: str) -> str:
+    """Blank every comment/string/char-literal char with a space (offsets + newlines
+    preserved) so structural brace/angle/paren matching sees only code.
+
+    Same lexical discipline as :func:`_scan_idents` / the boundary scanner: a brace
+    or angle bracket inside a comment or string never perturbs the match.
+    """
+    out = list(text)
+    i, n = 0, len(text)
+    state = "code"
+    while i < n:
+        ch = text[i]
+        nxt = text[i + 1] if i + 1 < n else ""
+        if state == "code":
+            if ch == "/" and nxt == "/":
+                out[i] = out[i + 1] = " "; state = "line_comment"; i += 2; continue
+            if ch == "/" and nxt == "*":
+                out[i] = out[i + 1] = " "; state = "block_comment"; i += 2; continue
+            if ch == '"':
+                out[i] = " "; state = "string"; i += 1; continue
+            if ch == "'":
+                out[i] = " "; state = "char"; i += 1; continue
+            i += 1
+        elif state == "line_comment":
+            if ch == "\n":
+                state = "code"
+            else:
+                out[i] = " "
+            i += 1
+        elif state == "block_comment":
+            if ch == "*" and nxt == "/":
+                out[i] = out[i + 1] = " "; state = "code"; i += 2
+            else:
+                if ch != "\n":
+                    out[i] = " "
+                i += 1
+        elif state == "string":
+            if ch == "\\" and nxt:
+                out[i] = out[i + 1] = " "; i += 2
+            elif ch == '"':
+                out[i] = " "; state = "code"; i += 1
+            else:
+                if ch != "\n":
+                    out[i] = " "
+                i += 1
+        elif state == "char":
+            if ch == "\\" and nxt:
+                out[i] = out[i + 1] = " "; i += 2
+            elif ch == "'":
+                out[i] = " "; state = "code"; i += 1
+            else:
+                if ch != "\n":
+                    out[i] = " "
+                i += 1
+    return "".join(out)
+
+
+def _match_delim(s: str, k: int, opench: str, closech: str) -> int:
+    """Index of the ``closech`` matching the ``opench`` at ``s[k]``; -1 if unbalanced.
+
+    Char-level so ``>>`` closing two ``<`` levels (C++ nested template-ids) matches
+    correctly.  ``s`` must be the masked (code-only) text.
+    """
+    depth = 0
+    n = len(s)
+    while k < n:
+        c = s[k]
+        if c == opench:
+            depth += 1
+        elif c == closech:
+            depth -= 1
+            if depth == 0:
+                return k
+        k += 1
+    return -1
+
+
+def _parse_one_template(masked: str, tpl_start: int, after_kw: int, n: int,
+                        line_of) -> tuple[tuple[str, int, int] | None, int]:
+    """Parse one ``template<...>`` head at ``tpl_start``.
+
+    Returns ``((name, line_start, line_end), continue_off)`` for a function-template
+    *definition*, or ``(None, continue_off)`` when the head is a declaration, a
+    class/alias/variable template, or malformed.  ``continue_off`` is where the outer
+    scan resumes (past the body for a def; just past the keyword otherwise, so member
+    templates inside a skipped class template are still discovered).
+    """
+    # 1. the template parameter clause '<...>'
+    k = after_kw
+    while k < n and masked[k].isspace():
+        k += 1
+    if k >= n or masked[k] != "<":
+        return None, after_kw
+    clause_end = _match_delim(masked, k, "<", ">")
+    if clause_end < 0:
+        return None, after_kw
+    p = clause_end + 1
+
+    # 2. walk the declarator up to the parameter-list '(' at paren-depth 0,
+    #    remembering the identifier immediately before it (the function name).
+    last_ident: str | None = None
+    first_word = True
+    while p < n:
+        c = masked[p]
+        if c.isspace():
+            p += 1
+            continue
+        if c in _IDENT_CHARS and not c.isdigit():
+            j = p
+            while j < n and masked[j] in _IDENT_CHARS:
+                j += 1
+            word = masked[p:j]
+            if first_word and word in _NON_FUNC_TEMPLATE_HEADS:
+                return None, after_kw          # not a function template
+            first_word = False
+            last_ident = word
+            p = j
+            continue
+        if c == "<":                            # a return-type template-id: skip it
+            close = _match_delim(masked, p, "<", ">")
+            if close < 0:
+                return None, after_kw
+            p = close + 1
+            continue
+        if c == "(":                            # parameter list opens
+            break
+        if c in ";{=":                          # decl / variable template / no body
+            return None, p + 1
+        p += 1
+    if p >= n or masked[p] != "(" or not last_ident:
+        return None, after_kw
+
+    # 3. skip the parameter list, then find the body '{' (definition) or ';' (decl).
+    rparen = _match_delim(masked, p, "(", ")")
+    if rparen < 0:
+        return None, after_kw
+    q = rparen + 1
+    while q < n and masked[q] not in "{;":
+        q += 1
+    if q >= n or masked[q] == ";":              # declaration, not a definition
+        return None, (q + 1 if q < n else after_kw)
+    close_brace = _match_delim(masked, q, "{", "}")
+    if close_brace < 0:
+        return None, after_kw
+    rec = (last_ident, line_of(tpl_start), line_of(close_brace))
+    return rec, close_brace + 1
+
+
+def _scan_template_funcdefs(text: str) -> list[tuple[str, int, int]]:
+    """Recover ``template<...>`` function *definitions* as ``(name, ls, le)`` (1-based,
+    inclusive) via a masked brace scan — the extents libclang drops or truncates in a
+    broken-include parse.  Non-template defs are never emitted (strictly a template
+    supplement).
+    """
+    masked = _mask_noncode(text)
+    n = len(masked)
+    line_starts = [0]
+    for i, ch in enumerate(masked):
+        if ch == "\n":
+            line_starts.append(i + 1)
+
+    def line_of(off: int) -> int:
+        return bisect.bisect_right(line_starts, off)
+
+    out: list[tuple[str, int, int]] = []
+    i = 0
+    while i < n:
+        ch = masked[i]
+        if ch in _IDENT_CHARS and not ch.isdigit():
+            j = i
+            while j < n and masked[j] in _IDENT_CHARS:
+                j += 1
+            if masked[i:j] == "template":
+                rec, cont = _parse_one_template(masked, i, j, n, line_of)
+                if rec is not None:
+                    out.append(rec)
+                i = cont if cont > j else j
+                continue
+            i = j
+            continue
+        i += 1
+    return out
+
+
+def _install_def(defs: dict[str, list[FuncDef]], fd: FuncDef) -> None:
+    """Add ``fd``, superseding any same-name+same-file def whose extent OVERLAPS it.
+
+    An overlapping libclang entry is the truncated / mislabeled one the scan corrects;
+    non-overlapping siblings (other overloads) are preserved.  Idempotent: a re-scan
+    of the same extent replaces its own prior entry rather than duplicating it.
+    """
+    lst = defs.setdefault(fd.name, [])
+    kept = [ex for ex in lst
+            if not (ex.file == fd.file
+                    and not (ex.line_end < fd.line_start or ex.line_start > fd.line_end))]
+    kept.append(fd)
+    defs[fd.name] = kept
+
+
+def _merge_template_funcdefs(defs: dict[str, list[FuncDef]], tree: Path) -> None:
+    """Supplement ``defs`` with template-function extents recovered by the brace scan.
+
+    Scans only files libclang already produced ≥1 def for (the TU's include closure)
+    — bounded, and avoids inventing defs for functions outside the parsed unit.
+    Mutates ``defs`` in place.
+    """
+    files = sorted({fd.file for fds in defs.values() for fd in fds})
+    for fpath in files:
+        try:
+            text = Path(fpath).read_text(encoding="utf-8", errors="ignore")
+        except OSError:
+            continue
+        for name, ls, le in _scan_template_funcdefs(text):
+            _install_def(defs, FuncDef(name=name, file=fpath,
+                                       line_start=ls, line_end=le, is_template=True))
 
 
 def _extract_edges(defs: dict[str, list[FuncDef]]

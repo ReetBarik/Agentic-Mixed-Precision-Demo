@@ -95,6 +95,35 @@ def synth_graph(synth_tree):
     return build_call_graph("entry", synth_tree, tu_file=synth_tree / "app.h")
 
 
+# The real qcdloop template-heavy header — libclang drops/truncates its function
+# templates under a broken include context (Phase 2f Tier-B blocker).  Used to pin
+# the template-extent token-scan fallback against ground truth.
+_KOKKOS_UTILS = Path(__file__).resolve().parents[3] / "src" / "kokkosUtils.h"
+requires_kokkos_utils = pytest.mark.skipif(
+    not _KOKKOS_UTILS.is_file(), reason=f"{_KOKKOS_UTILS} not present")
+
+
+@pytest.fixture
+def kokkos_utils_tree(tmp_path) -> Path:
+    """A tree with a standalone copy of the real ``kokkosUtils.h`` (broken includes)."""
+    if not _KOKKOS_UTILS.is_file():
+        pytest.skip(f"{_KOKKOS_UTILS} not present")
+    shutil.copy(_KOKKOS_UTILS, tmp_path / "kokkosUtils.h")
+    return tmp_path
+
+
+@pytest.fixture
+def kokkos_utils_graph(kokkos_utils_tree):
+    """Call graph over the standalone kokkosUtils.h (skips w/o libclang)."""
+    if not LIBCLANG:
+        pytest.skip("libclang bindings unavailable")
+    from agents.patcher.call_graph import build_call_graph
+    from agents.patcher import fanout
+    fanout.clear_graph_cache()
+    return build_call_graph("printDoubleBits", kokkos_utils_tree,
+                            tu_file=kokkos_utils_tree / "kokkosUtils.h")
+
+
 def gxx_compile(src: Path, out: Path) -> subprocess.CompletedProcess:
     """Compile ``src`` to object ``out`` with g++ (C++17), returning the result."""
     return subprocess.run([_GXX, "-std=c++17", "-c", str(src), "-o", str(out)],
