@@ -1,0 +1,2 @@
+{"iter_id": 0, "rationale_id": "cascade_B12_65bb39c0_62ff5a3d", "target": "B2m.h:206", "kind": "double-to-dd", "attempt": 0, "outcome": "build_failed", "status": "build_failed", "elapsed_sec": 55.394, "backoff_sec": 2.045, "r4_escape": true, "r4_symbol": "ql::Lnrat<ddouble,ddouble,ddouble>"}
+{"iter_id": 0, "rationale_id": "cascade_B12_65bb39c0_62ff5a3d", "target": "B2m.h:206", "kind": "double-to-dd", "attempt": 1, "outcome": "ok", "status": "ok", "elapsed_sec": 51.601, "backoff_sec": 0.0}
