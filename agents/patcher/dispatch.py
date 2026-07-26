@@ -567,10 +567,48 @@ def _gen_chain(intent: RemediationIntent, deps: PatchDeps, attempt: int) -> Gen:
                    f"between links, breaking the chain (the outermost region's "
                    f"exit-truncation is the designed boundary and is exempt)")
 
+    # 3c. Deterministic post-generation normaliser (Subtask 3, design §6.1): a pure,
+    #     idempotent source sweep that fixes the LLM shim-gen defect classes ("Blocker
+    #     B" — re-declared promoted locals, malformed unary operator+, decimal-literal
+    #     constant ctors) the larger closure envelope makes more likely.  Runs AFTER the
+    #     shims/variant promotion are spliced into the tree and BEFORE the build gate;
+    #     semantically null on clean input, so it never changes a passing build.
+    _normalise_chain_tree(deps.repo_root, cr.files_touched, shim_include,
+                          scalar_cpp, complex_cpp)
+
     return Gen(True, shim_paths=all_shims, llm_tokens=total_tokens,
                declared_variants=list(cr.declared_variants),
                files_touched=list(cr.files_touched),
                in_place_region=(cr.in_place_regions > 0 and not cr.declared_variants))
+
+
+def _normalise_chain_tree(repo_root, files_touched, shim_include,
+                          scalar_cpp, complex_cpp) -> None:
+    """Run the deterministic shim normaliser over the chain's touched tree files.
+
+    Sweeps every file ``chain_promote`` mutated plus the canonical merged shim
+    (``ql_shim_dd.h``, where the LLM-generated shim bodies land).  Best-effort: a
+    normaliser hiccup on one file never fails the pass (the build gate is still the
+    authority)."""
+    from agents.patcher import shim_normalise as sn
+
+    ext_scalars = frozenset({scalar_cpp}) if scalar_cpp else sn.DEFAULT_EXT_SCALARS
+    ext_complex = frozenset({complex_cpp}) if complex_cpp else sn.DEFAULT_EXT_COMPLEX
+    root = Path(repo_root)
+    targets = list(files_touched or [])
+    if shim_include:
+        targets.append(shim_include)
+    seen: set[str] = set()
+    for rel in targets:
+        p = (root / rel) if not Path(rel).is_absolute() else Path(rel)
+        key = str(p.resolve())
+        if key in seen or not p.is_file():
+            continue
+        seen.add(key)
+        try:
+            sn.normalise_file(p, ext_scalars=ext_scalars, ext_complex=ext_complex)
+        except Exception:  # noqa: BLE001 — normaliser is best-effort; gate is authority
+            continue
 
 
 # ---------------------------------------------------------------------------

@@ -213,3 +213,157 @@ def test_literals_in_composite_complex():
 def test_derive_from_rhs_gives_up_on_opaque():
     # runtime expression with no literal / catalog term -> None (falls to R4)
     assert cd.derive_from_rhs("x", "some_runtime_call(a, b)", "dd") is None
+
+
+# --------------------------------------------------------------------------- #
+# π-family catalog extension (Subtask 3) — the _pi2o6 R4-escape fix
+#
+# Upstream Constants<T> defines the π family COMPOSITIONALLY (kokkosMaths.h:95-127):
+#   _pi2()   = _pi() * _pi()                    // π²
+#   _pio3()  = _pi() / TScale(3)                // π/3
+#   _pio6()  = _pi() / TScale(6)                // π/6
+#   _pi2o3() = _pi() * _pio3<...>()             // π²/3
+#   _pi2o6() = _pi() * _pio6<...>()             // π²/6   <- B10's #error
+#   _pi2o12()= _pi2() / TScale(12)              // π²/12
+# The catalog now carries each of these, DERIVED from the canonical `pi` entry at
+# prec=80 (not transcribed), and derive_from_catalog recognizes the RHS shapes.
+# --------------------------------------------------------------------------- #
+
+_ALIAS = cd.PI_FAMILY_ACCESSOR_ALIASES
+
+
+def _decimal_bailey_dd(value):
+    """Independent reference dd split of a high-precision Decimal."""
+    import struct
+    from decimal import Decimal
+
+    hi = float(value)
+    lo = float(value - Decimal(hi))
+    b = lambda x: struct.unpack("<Q", struct.pack("<d", x))[0]
+    return b(hi), b(lo)
+
+
+def _decimal_bailey_ff(value):
+    import struct
+    from decimal import Decimal
+
+    f32 = lambda x: struct.unpack("<f", struct.pack("<f", x))[0]
+    hi = f32(float(value))
+    lo = f32(float(value - Decimal(hi)))
+    b = lambda x: struct.unpack("<I", struct.pack("<f", x))[0]
+    return b(hi), b(lo)
+
+
+def test_pi_family_catalog_entries_present():
+    for name in ("pi_squared", "pi_over_3", "pi_over_6",
+                 "pi_squared_over_3", "pi_squared_over_6", "pi_squared_over_12"):
+        assert name in cd.KNOWN_CONSTANTS, name
+        assert "dd" in cd.KNOWN_CONSTANTS[name] and "ff" in cd.KNOWN_CONSTANTS[name]
+
+
+def test_pi_family_dd_bit_exact_vs_independent_reference():
+    # Each entry round-trips to Decimal within one ULP of the low limb — computed
+    # from an INDEPENDENT high-precision π string (STOP #C guard).
+    from decimal import Decimal
+
+    pi = Decimal("3.14159265358979323846264338327950288419716939937510582097494459230781640628620899")
+    refs = {
+        "pi_squared":         pi * pi,
+        "pi_over_3":          pi / 3,
+        "pi_over_6":          pi / 6,
+        "pi_squared_over_3":  pi * pi / 3,
+        "pi_squared_over_6":  pi * pi / 6,
+        "pi_squared_over_12": pi * pi / 12,
+    }
+    for name, val in refs.items():
+        assert cd.KNOWN_CONSTANTS[name]["dd"] == _decimal_bailey_dd(val), name
+
+
+def test_pi_family_ff_correctly_rounded_vs_independent_reference():
+    from decimal import Decimal
+
+    pi = Decimal("3.14159265358979323846264338327950288419716939937510582097494459230781640628620899")
+    refs = {
+        "pi_squared":         pi * pi,
+        "pi_over_6":          pi / 6,
+        "pi_squared_over_6":  pi * pi / 6,
+        "pi_squared_over_12": pi * pi / 12,
+    }
+    for name, val in refs.items():
+        assert cd.KNOWN_CONSTANTS[name]["ff"] == _decimal_bailey_ff(val), name
+
+
+def test_pi_squared_over_6_numeric_value():
+    # sanity: π²/6 ≈ 1.6449340668482264 (Basel constant)
+    import struct
+
+    hi = cd.KNOWN_CONSTANTS["pi_squared_over_6"]["dd"][0]
+    val = struct.unpack("<d", struct.pack("<Q", hi))[0]
+    assert abs(val - 1.6449340668482264) < 1e-15
+
+
+# --- RHS shape resolution (the upstream composition forms) ------------------ #
+
+def test_compose_pi_squared_from_product():
+    d = cd.derive_from_rhs("_pi2", "_pi() * _pi()", "dd", _ALIAS)
+    assert d is not None and d.how == "catalog:pi_squared"
+
+
+def test_compose_pi_over_6_from_division():
+    d = cd.derive_from_rhs("_pio6", "_pi() / TScale(6)", "dd", _ALIAS)
+    assert d is not None and d.how == "catalog:pi_over_6"
+
+
+def test_compose_pi_squared_over_6_from_accessor_product():
+    # the B10 case: _pi() * _pio6<TOutput, TMass, TScale>() → π²/6
+    d = cd.derive_from_rhs("_pi2o6", "_pi() * _pio6<TOutput, TMass, TScale>()", "dd", _ALIAS)
+    assert d is not None and d.how == "catalog:pi_squared_over_6"
+
+
+def test_compose_pi_squared_over_12_from_pi2_division():
+    d = cd.derive_from_rhs("_pi2o12", "_pi2() / TScale(12)", "dd", _ALIAS)
+    assert d is not None and d.how == "catalog:pi_squared_over_12"
+
+
+def test_compose_pi_squared_over_3_from_accessor_product():
+    d = cd.derive_from_rhs("_pi2o3", "_pi() * _pio3<TOutput, TMass, TScale>()", "dd", _ALIAS)
+    assert d is not None and d.how == "catalog:pi_squared_over_3"
+
+
+def test_compose_cast_wrapped_variant():
+    # T(_pi() * _pio6<...>()) — the whole composition wrapped in a functional cast
+    d = cd.derive_from_rhs("_pi2o6", "T(_pi() * _pio6<A, B, C>())", "dd", _ALIAS)
+    assert d is not None and d.how == "catalog:pi_squared_over_6"
+
+
+def test_compose_template_arg_tolerance_on_accessor():
+    # _pio6<...>() must resolve to _pio6 (template args stripped in the recognizer)
+    d = cd.derive_from_rhs("x", "_pio6<TOutput, TMass, TScale>()", "dd", _ALIAS)
+    assert d is not None and d.how == "catalog:pi_over_6"
+
+
+# --- negatives (never invent a value) --------------------------------------- #
+
+def test_compose_unknown_operand_returns_none():
+    assert cd.derive_from_rhs("x", "_pi() * SomeOther()", "dd", _ALIAS) is None
+
+
+def test_compose_non_catalog_divisor_returns_none():
+    # π/7 is not a catalog entry → None (do not invent)
+    assert cd.derive_from_rhs("x", "_pi() / TScale(7)", "dd", _ALIAS) is None
+
+
+def test_compose_unknown_accessor_returns_none_no_crash():
+    assert cd.derive_from_rhs("x", "_unknown() * _pi()", "dd", _ALIAS) is None
+
+
+def test_compose_requires_alias_map_for_accessors():
+    # without the caller-supplied alias map, the app-spelled accessors are opaque
+    assert cd.derive_from_rhs("_pi2o6", "_pi() * _pio6<A,B,C>()", "dd") is None
+
+
+def test_strip_casts_leaves_product_intact():
+    # regression: _strip_casts must NOT corrupt a product-of-calls
+    assert cd._strip_casts("_pi() * _pio6()") == "_pi() * _pio6()"
+    assert cd._strip_casts("T(_pi() * _pio6())") == "_pi() * _pio6()"
+    assert cd._strip_casts("TScale(1e-50)") == "1e-50"

@@ -54,6 +54,7 @@ import re
 import struct
 from dataclasses import dataclass
 from decimal import Decimal, getcontext
+from fractions import Fraction
 
 # High-precision decimal strings for the catalog (≥ 40 significant digits — more
 # than a double-double needs).  Computed to (hi, lo) at import via the Bailey
@@ -72,6 +73,25 @@ _CONST_DECIMALS: dict[str, Decimal] = {
     "euler_gamma": Decimal("0.57721566490153286060651209008240243104215933593992359880576723"),
 }
 
+# The π family (π², π/3, π/6, π²/3, π²/6, π²/12).  These are DERIVED from the
+# canonical ``pi`` entry above at prec=80 rather than transcribed as decimal
+# literals: composing from the 63-digit ``pi`` string is exact to ~63 significant
+# digits (far beyond the ~32 a double-double carries) and removes the hand-copy
+# error that a literal string would risk (STOP #C).  The stored value is still the
+# *true* constant's Bailey split — never the result of dd arithmetic — exactly like
+# ``two_pi``/``half_pi``.  Upstream a kernel may define these compositionally
+# (``_pi()*_pi()``, ``_pi()/TScale(6)`` …); :func:`derive_from_catalog` recognizes
+# those RHS shapes and maps them onto these entries.
+_pi_hp = _CONST_DECIMALS["pi"]
+_CONST_DECIMALS.update({
+    "pi_squared":         _pi_hp * _pi_hp,
+    "pi_over_3":          _pi_hp / Decimal(3),
+    "pi_over_6":          _pi_hp / Decimal(6),
+    "pi_squared_over_3":  _pi_hp * _pi_hp / Decimal(3),
+    "pi_squared_over_6":  _pi_hp * _pi_hp / Decimal(6),
+    "pi_squared_over_12": _pi_hp * _pi_hp / Decimal(12),
+})
+
 # Aliases the source RHS may spell a catalog constant with.  Keys are matched
 # case-sensitively against a bare identifier / macro; values index _CONST_DECIMALS.
 # Framework-agnostic: only standard math spellings (C macros, std::numbers, and
@@ -85,6 +105,48 @@ _CATALOG_ALIASES: dict[str, str] = {
     "M_LN10": "ln10", "ln10": "ln10", "LN10": "ln10", "ln10_v": "ln10",
     "egamma": "euler_gamma", "euler_gamma": "euler_gamma", "gamma": "euler_gamma",
     "egamma_v": "euler_gamma",
+}
+
+# Accessor-name aliases for the π family, registered so a *composition* RHS
+# (``_pi() * _pio6<...>()``) can resolve each accessor to its canonical catalog
+# name without a source walk.  These are standard mathematical π-family accessor
+# spellings (the same convention as ``M_PI`` / ``std::numbers::pi_v`` above) — they
+# name a mathematical value, not any app symbol.  A caller may pass its own map to
+# :func:`derive_from_rhs` to override / extend this default (kernel-specific
+# spellings stay caller-supplied — the catalog itself is library-agnostic).
+_PI_FAMILY_ACCESSOR_ALIASES: dict[str, str] = {
+    "_pi": "pi",
+    "_pi2": "pi_squared",
+    "_pio3": "pi_over_3",
+    "_pio6": "pi_over_6",
+    "_pi2o3": "pi_squared_over_3",
+    "_pi2o6": "pi_squared_over_6",
+    "_pi2o12": "pi_squared_over_12",
+}
+# Public: the accessor-alias default the integrator engine registers.
+PI_FAMILY_ACCESSOR_ALIASES = dict(_PI_FAMILY_ACCESSOR_ALIASES)
+
+# Symbolic form of each catalog entry as (π-power, rational coefficient) so a
+# composition (``A() * B()`` / ``A() / k``) can be reduced algebraically and matched
+# back to a catalog name.  Only the π family (plus the plain ``pi`` bases) carries a
+# symbolic form; other catalog constants (e, √2, …) are absent → composition over
+# them returns ``None`` (we never invent a value).
+_CONST_SYMBOLIC: dict[str, tuple[int, Fraction]] = {
+    # canonical name -> (power of pi, rational coefficient)
+    "pi":                 (1, Fraction(1)),
+    "two_pi":             (1, Fraction(2)),
+    "half_pi":            (1, Fraction(1, 2)),
+    "pi_squared":         (2, Fraction(1)),
+    "pi_over_3":          (1, Fraction(1, 3)),
+    "pi_over_6":          (1, Fraction(1, 6)),
+    "pi_squared_over_3":  (2, Fraction(1, 3)),
+    "pi_squared_over_6":  (2, Fraction(1, 6)),
+    "pi_squared_over_12": (2, Fraction(1, 12)),
+}
+# Reverse map: a reduced (power, coeff) -> catalog name, so a composed symbolic
+# form lands on a catalog entry (or None → not derivable, never invented).
+_SYMBOLIC_TO_NAME: dict[tuple[int, Fraction], str] = {
+    sym: name for name, sym in _CONST_SYMBOLIC.items()
 }
 
 
@@ -197,20 +259,43 @@ _CAST_RE = re.compile(r"^\s*(?:static_cast\s*<[^>]*>|[A-Za-z_]\w*)\s*\(\s*(.*?)\
                       re.DOTALL)
 
 
+_CAST_PREFIX_RE = re.compile(r"^\s*(?:static_cast\s*<[^>]*>|[A-Za-z_]\w*)\s*\(")
+
+
+def _matching_paren(text: str, open_idx: int) -> int | None:
+    """Index of the ``)`` matching the ``(`` at ``open_idx``, or ``None``."""
+    depth = 0
+    for i in range(open_idx, len(text)):
+        ch = text[i]
+        if ch == "(":
+            depth += 1
+        elif ch == ")":
+            depth -= 1
+            if depth == 0:
+                return i
+    return None
+
+
 def _strip_casts(text: str) -> str:
     """Peel functional / static_cast wrappers: ``TScale(1e-50)`` -> ``1e-50``.
 
-    Only peels when the parentheses balance around the whole expression, so a
-    genuine multi-arg call (``foo(a, b)``) or a braced init is left intact.
+    Only peels when the wrapper's ``(`` matches a ``)`` that is the LAST non-space
+    character — i.e. the cast genuinely brackets the whole expression.  A product
+    like ``_pi() * _pio6()`` (whose first ``(`` closes mid-expression) and a
+    genuine multi-arg call (``foo(a, b)``) or braced init are left intact.
     """
     prev = None
     cur = text.strip()
     while cur != prev:
         prev = cur
-        m = _CAST_RE.match(cur)
+        m = _CAST_PREFIX_RE.match(cur)
         if not m:
             break
-        inner = m.group(1)
+        open_idx = m.end() - 1               # position of the wrapper's '('
+        close_idx = _matching_paren(cur, open_idx)
+        if close_idx is None or close_idx != len(cur.rstrip()) - 1:
+            break                            # '(' does not bracket the whole expr
+        inner = cur[open_idx + 1:close_idx]
         # Reject if the inner text has a top-level comma (a real call, not a cast).
         if _has_top_level_comma(inner):
             break
@@ -259,64 +344,199 @@ def derive_literal(name: str, rhs: str, scalar: str) -> Derivation | None:
 _CATALOG_TOKEN_RE = re.compile(r"[A-Za-z_]\w*(?:_v)?")
 
 
-def _lookup_catalog_alias(token: str) -> str | None:
+def _lookup_catalog_alias(token: str,
+                          alias_map: dict[str, str] | None = None) -> str | None:
+    """Resolve ``token`` to a canonical catalog name.
+
+    Consults the built-in math-spelling table first, then the caller-supplied
+    ``alias_map`` (kernel-specific accessor spellings — library-agnostic values,
+    caller-supplied names).  ``std::numbers::pi_v`` style qualifiers fall back to
+    the last path component.
+    """
     if token in _CATALOG_ALIASES:
         return _CATALOG_ALIASES[token]
+    if alias_map and token in alias_map:
+        return alias_map[token]
     # tolerate ``std::numbers::pi_v`` style: last path component
     tail = token.rsplit("::", 1)[-1]
-    return _CATALOG_ALIASES.get(tail)
+    if tail in _CATALOG_ALIASES:
+        return _CATALOG_ALIASES[tail]
+    if alias_map and tail in alias_map:
+        return alias_map[tail]
+    return None
 
 
-def derive_from_catalog(name: str, rhs: str, scalar: str) -> Derivation | None:
-    """Derive a constant whose RHS is a bare catalog constant (Gap B step 3b).
+# An accessor call token, template args tolerated: ``_pio6<TOutput,TMass,TScale>()``
+# or ``Constants<T>::_pi()`` -> the leading identifier (``_pio6`` / ``_pi``).
+_ACCESSOR_NAME_RE = re.compile(
+    r"^\s*(?:[A-Za-z_]\w*\s*(?:<[^;{}]*>)?\s*::\s*)*"   # optional qualifier(s)
+    r"(?:template\s+)?([A-Za-z_]\w*)\s*(?:<[^;{}]*>)?\s*\(\s*\)\s*$")
 
-    Handles the exact-name case (``M_PI`` -> π).  A scaled form (``2.0*M_PI``)
-    is matched only when the catalog carries the scaled value directly (``two_pi``
-    for ``2*pi``); otherwise we return ``None`` and let the model compose from the
-    catalog base value we still surface in the hint.
+
+def _resolve_symbolic(token: str,
+                      alias_map: dict[str, str] | None) -> tuple[int, Fraction] | None:
+    """Reduce one operand (an accessor call or bare alias) to (π-power, coeff).
+
+    Handles a catalog alias (``M_PI`` -> pi -> (1, 1)) and an accessor call with
+    optional template args (``_pio6<...>()`` -> pi_over_6 -> (1, 1/6)).  Returns
+    ``None`` when the operand does not name a symbolic catalog constant.
+    """
+    tok = token.strip()
+    m = _ACCESSOR_NAME_RE.match(tok)
+    if m is not None:
+        tok = m.group(1)
+    canon = _lookup_catalog_alias(tok, alias_map)
+    if canon is None:
+        return None
+    return _CONST_SYMBOLIC.get(canon)
+
+
+def _catalog_from_symbolic(name: str, sym: tuple[int, Fraction], scalar: str,
+                           rhs: str) -> Derivation | None:
+    """Map a reduced (power, coeff) onto a catalog entry, or ``None``."""
+    canon = _SYMBOLIC_TO_NAME.get(sym)
+    if canon is None or canon not in KNOWN_CONSTANTS:
+        return None
+    hi, lo = KNOWN_CONSTANTS[canon][scalar]
+    return Derivation(name=name, scalar=scalar, expr=_make_call(scalar, hi, lo),
+                      how=f"catalog:{canon}", rhs=rhs.strip())
+
+
+def _derive_composition(name: str, inner: str, scalar: str,
+                        alias_map: dict[str, str] | None) -> Derivation | None:
+    """Recognize an algebraic composition of catalog accessors / aliases.
+
+    Supported shapes (each operand an accessor call or bare alias):
+      * ``A() * B()``           -> symbolic product     (``_pi()*_pio6()`` -> π²/6)
+      * ``A() / TScale(k)``     -> divide by integer k   (``_pi()/TScale(6)`` -> π/6)
+      * ``A() / k``             -> divide by integer k   (``_pi2()/TScale(12)`` -> π²/12)
+
+    Each operand is reduced to a (π-power, rational-coeff) symbolic form; the
+    composition is reduced algebraically and matched back to a catalog entry.  A
+    composition that does not land on a catalog name returns ``None`` — the value
+    is never invented.
+    """
+    # A() / <divisor>  — divisor is a small integer, optionally cast-wrapped.
+    parts = _split_top_level_binop(inner, "/")
+    if parts is not None:
+        lhs, rhs_div = parts
+        sym = _resolve_symbolic(lhs, alias_map)
+        if sym is None:
+            return None
+        k = _parse_int_divisor(rhs_div)
+        if k is None or k == 0:
+            return None
+        power, coeff = sym
+        return _catalog_from_symbolic(name, (power, coeff / k), scalar, inner)
+
+    # A() * B()  — symbolic product (powers add, coefficients multiply).
+    parts = _split_top_level_binop(inner, "*")
+    if parts is not None:
+        lhs, rhs_mul = parts
+        sym_l = _resolve_symbolic(lhs, alias_map)
+        sym_r = _resolve_symbolic(rhs_mul, alias_map)
+        if sym_l is None or sym_r is None:
+            return None
+        power = sym_l[0] + sym_r[0]
+        coeff = sym_l[1] * sym_r[1]
+        return _catalog_from_symbolic(name, (power, coeff), scalar, inner)
+    return None
+
+
+def _split_top_level_binop(text: str, op: str) -> tuple[str, str] | None:
+    """Split ``text`` on a SINGLE top-level binary ``op``; ``None`` if not exactly one."""
+    depth = 0
+    pos = -1
+    for i, ch in enumerate(text):
+        if ch in "([{<":
+            depth += 1
+        elif ch in ")]}>":
+            depth = max(0, depth - 1)
+        elif ch == op and depth == 0:
+            if pos != -1:
+                return None            # more than one top-level op — not a simple pair
+            pos = i
+    if pos == -1:
+        return None
+    return text[:pos].strip(), text[pos + 1:].strip()
+
+
+def _parse_int_divisor(text: str) -> int | None:
+    """Parse a small positive integer divisor, optionally cast-wrapped (``TScale(6)``)."""
+    inner = _strip_casts(text).strip()
+    if re.fullmatch(r"\d+", inner):
+        return int(inner)
+    if re.fullmatch(r"\d+\.0*", inner):   # 6. / 6.0 → integer
+        return int(float(inner))
+    return None
+
+
+def derive_from_catalog(name: str, rhs: str, scalar: str,
+                        alias_map: dict[str, str] | None = None) -> Derivation | None:
+    """Derive a constant whose RHS is a catalog constant or a composition (step 3b).
+
+    Handles the exact-name case (``M_PI`` -> π), a scaled form carried directly by
+    the catalog (``2.0*M_PI`` -> ``two_pi``), and an algebraic composition of
+    catalog accessors (``_pi() * _pio6<...>()`` -> π²/6, ``_pi() / TScale(6)`` ->
+    π/6).  Returns ``None`` when nothing lands on a catalog entry — the value is
+    never invented.  ``alias_map`` supplies caller-specific accessor spellings.
     """
     inner = _strip_casts(rhs)
     # bare catalog constant
-    canon = _lookup_catalog_alias(inner.strip())
+    canon = _lookup_catalog_alias(inner.strip(), alias_map)
+    # bare accessor call (``_pio6<...>()``) — strip template args + () and look up
+    if canon is None:
+        m_acc = _ACCESSOR_NAME_RE.match(inner.strip())
+        if m_acc is not None:
+            canon = _lookup_catalog_alias(m_acc.group(1), alias_map)
     if canon and canon in KNOWN_CONSTANTS:
         hi, lo = KNOWN_CONSTANTS[canon][scalar]
         return Derivation(name=name, scalar=scalar, expr=_make_call(scalar, hi, lo),
                           how=f"catalog:{canon}", rhs=rhs.strip())
-    # k * <catalog> with a direct scaled catalog entry (only 2*pi today)
+    # k * <catalog> with a direct scaled catalog entry (numeric scalar factor)
     m = re.match(r"^\s*([\d.]+)\s*\*\s*([A-Za-z_][\w:]*)\s*$", inner)
     if not m:
         m2 = re.match(r"^\s*([A-Za-z_][\w:]*)\s*\*\s*([\d.]+)\s*$", inner)
         if m2:
             k_text, tok = m2.group(2), m2.group(1)
         else:
-            return None
+            k_text = tok = None
     else:
         k_text, tok = m.group(1), m.group(2)
-    base = _lookup_catalog_alias(tok.strip())
-    try:
-        k = float(k_text)
-    except ValueError:
-        return None
-    if base == "pi" and k == 2.0:
-        hi, lo = KNOWN_CONSTANTS["two_pi"][scalar]
-        return Derivation(name=name, scalar=scalar, expr=_make_call(scalar, hi, lo),
-                          how="catalog:two_pi", rhs=rhs.strip())
-    if base == "pi" and k == 0.5:
-        hi, lo = KNOWN_CONSTANTS["half_pi"][scalar]
-        return Derivation(name=name, scalar=scalar, expr=_make_call(scalar, hi, lo),
-                          how="catalog:half_pi", rhs=rhs.strip())
-    return None
+    if k_text is not None:
+        base = _lookup_catalog_alias(tok.strip(), alias_map)
+        try:
+            k = float(k_text)
+        except ValueError:
+            k = None
+        if k is not None:
+            if base == "pi" and k == 2.0:
+                hi, lo = KNOWN_CONSTANTS["two_pi"][scalar]
+                return Derivation(name=name, scalar=scalar,
+                                  expr=_make_call(scalar, hi, lo),
+                                  how="catalog:two_pi", rhs=rhs.strip())
+            if base == "pi" and k == 0.5:
+                hi, lo = KNOWN_CONSTANTS["half_pi"][scalar]
+                return Derivation(name=name, scalar=scalar,
+                                  expr=_make_call(scalar, hi, lo),
+                                  how="catalog:half_pi", rhs=rhs.strip())
+    # algebraic composition of catalog accessors (π family)
+    return _derive_composition(name, inner, scalar, alias_map)
 
 
-def derive_from_rhs(name: str, rhs: str, scalar: str) -> Derivation | None:
+def derive_from_rhs(name: str, rhs: str, scalar: str,
+                    alias_map: dict[str, str] | None = None) -> Derivation | None:
     """Run the Gap B derivation cascade over a resolved RHS.
 
-    Order: numeric literal (3a) -> catalog closed form (3b) -> ``None`` (the
-    caller falls through to Rule R4).  ``scalar`` is ``"dd"`` or ``"ff"``.
+    Order: numeric literal (3a) -> catalog closed form / composition (3b) ->
+    ``None`` (the caller falls through to Rule R4).  ``scalar`` is ``"dd"`` or
+    ``"ff"``; ``alias_map`` supplies caller-specific accessor spellings for the
+    catalog composition branch.
     """
     if not rhs or not rhs.strip():
         return None
-    return derive_literal(name, rhs, scalar) or derive_from_catalog(name, rhs, scalar)
+    return (derive_literal(name, rhs, scalar)
+            or derive_from_catalog(name, rhs, scalar, alias_map))
 
 
 # --------------------------------------------------------------------------- #

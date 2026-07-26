@@ -291,11 +291,16 @@ def derive_region_constants(region_text: str, sources: list[str], scalar: str,
     :func:`agents.shared.constant_derive.derive_complex_from_rhs`).
     """
     out: list[dict] = []
+    # Standard math accessor spellings for the π family (π², π/6, π²/6, …) so a
+    # constant defined *compositionally* upstream (``_pi() * _pio6<...>()``) is
+    # resolved to its catalog value instead of tripping the Rule R4 #error.  These
+    # are library-agnostic mathematical accessor names, not app symbols.
+    alias_map = cderive.PI_FAMILY_ACCESSOR_ALIASES
     for name in _find_constant_candidates(region_text):
         rhs = cderive.resolve_constant_rhs(name, sources)
         if rhs is None:
             continue
-        whole = cderive.derive_from_rhs(name, rhs, scalar)
+        whole = cderive.derive_from_rhs(name, rhs, scalar, alias_map)
         if whole is not None:
             out.append({"name": name, "rhs": rhs, "expr": whole.expr,
                         "how": whole.how, "literals": []})
