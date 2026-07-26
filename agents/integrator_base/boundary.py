@@ -338,6 +338,10 @@ def _parse_bare_decl_stmt(toks: list[_Tok], lo: int, hi: int) -> _BareDecl | Non
                     d += 1
                 elif tj in ")]}":
                     d -= 1
+                elif tj == "<":               # template-id in init (``= ql::f<T,U>(…)``)
+                    d += 1
+                elif tj == ">":
+                    d -= 1
                 elif tj == "," and d == 0:
                     break
                 j += 1

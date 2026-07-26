@@ -12,9 +12,10 @@ carries two views of a chain's closure on one :class:`CarrierClosure`:
 * the **enlarged value closure** (``closure_names`` / ``closure_decl_widens`` /
   ``designed_exits`` / ``escape_reasons`` / ``return_widens``) — the least fixed
   point of rule (a) [read on ANY frame line] and rule (b) [forward flow to a local /
-  out-param / return / kernel output], with ``chain_closure_escapes`` refusals at the
-  frontier.  Rule (c) (cross-frame return propagation) is Subtask 2a/2b, so
-  ``return_widens`` is empty and B10 stops at ``Li2omx2``'s return here.
+  out-param / return / kernel output] and rule (c) [cross-frame return propagation],
+  with ``chain_closure_escapes`` refusals at the frontier.  Rule (c) (Subtask 2b)
+  carries dd across ``Li2omx2``'s / ``ddilog``'s returns into B10's cancellation, so
+  ``return_widens`` names both callees and dilog4/dilog5 join the closure.
 
 The ``entry -> mid -> inner`` synthetic (``CARRIER_H``) exercises the compat subset;
 ``top -> mid2 -> leaf`` (``CLOSURE_H``) exercises rules (a)/(b), escapes, designed
@@ -532,19 +533,239 @@ def test_real_b14_closure_widens_fac_and_marks_output_store(qcdloop_full_graph):
 
 @requires_libclang
 @requires_qcdloop_full
-def test_real_b10_closure_extends_to_li2omx2_but_stops_at_return(qcdloop_full_graph):
-    # Rule (a) also widens Li2omx2's `prod, Li2omx2;` (decl :691; Li2omx2 written :704,
-    # read at the :707 return), on top of ddilog's Fix-A {Y,S,A}.  Rule (b) marks the
-    # :707 `return Li2omx2` as a designed-exit candidate but — with rule (c) OUT of
-    # scope — does NOT cross into B1m.h, so dilog4/dilog5 stay double and B10's headline
-    # cancellation is still unrecovered (the Subtask 2a/2b job).
+def test_real_b10_closure_extends_across_li2omx2_return(qcdloop_full_graph):
+    # Rule (c) — the Subtask-2b headline.  Rule (a) widens ddilog's {Y,S,A} @157 and
+    # Li2omx2's `prod, Li2omx2;` @691; rule (b) reaches Li2omx2's `return Li2omx2` @707
+    # and ddilog's `return -(...+A)` @212.  Rule (c) then fires on BOTH chain-internal
+    # return edges: ddilog -> Li2omx2 (consumed at :698/:704) and Li2omx2 -> B10
+    # (consumed at B1m.h:{235,236,237}).  The callee return types widen (recorded in
+    # return_widens) and the caller's receiving locals dilog3/dilog4/dilog5 re-enter
+    # rule (a) in B10 and widen — so the :241 `res(i,0) = dilog4 - dilog5 ...`
+    # cancellation now executes at dd and its store to res(i,k) is the designed exit.
     cc = _real_closure(qcdloop_full_graph, "B10")
     assert {"Y", "S", "A", "prod", "Li2omx2"} <= cc.closure_names
-    ret_exits = {ln for _f, ln, kind, _cv, _d in cc.designed_exits if kind == "return"}
-    assert 707 in ret_exits
-    # no rule (c): the cancellation operands never join under rules (a),(b) alone
-    assert "dilog4" not in cc.closure_names
-    assert "dilog5" not in cc.closure_names
-    assert cc.return_widens == []       # Subtask 2a: list (was frozenset), still empty
-    # Fix-A compat subset unchanged (regression guard)
+    # rule (c): the cancellation operands NOW join the closure and widen (was the
+    # Subtask-1b falsifier; inverted here — the whole point of rule (c)).
+    assert "dilog4" in cc.closure_names
+    assert "dilog5" in cc.closure_names
+    b10_decl_lines = {ln for f, ln, _n, _t in cc.closure_widenable
+                      if Path(f).name == "B1m.h"}
+    assert {236, 237} <= b10_decl_lines
+    # rule (c) records a return-type widen for BOTH chain-internal callees, naming the
+    # ORIGINAL function (attach binds it to every per-caller-path variant at emission).
+    rw_by_fn = {rw.function_name: rw for rw in cc.return_widens}
+    assert "Li2omx2" in rw_by_fn and "ddilog" in rw_by_fn
+    assert (rw_by_fn["Li2omx2"].return_line, rw_by_fn["Li2omx2"].orig_type) == (688, "TOutput")
+    assert (rw_by_fn["ddilog"].return_line, rw_by_fn["ddilog"].orig_type) == (149, "TMass")
+    assert all(rw.dd_type == "quad::ddfun::ddouble" for rw in cc.return_widens)
+    # the chain's designed exit is now B10's res(i,0) cancellation store, NOT Li2omx2's
+    # return (which carries dd across, no truncation — clause (ii)).
+    exit_kinds = {(ln, kind) for _f, ln, kind, _cv, _d in cc.designed_exits}
+    assert (241, "kernel_output") in exit_kinds
+    # Fix-A compat subset unchanged (regression guard): rule (c) widens RETURNS and
+    # caller locals but leaves the strict-carrier compat view byte-identical.
     assert cc.carrier_names == {"Y", "S", "A"}
+    # Li2omx2's internal decl-init locals lnarg/lnomarg (@702/703) are read by the dd
+    # cancellation @704 — body-owned chain-line carriers threaded into closure_names so
+    # the boundary transform keeps them wide instead of demoting the decl-init landing.
+    assert {"lnarg", "lnomarg"} <= cc.closure_body_names
+    assert {"lnarg", "lnomarg"} <= cc.closure_names
+
+
+# --------------------------------------------------------------------------- #
+# rule (c) — cross-frame return propagation (synthetic, CLOSURE_SCOPED §2.3)
+#
+# entry -> caller -> callee: callee returns a carried value consumed by caller in a
+# cancellation; a further hop caller -> deepr climbs the DAG.  refuse: callee2 calls
+# an ext ∉ F.  Chain lines are the writes that seed each frame.
+# --------------------------------------------------------------------------- #
+
+RULEC_H = """\
+#pragma once
+namespace app {
+
+template<class T>
+T deepr(T u) {
+    T w, z;
+    w = u + T(1);
+    z = w - T(2);
+    return z;
+}
+
+template<class T>
+T callee(T a, T b) {
+    T p, q, r;
+    p = deepr<T>(a);
+    q = a - b;
+    r = p + q;
+    return r;
+}
+
+template<class T>
+T caller(T x) {
+    T m, n, diff;
+    m = callee<T>(x, x);
+    n = callee<T>(x, x);
+    diff = m - n;
+    return diff;
+}
+
+template<class T>
+T entry(T x) {
+    return caller<T>(x);
+}
+
+}  // namespace app
+"""
+
+# line map (1-based against RULEC_H)
+RC_DEEPR_SIG = 5          # `T deepr(T u) {`
+RC_DEEPR_DECL = 6         # `T w, z;`
+RC_DEEPR_W = 7            # `w = u + T(1);`
+RC_DEEPR_Z = 8            # `z = w - T(2);`
+RC_DEEPR_RET = 9          # `return z;`
+RC_CALLEE_SIG = 13        # `T callee(T a, T b) {`
+RC_CALLEE_DECL = 14       # `T p, q, r;`
+RC_CALLEE_P = 15          # `p = deepr<T>(a);`
+RC_CALLEE_Q = 16          # `q = a - b;`
+RC_CALLEE_R = 17          # `r = p + q;`
+RC_CALLEE_RET = 18        # `return r;`
+RC_CALLER_SIG = 22        # `T caller(T x) {`
+RC_CALLER_DECL = 23       # `T m, n, diff;`
+RC_CALLER_M = 24          # `m = callee<T>(x, x);`
+RC_CALLER_N = 25          # `n = callee<T>(x, x);`
+RC_CALLER_DIFF = 26       # `diff = m - n;`
+
+
+@pytest.fixture
+def rulec_tree(tmp_path) -> Path:
+    (tmp_path / "app.h").write_text(RULEC_H)
+    return tmp_path
+
+
+@pytest.fixture
+def rulec_graph(rulec_tree):
+    from agents.patcher.call_graph import build_call_graph
+    fanout.clear_graph_cache()
+    return build_call_graph("entry", rulec_tree, tu_file=rulec_tree / "app.h")
+
+
+def _rulec_closure(graph, lines, **kw):
+    man = ChainManifest(chain_id="rc", integral="B", entry_point="entry",
+                        lines=[("app.h", ln, ln) for ln in lines])
+    return compute_value_closure(manifest=man, graph=graph, scalar_type="Ext", **kw)
+
+
+def test_rulec_header_line_numbers_match_constants():
+    lines = RULEC_H.split("\n")
+    assert lines[RC_DEEPR_SIG - 1].strip() == "T deepr(T u) {"
+    assert lines[RC_DEEPR_Z - 1].strip() == "z = w - T(2);"
+    assert lines[RC_DEEPR_RET - 1].strip() == "return z;"
+    assert lines[RC_CALLEE_SIG - 1].strip() == "T callee(T a, T b) {"
+    assert lines[RC_CALLEE_R - 1].strip() == "r = p + q;"
+    assert lines[RC_CALLEE_RET - 1].strip() == "return r;"
+    assert lines[RC_CALLER_DECL - 1].strip() == "T m, n, diff;"
+    assert lines[RC_CALLER_M - 1].strip() == "m = callee<T>(x, x);"
+    assert lines[RC_CALLER_DIFF - 1].strip() == "diff = m - n;"
+
+
+@requires_libclang
+def test_rulec_fires_across_one_return_edge(rulec_graph):
+    # callee returns carried `r`; caller consumes it into m/n and cancels at :25.
+    # Chain seeds: callee's `r` write (:17) and caller's `diff` write (:25).  Rule (c)
+    # widens callee's return type and re-seeds m/n in caller -> they widen by rule (a).
+    cc = _rulec_closure(rulec_graph, [RC_CALLEE_R, RC_CALLER_DIFF])
+    assert "r" in cc.closure_names
+    assert "m" in cc.closure_names and "n" in cc.closure_names
+    rw = {r.function_name: r for r in cc.return_widens}
+    assert "callee" in rw
+    assert (rw["callee"].return_line, rw["callee"].orig_type) == (RC_CALLEE_SIG, "T")
+    assert rw["callee"].dd_type == "Ext"
+    # caller receiving-local decls widen (m/n decl on the shared :22 line)
+    decl_lines = {ln for _f, ln, _n, _t in cc.closure_widenable}
+    assert RC_CALLER_DECL in decl_lines
+
+
+@requires_libclang
+def test_rulec_climbs_the_dag_two_hops(rulec_graph):
+    # deepr -> callee -> caller: seed all three frames' carried writes.  Rule (c) fires
+    # on BOTH internal return edges (deepr->callee at :15, callee->caller at :23/:24),
+    # so both deepr and callee return types widen and p (in callee) + m/n (in caller)
+    # re-seed and widen — the climb terminates at caller (whose return feeds entry).
+    cc = _rulec_closure(rulec_graph, [RC_DEEPR_Z, RC_CALLEE_R, RC_CALLER_DIFF])
+    rw = {r.function_name for r in cc.return_widens}
+    assert {"deepr", "callee"} <= rw
+    assert "p" in cc.closure_names        # callee's receiving local from deepr
+    assert {"m", "n"} <= cc.closure_names # caller's receiving locals from callee
+
+
+@requires_libclang
+def test_rulec_terminates_no_runaway(rulec_graph):
+    # Termination property (§2.5): the fixed point converges without hitting MAX_ROUNDS.
+    # A converged closure is stable — recomputing yields identical closure_names and
+    # return_widens (idempotent, monotone lattice).
+    a = _rulec_closure(rulec_graph, [RC_DEEPR_Z, RC_CALLEE_R, RC_CALLER_DIFF])
+    b = _rulec_closure(rulec_graph, [RC_DEEPR_Z, RC_CALLEE_R, RC_CALLER_DIFF])
+    assert a.closure_names == b.closure_names
+    assert {r.function_name for r in a.return_widens} == {
+        r.function_name for r in b.return_widens}
+
+
+@requires_libclang
+def test_rulec_does_not_fire_without_internal_consumer(rulec_graph):
+    # deepr's return is consumed by callee, but if the chain seeds ONLY deepr (no caller
+    # frame in F consuming callee's onward return), rule (c) still fires deepr->callee
+    # because callee IS in F once its line is seeded — so seed only deepr's frame and
+    # NOT callee's: callee is not a chain frame, deepr's return has no in-F consumer, so
+    # no return widen is recorded (the return is a plain designed-exit / gate-checked).
+    cc = _rulec_closure(rulec_graph, [RC_DEEPR_Z])
+    assert cc.return_widens == []
+    # deepr's own return is marked (rule b) but not widened (no in-F caller); with rule
+    # (c) not firing it stays a plain gate-checked return, never return_widened.
+    kinds = {kind for _f, _l, kind, _cv, _d in cc.designed_exits}
+    assert "return_widened" not in kinds
+
+
+@requires_libclang
+def test_rulec_callee_not_in_F_stays_plain_return(closure_graph):
+    # §2.4 asymmetry: a call to a function NOT in the chain function set is an ESCAPE,
+    # not a rule-(c) edge — v1 does not widen a foreign signature.  Here the chain is
+    # only `leaf`'s `c` (:16); `leaf` returns `c` (:21) but no OTHER chain frame consumes
+    # that return internally (mid2 is not seeded), so rule (c) records nothing and the
+    # return stays a plain (gate-checked) exit.  `d = ext(c)` sends c into ext ∉ F — a
+    # source escape, never a rule-(c) return widen on ext.
+    cc = _closure_h(closure_graph, [CL_C_W])
+    assert cc.return_widens == []
+    assert "ext" not in {r.function_name for r in cc.return_widens}
+    kinds = {kind for _f, _l, kind, _cv, _d in cc.designed_exits}
+    assert "return_widened" not in kinds       # leaf's return not widened (no in-F caller)
+
+
+def test_decl_init_writes_recovers_chain_line_carriers():
+    # _decl_init_writes recovers a decl-init LHS (excluded by region_writes_from_source)
+    # so a chain-line decl-init carrier (Li2omx2's lnarg) is recognized.  A bare decl and
+    # a plain assign yield nothing (region_writes_from_source owns the latter).
+    from agents.patcher.chain_promote import _decl_init_writes
+    assert _decl_init_writes("const TOutput lnarg = TOutput(a - b);") == {"lnarg"}
+    assert _decl_init_writes("const T dilog4 = ql::Li2omx2<T,U,V>(a, b);") == {"dilog4"}
+    assert _decl_init_writes("TOutput prod, Li2omx2;") == set()      # bare decl, no init
+    assert _decl_init_writes("Li2omx2 = -TOutput(x) + lnarg;") == set()  # plain assign
+    assert _decl_init_writes("if (a < b) c = d;") == set()           # not a decl
+
+
+@requires_libclang
+def test_rulec_attach_binds_frame_record_to_variant(rulec_graph):
+    # STOP #5 wiring end-to-end: the frame-level ReturnWiden that rule (c) records
+    # (function_name = ORIGINAL name, return_line = signature line) binds to a per-path
+    # VariantSpec via _attach_return_widens (orig_name + line containment).
+    from agents.patcher.chain_promote import _attach_return_widens
+    from agents.patcher.fanout import VariantSpec
+    cc = _rulec_closure(rulec_graph, [RC_CALLEE_R, RC_CALLER_DIFF])
+    rw = [r for r in cc.return_widens if r.function_name == "callee"]
+    assert rw
+    spec = VariantSpec(variant_name="callee_caller_B", orig_name="callee",
+                       file="app.h", orig_start=12, orig_end=19)
+    _attach_return_widens(cc.return_widens, {"app.h": {"callee_caller_B": spec}})
+    assert spec.return_widen is not None
+    assert spec.return_widen.function_name == "callee"
+    assert spec.return_widen.return_line == RC_CALLEE_SIG

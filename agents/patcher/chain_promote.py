@@ -131,19 +131,20 @@ def chain_promotion_no_op(per_region_promoted: list[bool]) -> bool:
 
 
 def _designed_exit_kind(kind: str) -> bool:
-    """Whether a designed-exit ``kind`` currently exempts its landing line from the
-    interior write-truncation gate (CLOSURE_SCOPED_CHAINS_DESIGN.md §3.2).
+    """Whether a designed-exit ``kind`` exempts its landing line from the interior
+    write-truncation gate (CLOSURE_SCOPED_CHAINS_DESIGN.md §3.2).
 
     * ``kernel_output`` / ``out_param`` (clause i) and ``extract`` (clause iii, already
       filtered to *benign* extracts by the closure) — a carried value leaving the chain
       function set at caller precision at its designed landing: exempt.
-    * ``return`` (clause ii) — a widened return is rule (c) / Subtask 2a; until the
-      variant return type is actually widened the value IS truncated at the return, so
-      the return landing is NOT yet exempt.
+    * ``return_widened`` (clause ii) — a return in a frame whose variant return type the
+      closure WIDENED under rule (c): the value carries dd across the return, no
+      truncation, so the landing is exempt.  A plain ``return`` (the frame's return type
+      was NOT widened — rule (c) refused or did not reach it) still truncates to caller
+      precision and is NOT exempt, so the gate keeps rejecting it (§3.3: B10 with rule
+      (c) disabled must still reject at :707).
     """
-    if kind == "return":
-        return False   # TODO(subtask-2a): widened-return exemption (rule c)
-    return kind in ("kernel_output", "out_param", "extract")
+    return kind in ("kernel_output", "out_param", "extract", "return_widened")
 
 
 def chain_write_truncation(region_meta: list[dict], *, two_limb: bool,
@@ -283,6 +284,13 @@ class CarrierClosure:
     # Subtask 2a: a proper collection of ReturnWiden records (was a frozenset in 1a).
     # Stays EMPTY here; rule (c)'s cross-frame propagation (Subtask 2b) populates it.
     return_widens: list = field(default_factory=list)
+    # Carriers whose DECL lies ON a chain line (so the body transform owns widening the
+    # decl — they get NO ``closure_decl_widens`` record) but which are still carried
+    # values the boundary transform must keep WIDE at their producing/consuming chain
+    # regions (Li2omx2's ``lnarg``/``lnomarg`` @702/703, read by the dd cancellation
+    # @704).  Threaded into ``closure_names`` so ``promote_region_block`` does not demote
+    # them at their decl-init landing.
+    closure_body_names: set = field(default_factory=set)
 
     @property
     def escape_reasons(self) -> list[tuple[str, str]]:
@@ -299,8 +307,10 @@ class CarrierClosure:
 
     @property
     def closure_names(self) -> set[str]:
-        """Every name in the ENLARGED value closure (rules (a) generalised + (b))."""
-        return {name for _f, _l, name, _t in self.closure_widenable}
+        """Every name in the ENLARGED value closure (rules (a) generalised + (b)),
+        plus chain-line decl-init carriers whose decl the body transform owns."""
+        return ({name for _f, _l, name, _t in self.closure_widenable}
+                | set(self.closure_body_names))
 
 
 @dataclass
@@ -606,6 +616,12 @@ def _local_decls(func_src: str, func_line_start: int) -> dict[str, _DeclStmt]:
                         d += 1
                     elif tx in ")]}":
                         d -= 1
+                    elif tx == "<":        # template-id in init (``= ql::f<T,U>(…)``)
+                        d += 1
+                    elif tx == ">":
+                        d -= 1
+                    elif tx == ">>":
+                        d -= 2
                     elif tx == "," and d == 0:
                         break
                     j += 1
@@ -668,7 +684,32 @@ def _scan_calls(line_text: str) -> list[tuple[str, str, set[str]]]:
     i = 0
     while i < n:
         t = toks[i]
-        if region_scan._is_ident_tok(t.text) and i + 1 < n and toks[i + 1].text == "(":
+        # A call is ``ident (`` OR a template-id ``ident < template-args > (`` — the
+        # latter is qcdloop's dominant form (``ql::Li2omx2<TOutput,...>(...)``).  Find
+        # the ``(`` that opens the argument list, skipping a balanced ``<...>`` if the
+        # ident is immediately followed by one (over-detection of a stray comparison is
+        # harmless: a call is only acted on when ``last`` is in the chain function set).
+        paren_i: int | None = None
+        if region_scan._is_ident_tok(t.text) and i + 1 < n:
+            if toks[i + 1].text == "(":
+                paren_i = i + 1
+            elif toks[i + 1].text == "<":
+                d = 0
+                j2 = i + 1
+                while j2 < n:
+                    tx2 = toks[j2].text
+                    if tx2 == "<":
+                        d += 1
+                    elif tx2 == ">":
+                        d -= 1
+                    elif tx2 == ">>":
+                        d -= 2
+                    j2 += 1
+                    if d <= 0:
+                        break
+                if j2 < n and toks[j2].text == "(":
+                    paren_i = j2
+        if paren_i is not None:
             prefix: list[str] = []          # qualify: (ident ::)* ident
             k = i - 1
             while k - 1 >= 0 and toks[k].text == "::" \
@@ -679,7 +720,7 @@ def _scan_calls(line_text: str) -> list[tuple[str, str, set[str]]]:
             qual = "::".join(prefix + [last]) if prefix else last
             depth = 0
             args: set[str] = set()
-            j = i + 1
+            j = paren_i
             while j < n:
                 tx = toks[j].text
                 if tx == "(":
@@ -691,14 +732,51 @@ def _scan_calls(line_text: str) -> list[tuple[str, str, set[str]]]:
                 elif region_scan._is_ident_tok(tx):
                     prev = toks[j - 1].text
                     nxt = toks[j + 1].text if j + 1 < n else ""
-                    if prev not in (".", "->", "::") and nxt not in ("(", "::"):
+                    # exclude member/qualified leads, and call targets — either a plain
+                    # ``ident(`` or a template-id ``ident<`` (the nested-call target is
+                    # recorded as its own call by the token-by-token advance below).
+                    if prev not in (".", "->", "::") and nxt not in ("(", "::", "<"):
                         args.add(tx)
                 j += 1
             calls.append((qual, last, args))
-            i = j + 1
+            # advance by ONE token (not past the whole call): a nested call inside the
+            # argument list (``TOutput(... ql::ddilog<...>(arg) ...)``) is a distinct
+            # chain-internal edge rule (c) needs, so it must be scanned in turn.
+            i += 1
             continue
         i += 1
     return calls
+
+
+def _decl_init_writes(line_text: str) -> set[str]:
+    """Names WRITTEN by a statement-level declaration-with-initializer on one line.
+
+    ``region_scan.region_writes_from_source`` deliberately EXCLUDES decl-init targets
+    (``const TOutput lnarg = …``) — a decl is a *landing* the boundary transform's
+    ``_compute_promotion`` classifies separately, not a Case-B pre-declared write.  But
+    for the value-closure seed a decl-init on a chain line whose value is read by another
+    chain line IS a produced carrier (Li2omx2's ``lnarg``/``lnomarg`` @702/703 feed the
+    dd cancellation @704; B10's ``dilog4 = ql::Li2omx2<…>()`` receives a rule-(c) dd
+    return).  This recovers exactly those LHS names: the declarator identifier(s) of a
+    statement-leading ``<type> <name> [= …]`` at paren depth 0 — reusing the same
+    :func:`_local_decls` scanner so the ``<>`` / multi-declarator handling matches.
+    A bare ``<type> <name>;`` with no initializer produces no write (nothing computed).
+    """
+    toks = region_scan._tokenize(line_text)
+    out: set[str] = set()
+    n = len(toks)
+    # decl-init only: the line must contain a single-'=' assignment (an initializer),
+    # not a bare declaration; _local_decls already parses the declarator list.
+    has_init = any(
+        t.text == "=" and (i + 1 >= n or toks[i + 1].text != "=")
+        and (i == 0 or toks[i - 1].text not in ("!", "<", ">", "+", "-", "*", "/", "%",
+                                                "&", "|", "^", "="))
+        for i, t in enumerate(toks))
+    if not has_init:
+        return out
+    for nm, st in _local_decls(line_text, 1).items():
+        out.add(nm)
+    return out
 
 
 def _scan_container_stores(line_text: str) -> list[tuple[str, set[str]]]:
@@ -772,6 +850,104 @@ def _has_binary_addsub(line_text: str) -> bool:
     return False
 
 
+def _return_type_signature(func_src: str, func_line_start: int):
+    """Locate a function's return-type token for rule (c)'s :class:`ReturnWiden`.
+
+    Returns ``(sig_line, orig_type)`` where ``sig_line`` is the 1-based ABSOLUTE file
+    line of the function-name identifier that precedes the parameter-list ``(`` (the
+    signature line — the same coordinate :func:`boundary.widen_return_type_line`
+    expects), and ``orig_type`` is the leading core return-type token as source spells
+    it (its last ``::`` segment, mirroring :func:`_local_decls`).  Returns ``None`` if
+    the return type cannot be recovered (an ``auto`` trailing-return / SFINAE shape) —
+    rule (c) then declines to widen that frame's return (the gate keeps it truncating).
+
+    Source-only token scan over the enclosing function; skips the leading ``template
+    <...>`` clause, storage / macro qualifiers, and any ``::``-qualified / templated
+    type, so it recovers ``TMass`` from ``KOKKOS_INLINE_FUNCTION TMass ddilog(...)``
+    and ``TOutput`` from ``KOKKOS_INLINE_FUNCTION TOutput Li2omx2(...)``.
+    """
+    toks = region_scan._tokenize(func_src)
+    n = len(toks)
+    i = 0
+    # skip a leading ``template < ... >`` clause
+    if i < n and toks[i].text == "template":
+        i += 1
+        if i < n and toks[i].text == "<":
+            d = 0
+            while i < n:
+                tx = toks[i].text
+                if tx == "<":
+                    d += 1
+                elif tx == ">":
+                    d -= 1
+                elif tx == ">>":
+                    d -= 2
+                i += 1
+                if d <= 0:
+                    break
+    # Find the parameter-list ``(`` at angle/bracket depth 0 — the opener that follows
+    # the function name — then the function name is the ident immediately before it and
+    # the return type is the last core token before the function name.  This mirrors
+    # boundary.widen_return_type_line so the recovered coordinate is exactly what it
+    # rewrites, and avoids fragile macro-vs-type heuristics (a single-letter type ``T``
+    # is not distinguishable from a macro by casing).
+    paren = None
+    depth = 0
+    k = i
+    while k < n:
+        tx = toks[k].text
+        if tx in ("<", "["):
+            depth += 1
+        elif tx in (">", "]"):
+            depth = max(0, depth - 1)
+        elif tx == ">>":
+            depth = max(0, depth - 2)
+        elif tx == "(" and depth == 0:
+            paren = k
+            break
+        k += 1
+    if paren is None:
+        return None
+    # function-name ident = last ident before the param '('
+    fn = None
+    for k in range(paren - 1, i - 1, -1):
+        if region_scan._is_ident_tok(toks[k].text):
+            fn = k
+            break
+    if fn is None or fn == i:
+        return None                          # no return-type token before the name
+    # the return-type region is every token in [i, fn); its core token is the LAST
+    # identifier immediately before the function name (walking back over ``&`` / ``*`` /
+    # ``const`` and any trailing ``>`` of a template-arg list), reduced to its last
+    # ``::`` segment.  Using the LAST core token (not the first) skips leading attribute
+    # macros (``KOKKOS_INLINE_FUNCTION``) / storage keywords, which are never the base
+    # return type — mirroring boundary.widen_return_type_line's rewrite target.
+    r = fn - 1
+    while r > i and toks[r].text in ("&", "*", "const"):
+        r -= 1
+    # if the token before the name closes a template-arg list (``std::vector<T> f``),
+    # the base type is the ident that OPENED it; walk back to that ident.
+    if r > i and toks[r].text in (">", ">>"):
+        d = 2 if toks[r].text == ">>" else 1
+        r -= 1
+        while r > i and d > 0:
+            if toks[r].text == "<":
+                d -= 1
+            elif toks[r].text == ">":
+                d += 1
+            elif toks[r].text == ">>":
+                d += 2
+            r -= 1
+        while r > i and toks[r].text not in ("::",) \
+                and not region_scan._is_ident_tok(toks[r].text):
+            r -= 1
+    if r < i or not region_scan._is_ident_tok(toks[r].text):
+        return None
+    core = toks[r].text
+    sig_line = func_line_start + toks[fn].line - 1
+    return sig_line, core
+
+
 def _expand_value_closure(out: CarrierClosure, *, frames, frame_names, func_src,
                           func_line_start, chain_lineset, scalar_type,
                           complex_type, complex_tokens) -> None:
@@ -800,6 +976,7 @@ def _expand_value_closure(out: CarrierClosure, *, frames, frame_names, func_src,
     line_stores: dict = {}
     line_return: dict = {}
     line_addsub: dict = {}                   # fkey -> {line: has a binary +/-}
+    line_decl_inits: dict = {}               # fkey -> {line: decl-init LHS names}
     frame_writes: dict = {}                 # fkey -> every name written in the frame
     chain_lines_in_frame: dict = {}
     for fkey in frames:
@@ -808,12 +985,14 @@ def _expand_value_closure(out: CarrierClosure, *, frames, frame_names, func_src,
         src_lines = func_src[fkey].split("\n")
         lr, lw, lc, lst, lret, ladd = {}, {}, {}, {}, {}, {}
         fw: set[str] = set()
+        di: dict = {}                        # L -> decl-init LHS names on that line
         for L in range(ls0, le0 + 1):
             idx = L - ls0
             txt = src_lines[idx] if 0 <= idx < len(src_lines) else ""
             writes = set(region_scan.region_writes_from_source(txt))
             lr[L] = _names_read_in_region(txt)
             lw[L] = writes
+            di[L] = _decl_init_writes(txt)
             lc[L] = _scan_calls(txt)
             lst[L] = _scan_container_stores(txt)
             lret[L] = any(tk.text == "return" for tk in region_scan._tokenize(txt))
@@ -825,6 +1004,7 @@ def _expand_value_closure(out: CarrierClosure, *, frames, frame_names, func_src,
         line_stores[fkey] = lst
         line_return[fkey] = lret
         line_addsub[fkey] = ladd
+        line_decl_inits[fkey] = di
         frame_writes[fkey] = fw
         cl = chain_lineset.get(fkey[0], set())
         chain_lines_in_frame[fkey] = {L for L in cl if ls0 <= L <= le0}
@@ -862,6 +1042,21 @@ def _expand_value_closure(out: CarrierClosure, *, frames, frame_names, func_src,
     # carried set + widened siblings, so it is decided after the fixed point (§3.2 iii).
     extract_cands: dict = {}                 # (file, line, dest) -> {carried, callee}
 
+    # -- rule (c) accumulators (CLOSURE_SCOPED_CHAINS_DESIGN.md §2.3) --------------
+    # ``return_widen_frames`` keys each callee frame whose return the closure widens by
+    # its frame key; the value is (sig_line, orig_type) from _return_type_signature.
+    # Recorded at FRAME level (the callee's ORIGINAL name), then attached to every
+    # per-caller-path variant at emission time (chain_promote._attach_return_widens),
+    # because a single callee (ddilog) fans out to many per-path variants and the
+    # closure has no path/graph context to enumerate them here (STOP #5 resolution).
+    return_widen_frames: dict = {}           # callee fkey -> (sig_line, orig_type)
+    # Frame name -> its frame key, for the caller->callee edge lookup below.  A name
+    # visible in exactly one chain frame; a name in more than one is not a plain callee
+    # frame (rule (c) does not fire on it — it would already be an external/global).
+    fkey_by_name: dict = {}
+    for fk in frames:
+        fkey_by_name.setdefault(frames[fk].name, set()).add(fk)
+
     def _mark_designed(dfile, dline, kind, target, carried) -> bool:
         k = (dfile, dline, kind, target)
         prev = designed.get(k)
@@ -872,6 +1067,81 @@ def _expand_value_closure(out: CarrierClosure, *, frames, frame_names, func_src,
             prev |= carried
             return True
         return False
+
+    def _receiving_locals_at_calls(caller_fk, callee_name: str):
+        """Local names in ``caller_fk`` that BIND the result of a call to
+        ``callee_name`` (a chain-internal edge), with the line the binding is on.
+
+        Two binding forms in qcdloop's chains:
+          * decl-init  ``const TOutput dilog4 = ql::Li2omx2<...>(...)``  (B10:236) —
+            ``region_writes_from_source`` reports no write on a decl-init, so the
+            receiving local is recovered from the frame's decl table; the call target
+            is the only call on the line.
+          * plain assign ``Li2omx2 = ... ql::ddilog<...>(...) ...``     (kokkos:704) —
+            the LHS is a normal write.  The call may be nested inside a cast; the
+            binding local is every name written on the line.
+
+        Yields ``(recv_local, line)``.  A call whose result is consumed as a bare
+        sub-expression with no binding (fed straight into another call / a return
+        expression) yields nothing here — that value has no receiving *local* to widen
+        in ``caller_fk``; if it is itself returned, the return is handled by rule (b)
+        marking + a further rule (c) hop from ``caller_fk``.
+        """
+        cf_decls = decls_by_frame[caller_fk]
+        for L in range(func_line_start[caller_fk], caller_fk[2] + 1):
+            calls_on_L = line_calls[caller_fk].get(L, [])
+            if not any(last == callee_name for _q, last, _a in calls_on_L):
+                continue
+            # plain-assign writes (LHS locals declared in this frame)
+            for w in line_writes[caller_fk].get(L, set()):
+                if cf_decls.get(w) is not None:
+                    yield (w, L)
+            # decl-init binding: no write reported, but the line declares a local whose
+            # decl line IS this line (``const TOutput dilog4 = ...``).
+            for nm, st in cf_decls.items():
+                if st.decl_line == L and nm not in line_writes[caller_fk].get(L, set()):
+                    yield (nm, L)
+
+    def _apply_rule_c(callee_fk) -> bool:
+        """Fire rule (c) for a callee frame ``callee_fk`` that returns a carried value.
+
+        Returns True iff it changed the accumulators (a new return-widen recorded or a
+        receiving local newly carried).  Honors the §8 boundary: a callee whose return
+        also requires a widened INWARD parameter is refused (STOP #4 territory) — but
+        v1's rule (c) never widens a parameter, so a callee needing dd IN is already
+        caught by the param terminal upstream; here we only widen the callee's return
+        type (outward) and re-seed the caller's receiving local.
+        """
+        callee_name = frames[callee_fk].name
+        ch = False
+        for caller_fk in frames:
+            if caller_fk == callee_fk:
+                continue
+            for (recv, L) in _receiving_locals_at_calls(caller_fk, callee_name):
+                # record the callee's return-type widen once (frame-level; STOP #5)
+                if callee_fk not in return_widen_frames:
+                    sig = _return_type_signature(
+                        func_src[callee_fk], func_line_start[callee_fk])
+                    if sig is not None:
+                        return_widen_frames[callee_fk] = sig
+                        ch = True
+                # re-seed the caller's receiving local -> rule (a) widens it next round
+                if recv not in W[caller_fk]:
+                    W[caller_fk].add(recv)
+                    ch = True
+                # A decl-init binding (``const TOutput dilog4 = ql::Li2omx2<...>()``)
+                # is not seen as a write by region_writes_from_source, so rule (a)'s
+                # ``written_on_carried`` test would miss it and never widen the decl —
+                # leaving the dd return truncated straight back into the caller-precision
+                # local (rule (c) point 2 defeated).  Register the binding line as a
+                # write of the receiving local so rule (a) recognizes and widens its
+                # decl (idempotent — a set add).
+                lw_L = line_writes[caller_fk].setdefault(L, set())
+                if recv not in lw_L:
+                    lw_L.add(recv)
+                    frame_writes[caller_fk].add(recv)
+                    ch = True
+        return ch
 
     MAX_ROUNDS = 64
     changed = True
@@ -973,6 +1243,15 @@ def _expand_value_closure(out: CarrierClosure, *, frames, frame_names, func_src,
                 if line_return[fkey].get(L):
                     if _mark_designed(file, L, "return", "", set(carried_here)):
                         changed = True
+                    # ---- rule (c): cross-frame return propagation --------------
+                    # This frame g returns a carried value.  If another chain frame f
+                    # calls g on a chain-internal edge (f -> g) and binds the result
+                    # into a receiving local, then (1) g's variant return type widens
+                    # (recorded here, attached per-path at emission), and (2) the
+                    # receiving local re-enters rule (a) in f (added to W[f]); the
+                    # fixed point then climbs the DAG (§2.3 rule c).
+                    if _apply_rule_c(fkey):
+                        changed = True
 
     # -- expand each widened decl line to all its declarators (siblings, §2) ------
     widened_names: set[str] = set()
@@ -984,6 +1263,26 @@ def _expand_value_closure(out: CarrierClosure, *, frames, frame_names, func_src,
             widened_names.add(nm)
         out.closure_decl_widens.append(
             (dfile, dline, stmt.core_type, dd_type, stmt.names[0]))
+
+    # -- body-owned chain-line decl-init carriers (closure_body_names) ------------
+    # A decl-init on a CHAIN line (``const TOutput lnarg = …`` @702) whose value is READ
+    # on ANOTHER chain line in the same frame (the dd cancellation @704) is a carrier the
+    # body transform already widens (its decl is inside the chain set, so rule (a) leaves
+    # it to promote_region_block).  But the boundary transform demotes the decl-init
+    # landing to caller precision UNLESS the name is in closure_names — so record it here.
+    # Strict chain-scope (write AND read both on chain lines) so a frame's non-chain
+    # locals are untouched: this leaves every a/b/c fixed-point result — and thus B13's
+    # baseline — byte-identical, adding only the missing "keep wide" signal.
+    for fk in frames:
+        cif = chain_lines_in_frame[fk]
+        di = line_decl_inits[fk]
+        for wl in cif:
+            for nm in di.get(wl, set()):
+                read_elsewhere = any(
+                    nm in line_reads[fk].get(rl, set())
+                    for rl in cif if rl != wl)
+                if read_elsewhere:
+                    out.closure_body_names.add(nm)
 
     # -- classify deferred extract landings (§3.2 clause iii, benign-extract) ------
     # Both checks are decidable from the closure result alone (no source re-scan):
@@ -1034,13 +1333,46 @@ def _expand_value_closure(out: CarrierClosure, *, frames, frame_names, func_src,
                     f"conservative chain_closure_escapes (design §3.2 clause iii)")
             dest_escape_carried.setdefault(dest, set()).update(carried)
 
+    # -- rule (c): emit ReturnWiden records (frame-level; §2.3, §7) ---------------
+    # One record per callee frame whose return the closure widened, naming the callee's
+    # ORIGINAL function name and its signature return-type line.  chain_promote's
+    # _attach_return_widens binds each to every per-caller-path variant of that function
+    # whose original extent contains the signature line (STOP #5 resolution — the
+    # closure has no path context to enumerate variant names here).  Emitted only if the
+    # return-type token is recoverable AND is not already the dd type (a ``void`` /
+    # already-dd return contributes nothing).
+    for callee_fk, (sig_line, orig_type) in sorted(return_widen_frames.items()):
+        dd_type = _carrier_dd_type(orig_type, scalar_type,
+                                   complex_type, complex_tokens)
+        if orig_type == dd_type:
+            continue
+        out.return_widens.append(ReturnWiden(
+            return_line=sig_line, orig_type=orig_type, dd_type=dd_type,
+            function_name=frames[callee_fk].name))
+    out.return_widens.sort(key=lambda r: (r.function_name, r.return_line))
+
     out.closure_widenable.sort(key=lambda w: (w[0], w[1], w[2]))
     out.closure_decl_widens.sort(key=lambda w: (w[0], w[1]))
+    # File-lines whose enclosing frame's return type the closure WIDENED under rule (c):
+    # a return landing there carries dd across, no truncation, so it is a designed exit
+    # (§3.2 clause ii).  A return in a frame whose type was NOT widened still truncates,
+    # so it stays a plain ``return`` the interior gate checks (§3.3 correctness — B10
+    # with rule (c) disabled must still reject at :707).
+    widened_return_frames = set(return_widen_frames)
+
+    def _return_is_widened(dfile: str, dline: int) -> bool:
+        for fk in widened_return_frames:
+            if fk[0] == dfile and func_line_start[fk] <= dline <= fk[2]:
+                return True
+        return False
+
     # designed_exits 5-tuple (A.2): (file, line, kind, carried_values, detail); sort by
     # a key that avoids ordering the frozenset (unorderable across sets).
     exits: list = []
     for (dfile, dline, kind, target), carried in designed.items():
-        detail = ",".join(sorted(carried)) if kind == "return" else target
+        if kind == "return" and _return_is_widened(dfile, dline):
+            kind = "return_widened"     # clause (ii): rule-(c) widened -> exempt
+        detail = ",".join(sorted(carried)) if kind.startswith("return") else target
         exits.append((dfile, dline, kind, frozenset(carried), detail))
     out.designed_exits = sorted(exits, key=lambda d: (d[0], d[1], d[2], d[4]))
     out.source_escapes = sorted(source_escapes.items())
@@ -1064,31 +1396,36 @@ def _attach_return_widens(return_widens: list,
                           new_specs: dict[str, dict[str, VariantSpec]]) -> None:
     """Attach each rule-(c) :class:`ReturnWiden` to the variant(s) it names (§7).
 
-    ``return_widens`` are the closure's variant-return-type widenings — each names a
-    ``function_name`` that must match an emitted variant.  A widened-return callee is
-    copied to one variant PER caller path, so a record naming variant ``V`` attaches to
-    every spec whose ``variant_name == V`` across files.  Multiple records for one
+    Rule (c) records a :class:`ReturnWiden` at FRAME level: ``function_name`` is the
+    callee's ORIGINAL function name (``Li2omx2``, ``ddilog``) and ``return_line`` its
+    signature return-type line, because the closure analysis has no caller-path context
+    to enumerate the per-path variant names (a single callee like ``ddilog`` fans out to
+    17 per-path variants — STOP #5 resolution).  A widened-return callee is copied to
+    one variant PER caller path, and the widened return rides on EVERY such variant, so
+    this binds each record to every spec whose ``orig_name == rw.function_name`` AND
+    whose original extent ``[orig_start, orig_end]`` contains ``rw.return_line`` (the
+    same line-containment attach the closure-decl widens use).  Multiple records for one
     variant combine via :func:`_merge_return_widen` (equal → dedup, differ →
-    :class:`FanoutError`).  A record naming a variant no emitted spec clones raises
-    :class:`FanoutError` — that is a Subtask-2b wiring bug (the closure demanded a
-    return widen on a function no variant clones); catching it here saves 2b debugging.
-
-    No-op this subtask: ``return_widens`` is empty (rule (c) is Subtask 2b).
+    :class:`FanoutError`).  A record naming a function NO emitted spec clones raises
+    :class:`FanoutError` — a real wiring bug (the closure demanded a return-widen on a
+    function that produced no variant; STOP #5), caught here rather than papered over.
     """
     if not return_widens:
         return
-    specs_by_name: dict[str, list[VariantSpec]] = {}
+    specs_by_orig: dict[str, list[VariantSpec]] = {}
     for specs in new_specs.values():
         for spec in specs.values():
-            specs_by_name.setdefault(spec.variant_name, []).append(spec)
+            specs_by_orig.setdefault(spec.orig_name, []).append(spec)
     for rw in return_widens:
-        targets = specs_by_name.get(rw.function_name)
+        candidates = specs_by_orig.get(rw.function_name, [])
+        targets = [s for s in candidates
+                   if s.orig_start <= rw.return_line <= s.orig_end]
         if not targets:
             raise FanoutError(
-                f"return_widen names variant {rw.function_name!r} but no emitted "
-                f"variant clones it (return {rw.orig_type}->{rw.dd_type} @line "
-                f"{rw.return_line}); the closure demanded a return-widen on a function "
-                f"no variant clones — a Subtask-2b wiring bug")
+                f"return_widen names function {rw.function_name!r} but no emitted "
+                f"variant clones it at return line {rw.return_line} (return "
+                f"{rw.orig_type}->{rw.dd_type}); the closure demanded a return-widen on "
+                f"a function no variant clones — a rule-(c) wiring bug (STOP #5)")
         for spec in targets:
             spec.return_widen = _merge_return_widen(
                 spec.return_widen, rw, spec.variant_name)

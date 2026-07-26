@@ -324,13 +324,18 @@ T f(T v) {
 # --------------------------------------------------------------------------- #
 
 def _mk_specs():
-    a = VariantSpec(variant_name="Li2omx2_B10", orig_name="Li2omx2",
-                    file="kokkosUtils.h", orig_start=1, orig_end=3)
-    # same variant name reachable via a second caller path -> another spec object,
-    # placed under a different file key to exercise the cross-file attach.
-    b = VariantSpec(variant_name="Li2omx2_B10", orig_name="Li2omx2",
-                    file="kokkosUtils.h", orig_start=1, orig_end=3)
-    return {"kokkosUtils.h": {"Li2omx2_B10": a}, "other.h": {"Li2omx2_B10": b}}, a, b
+    # Rule (c) records ReturnWiden at FRAME level: function_name = the ORIGINAL name
+    # (Li2omx2), return_line = the signature line.  The attach binds by orig_name +
+    # line-containment, so a single record rides EVERY per-caller-path variant of that
+    # function (Li2omx2_B10_B1m_B10 via one path, Li2omx2_B13_... via another).
+    a = VariantSpec(variant_name="Li2omx2_B10_B1m_B10", orig_name="Li2omx2",
+                    file="kokkosUtils.h", orig_start=688, orig_end=708)
+    # same original reached via a second caller path -> a distinct variant name and
+    # spec object, placed under a different file key to exercise the cross-file attach.
+    b = VariantSpec(variant_name="Li2omx2_B13_B2ma_B2m_B10", orig_name="Li2omx2",
+                    file="kokkosUtils.h", orig_start=688, orig_end=708)
+    return ({"kokkosUtils.h": {"Li2omx2_B10_B1m_B10": a},
+             "other.h": {"Li2omx2_B13_B2ma_B2m_B10": b}}, a, b)
 
 
 def test_attach_empty_is_noop():
@@ -341,22 +346,32 @@ def test_attach_empty_is_noop():
 
 def test_attach_binds_to_every_matching_variant():
     specs, a, b = _mk_specs()
-    rw = ReturnWiden(692, "TOutput", DDC, "Li2omx2_B10")
+    rw = ReturnWiden(688, "TOutput", DDC, "Li2omx2")   # frame-level: orig name
     _attach_return_widens([rw], specs)
     assert a.return_widen == rw and b.return_widen == rw
 
 
 def test_attach_nonexistent_variant_raises():
     specs, _a, _b = _mk_specs()
-    rw = ReturnWiden(692, "TOutput", DDC, "NoSuchVariant_B10")
+    rw = ReturnWiden(688, "TOutput", DDC, "NoSuchFn")
     with pytest.raises(FanoutError) as exc:
         _attach_return_widens([rw], specs)
-    assert "NoSuchVariant_B10" in str(exc.value)
+    assert "NoSuchFn" in str(exc.value)
+
+
+def test_attach_line_outside_extent_raises():
+    # A record whose return_line is outside every candidate variant's original extent
+    # is a wiring bug (STOP #5) — the closure demanded a widen on a line no variant of
+    # that function clones.
+    specs, _a, _b = _mk_specs()
+    rw = ReturnWiden(9999, "TOutput", DDC, "Li2omx2")
+    with pytest.raises(FanoutError):
+        _attach_return_widens([rw], specs)
 
 
 def test_attach_conflict_raises():
     specs, _a, _b = _mk_specs()
-    rw1 = ReturnWiden(692, "TOutput", DDC, "Li2omx2_B10")
-    rw2 = ReturnWiden(692, "TOutput", DD, "Li2omx2_B10")   # different dd_type
+    rw1 = ReturnWiden(688, "TOutput", DDC, "Li2omx2")
+    rw2 = ReturnWiden(688, "TOutput", DD, "Li2omx2")   # different dd_type
     with pytest.raises(FanoutError):
         _attach_return_widens([rw1, rw2], specs)

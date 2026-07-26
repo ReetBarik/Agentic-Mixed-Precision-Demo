@@ -138,6 +138,59 @@ def test_chain_write_truncation_single_region_never_fires(monkeypatch):
 
 
 # --------------------------------------------------------------------------- #
+# clause (ii): widened-return designed-exit exemption (Subtask 2b)
+# --------------------------------------------------------------------------- #
+
+def test_designed_exit_kind_return_widened_on_but_plain_return_off():
+    # The gate predicate: a rule-(c) widened return (``return_widened``) is exempt; a
+    # plain ``return`` (frame return type NOT widened) still truncates and is checked.
+    from agents.patcher.chain_promote import _designed_exit_kind
+    assert _designed_exit_kind("return_widened") is True
+    assert _designed_exit_kind("return") is False
+    assert _designed_exit_kind("kernel_output") is True
+    assert _designed_exit_kind("out_param") is True
+    assert _designed_exit_kind("extract") is True
+
+
+def test_gate_exempts_interior_region_all_widened_returns(monkeypatch):
+    # An interior region every one of whose lines is a widened-return landing (clause ii)
+    # is skipped — the value carries dd across, so it is NOT handed to the per-region
+    # detector even though the detector would trip on it.
+    checked = []
+
+    def fake(region_text, reads, writes, two_limb, *, caller_type="double",
+             complex_tokens=frozenset(), caller_complex=None, closure_names=frozenset()):
+        checked.append(region_text)
+        return True                            # detector would trip on anything
+
+    monkeypatch.setattr("agents.patcher.chain_promote.boundary.write_truncation_inert", fake)
+    region_meta = [
+        dict(depth=0, span=("f.h", 1, 1), region_text="OUT", reads=["a"], writes=["res"], promoted=True),
+        dict(depth=1, span=("g.h", 5, 5), region_text="RET", reads=["v"], writes=[], promoted=True),
+    ]
+    designed = [("g.h", 5, "return_widened", frozenset({"v"}), "v")]
+    assert chain_write_truncation(
+        region_meta, two_limb=True, designed_exits=designed) is False
+    assert "RET" not in checked                 # widened-return region exempt, not checked
+
+
+def test_gate_still_checks_plain_return_region(monkeypatch):
+    # §3.3 correctness: a plain ``return`` (frame return type NOT widened — rule (c)
+    # refused / did not reach it) is a real truncation, so the interior region is still
+    # checked and the gate fires (B10 with rule (c) disabled must still reject at :707).
+    monkeypatch.setattr(
+        "agents.patcher.chain_promote.boundary.write_truncation_inert",
+        lambda *a, **k: True)
+    region_meta = [
+        dict(depth=0, span=("f.h", 1, 1), region_text="OUT", reads=["a"], writes=["res"], promoted=True),
+        dict(depth=1, span=("g.h", 5, 5), region_text="RET", reads=["v"], writes=[], promoted=True),
+    ]
+    designed = [("g.h", 5, "return", frozenset({"v"}), "v")]   # NOT widened
+    assert chain_write_truncation(
+        region_meta, two_limb=True, designed_exits=designed) is True
+
+
+# --------------------------------------------------------------------------- #
 # coordinated multi-region promotion (real call graph)
 # --------------------------------------------------------------------------- #
 
@@ -378,3 +431,100 @@ def test_carrier_chain_widens_decl_and_gate_stays_silent(carrier_chain_tree,
     before_block, after_block = txt.split(fanout._BLOCK_BEGIN)
     assert "double carry;" in before_block           # original untouched
     assert f"{DD} carry;" in after_block             # variant decl widened
+
+
+# --------------------------------------------------------------------------- #
+# rule (c) end-to-end — cross-frame return propagation (Subtask 2b)
+#
+# ``callee`` (interior, depth 2) returns a carried value that ``caller`` (depth 1)
+# consumes into two locals and cancels.  Rule (c) widens callee's variant RETURN TYPE
+# and re-seeds caller's receiving locals so they widen — the value carries dd across
+# the return.  The shared ORIGINAL callee is never edited (only the per-integral
+# clone's return type is widened, Item 7 §3).
+# --------------------------------------------------------------------------- #
+
+RULEC_CHAIN_H = """\
+#pragma once
+namespace app {
+
+template<class T>
+T callee(T a, T b) {
+    T p, r;
+    p = a + T(1);
+    r = p - b;
+    return r;
+}
+
+template<class T>
+T caller(T x) {
+    T m, n, diff;
+    m = callee<T>(x, x);
+    n = callee<T>(x, x);
+    diff = m - n;
+    return diff;
+}
+
+template<class T>
+T entry(T x) {
+    T e = caller<T>(x);
+    return e + T(4);
+}
+
+}  // namespace app
+"""
+
+
+@pytest.fixture
+def rulec_chain_tree(tmp_path) -> Path:
+    (tmp_path / "app.h").write_text(RULEC_CHAIN_H)
+    return tmp_path
+
+
+@pytest.fixture
+def rulec_chain_graph(rulec_chain_tree):
+    from agents.patcher.call_graph import build_call_graph
+    fanout.clear_graph_cache()
+    return build_call_graph("entry", rulec_chain_tree,
+                            tu_file=rulec_chain_tree / "app.h")
+
+
+@requires_libclang
+def test_rulec_e2e_widens_callee_return_and_caller_locals(rulec_chain_tree,
+                                                          rulec_chain_graph):
+    g = rulec_chain_graph
+    r_line = _line(g, "callee", "r = p - b;")          # callee's carried write (seed)
+    diff_line = _line(g, "caller", "diff = m - n;")    # caller's cancellation (seed)
+    sig_line = _line(g, "callee", "T callee(T a, T b) {")
+    m_decl = _line(g, "caller", "T m, n, diff;")
+
+    res = chain_promote(manifest=ChainManifest(
+        chain_id="cascade_B10_rc", integral="B10", entry_point="entry",
+        lines=[("app.h", r_line, r_line), ("app.h", diff_line, diff_line)]),
+        graph=g, tree_root=rulec_chain_tree, scalar_type=DD, two_limb=True,
+        shim_include=None)
+
+    # no terminal refusal; the chain promotes and the interior gate stays silent (the
+    # widened callee return is a designed exit — clause ii — not a truncating seam).
+    assert res.chain_carrier_unwidenable is False
+    assert res.chain_carrier_external is False
+    assert res.chain_closure_escapes is False
+    assert res.promotion_applied is True
+    assert res.write_truncation is False
+
+    specs = _manifest_specs(rulec_chain_tree)
+    # callee variant carries the return-type widen (rule c); caller variant carries the
+    # receiving-local decl widen (rule a re-fired on m/n).
+    callee_variant = specs["callee_caller_B10"]
+    assert callee_variant.return_widen is not None
+    assert callee_variant.return_widen.return_line == sig_line
+    assert callee_variant.return_widen.orig_type == "T"
+    assert callee_variant.return_widen.dd_type == DD
+    caller_variant = specs["caller_B10"]
+    caller_decl_lines = {c.decl_line for c in caller_variant.closure_decls}
+    assert m_decl in caller_decl_lines
+
+    # rendered text: the callee CLONE returns dd; the shared ORIGINAL callee is untouched.
+    txt = (rulec_chain_tree / "app.h").read_text()
+    before_block, after_block = txt.split(fanout._BLOCK_BEGIN)
+    assert "T callee(T a, T b)" in before_block         # original signature untouched
+    assert f"{DD} callee_caller_B10(" in after_block    # clone return widened
