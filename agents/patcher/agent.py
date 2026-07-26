@@ -35,13 +35,18 @@ from agents.patcher.dispatch import PatchDeps
 from agents.patcher.intent import IntentError, parse_intent, precheck, resolve_in_tree
 from agents.state import PipelineState
 
-MAX_INTEGRATOR_RETRIES = 6      # P4b — single shared budget: integrator + build.
-# Bumped 3→6 (Subtask 4): Subtask 3 STOP #F showed a 3-attempt budget lost B10 to
-# LLM non-determinism on ql::Lnrat<ddouble> (an R4 #error "requires manual
-# classification" escape) — a symbol B12 recovered on attempt 2 in the SAME shim
-# silo. More attempts can only help a retryable misgen; backoff spacing widens
-# naturally.  (Durable fix — a deterministic forwarding-overload emitter — is
-# tracked separately as Subtask 3 option 2.)
+MAX_INTEGRATOR_RETRIES = 3      # P4b — single shared budget: integrator + build.
+# Reverted 6→3 (post Subtask 5): the 3→6 bump in Subtask 4 chased what we thought
+# was LLM variance on ql::Lnrat<ddouble>'s R4 #error "requires manual classification"
+# escape. Subtask 5 empirically proved the transform the LLM was refusing to emit is
+# STRUCTURALLY UNSOUND — any injected (ddouble,ddouble) forwarding overload of
+# Lnrat/ddilog self-recurses at runtime (C++ picks by arg types, not <...> list),
+# and no vendored quad::ddfun target exists. The R4 #error was arguably the LLM
+# correctly refusing an unsound overload, and design §2.4 already refuses Lnrat as
+# a chain_closure_escapes frontier. Extra attempts against an unsound transform are
+# wasted wall-clock; the real fix is a design revision (extend closure-scoped chains
+# to CLONE leaf callees like Li2omx2 does, not bridge them). R4 escape log kept for
+# diagnostic visibility. See runs/qcdloop/tier_b_stage2_subtask5/TIER_B_STAGE2_SUBTASK_5_2026-07-26.md.
 
 # Wave-2 backoff — space out the (unchanged) MAX_INTEGRATOR_RETRIES attempts on a
 # retryable llm-driven failure so a transient LLM/service hiccup gets a fresh roll
