@@ -124,6 +124,13 @@ DISPATCH: dict[str, DispatchEntry] = {
     "chain_carrier_external": DispatchEntry(
         action="advance_terminal", log_tag="chain_carrier_external",
         counts_budget=False, is_reject=True, dd_untested=True),
+    # Closure-scoped generalisation (CLOSURE_SCOPED_CHAINS_DESIGN §2.4): a destination
+    # escape materially severs a carried value's dd flow to a designed exit (a write to
+    # shared state, or a non-benign extract).  Same terminal shape as the two carrier
+    # terminals — gen-time, source-derived, rung-fixed, a real reject, dd_untested.
+    "chain_closure_escapes": DispatchEntry(
+        action="advance_terminal", log_tag="chain_closure_escapes",
+        counts_budget=False, is_reject=True, dd_untested=True),
 }
 
 

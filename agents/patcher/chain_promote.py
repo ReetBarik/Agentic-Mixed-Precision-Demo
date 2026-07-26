@@ -50,7 +50,7 @@ from pathlib import Path
 from agents.integrator_base import boundary
 from agents.patcher.call_graph import CallGraph
 from agents.patcher.fanout import (
-    CarrierDecl, FanoutError, Promote, VariantSpec,
+    ClosureDecl, FanoutError, Promote, VariantSpec,
     _accumulate_region_specs, _complex_reads, _merge_into_file, _original_text,
     _pick_def, _promote_in_place, _reroute_in_function, _resolve_complex_binding,
     _resolve_root_file,
@@ -109,9 +109,15 @@ class ChainFanoutResult:
     # carrier(s) for the terminal Gen message.
     chain_carrier_unwidenable: bool = False
     chain_carrier_external: bool = False
+    # CLOSURE_SCOPED_CHAINS_DESIGN §2.4 / §3.2 iii — set BEFORE any tree mutation when a
+    # *destination escape* (a rule-(b) write to shared state, or a non-benign extract)
+    # materially severs a carried value's dd flow to a designed exit.  Like the two
+    # carrier terminals above, the chain is abandoned (no variants emitted) rather than
+    # emitted with a truncating seam the interior gate would then reject.
+    chain_closure_escapes: bool = False
     carrier_detail: str = ""
-    # The widenable carrier names actually threaded into the promotion (forensics/tests).
-    carrier_names: list[str] = field(default_factory=list)
+    # The closure names actually threaded into the promotion (forensics/tests).
+    closure_names: list[str] = field(default_factory=list)
 
 
 def chain_promotion_no_op(per_region_promoted: list[bool]) -> bool:
@@ -124,37 +130,67 @@ def chain_promotion_no_op(per_region_promoted: list[bool]) -> bool:
     return not any(per_region_promoted)
 
 
+def _designed_exit_kind(kind: str) -> bool:
+    """Whether a designed-exit ``kind`` currently exempts its landing line from the
+    interior write-truncation gate (CLOSURE_SCOPED_CHAINS_DESIGN.md §3.2).
+
+    * ``kernel_output`` / ``out_param`` (clause i) and ``extract`` (clause iii, already
+      filtered to *benign* extracts by the closure) — a carried value leaving the chain
+      function set at caller precision at its designed landing: exempt.
+    * ``return`` (clause ii) — a widened return is rule (c) / Subtask 2a; until the
+      variant return type is actually widened the value IS truncated at the return, so
+      the return landing is NOT yet exempt.
+    """
+    if kind == "return":
+        return False   # TODO(subtask-2a): widened-return exemption (rule c)
+    return kind in ("kernel_output", "out_param", "extract")
+
+
 def chain_write_truncation(region_meta: list[dict], *, two_limb: bool,
                            caller_type: str = "double",
                            complex_tokens=frozenset(), caller_complex=None,
-                           carrier_names=frozenset()) -> bool:
-    """Chain-scope 2d-B gate: applied to the chain's INTERIOR regions only.
+                           closure_names=frozenset(), designed_exits=()) -> bool:
+    """Chain-scope 2d-B gate, reformulated to the §3.2 designed-exit predicate.
 
     ``region_meta`` is the per-region list built by :func:`chain_promote`, each entry
-    carrying ``depth`` (hops from the entry point — shallower = outer), ``region_text``,
-    ``reads`` and ``writes``.  The chain's OUTERMOST region(s) — those at the minimum
-    depth — are SKIPPED: their store to the caller-precision output is the chain's
-    *designed* exit boundary (round the final dd result down to caller precision after
-    the chain has done its work at dd), not evidence of inertness.  Every INTERIOR
-    region is checked with the per-region
-    :func:`agents.integrator_base.boundary.write_truncation_inert`; the gate fires iff
-    ANY interior region trips it — an intra-chain write truncating back to caller
-    precision injects double roundoff between chain links and genuinely breaks the
-    chain.
+    carrying ``depth`` (hops from the entry point — shallower = outer), ``span``
+    ``(file, ls, le)``, ``region_text``, ``reads`` and ``writes``.  The gate fires iff a
+    carried value is truncated to caller precision at a landing that is NOT a designed
+    exit; a region is skipped when its landing is designed:
 
-    Returns ``False`` for a single-region chain (nothing is interior) — a lone region
-    is its own designed exit boundary; the outermost exemption covers it.
+    * **Non-regression net (outermost depth):** the chain's shallowest region(s) store
+      to the caller-precision output — the chain's designed exit boundary — so they are
+      skipped exactly as before (Reet 2026-07-25, Fix 1).
+    * **Designed-exit region exemption (§3.2):** an interior region every one of whose
+      lines is a designed-exit landing (``designed_exits`` filtered by
+      :func:`_designed_exit_kind`) is the value's intended projection to caller precision
+      and is skipped.  Conservative — a region with any non-designed line is still
+      checked, so a genuine interior severance cannot slip through (§7 falsification).
+
+    Every remaining INTERIOR region is checked with the per-region
+    :func:`agents.integrator_base.boundary.write_truncation_inert` (closure names excluded
+    from its truncating-sink scan, so a widened carrier is not misread as inertness); the
+    gate fires iff ANY such region trips it.
+
+    Returns ``False`` for a single-region chain (nothing is interior) — a lone region is
+    its own designed exit boundary; the outermost exemption covers it.
     """
     if not region_meta:
         return False
+    designed_lines = {(f, l) for (f, l, k, _cv, _d) in designed_exits
+                      if _designed_exit_kind(k)}
     outermost_depth = min(m["depth"] for m in region_meta)
     for m in region_meta:
         if m["depth"] == outermost_depth:
-            continue  # designed exit boundary — the exit-truncation is the design
+            continue  # non-regression net: outermost store is the designed exit boundary
+        f, ls, le = m["span"]
+        if designed_lines and all((f, L) in designed_lines
+                                  for L in range(ls, le + 1)):
+            continue  # designed-exit region — every line is an intended caller-precision landing
         if boundary.write_truncation_inert(
                 m["region_text"], m["reads"], m["writes"], two_limb,
                 caller_type=caller_type, complex_tokens=complex_tokens,
-                caller_complex=caller_complex, carrier_names=carrier_names):
+                caller_complex=caller_complex, closure_names=closure_names):
             return True
     return False
 
@@ -180,11 +216,10 @@ class CarrierClosure:
     This object carries BOTH views of the closure:
 
     **The Fix-A-equivalent compat subset** (rule (a) restricted to reads on another
-    *chain* line — the Blocker-A strict-carrier test).  Every current consumer
-    (:func:`chain_promote`'s two terminals, the ``carrier_names`` threaded into every
-    region's boundary transform, the ``decl_widens`` attached to the variants) reads
-    ONLY these fields, so this subtask leaves their behaviour byte-identical.  Subtask
-    1b threads ``closure_names`` through the gate and retires this compat view.
+    *chain* line — the Blocker-A strict-carrier test).  As of Subtask 1b these fields
+    are RETAINED for the ``unwidenable_reasons`` / ``external_reasons`` terminals and for
+    forensics/tests only; production emission now threads the enlarged ``closure_names``
+    / ``closure_decl_widens`` (below) end-to-end.
 
     * ``widenable`` — ``(file, decl_line, name, dd_type)`` per name whose declaration
       the emission layer widens to the chain's internal dd type (carriers + their
@@ -203,14 +238,26 @@ class CarrierClosure:
 
     * ``closure_widenable`` / ``closure_decl_widens`` — the enlarged analogues of
       ``widenable`` / ``decl_widens`` (rule (a) local carriers + rule (b) locals).
-    * ``designed_exits`` — ``(file, line, kind, detail)`` rule (b) forward-flow that
-      terminates at the chain's designed landing at caller precision: ``kind`` is
-      ``"return"`` | ``"out_param"`` | ``"kernel_output"``.  These do NOT cross-frame
-      propagate — that is rule (c), Subtask 2a/2b.
-    * ``escape_reasons`` — ``(name, reason)`` per ``chain_closure_escapes`` refusal
-      (§2.4): a carried value that must enter a callee NOT in the chain's function set
-      as an argument (``x34* = ql::Real(ga34*)``), or a rule (b) write to a global /
-      class member / shared output container that is not a per-integral kernel output.
+    * ``designed_exits`` — ``(file, line, kind, carried_values, detail)`` rule (b)
+      forward-flow that terminates at the chain's designed landing at caller precision:
+      ``kind`` is ``"return"`` | ``"out_param"`` | ``"kernel_output"``, and
+      ``carried_values`` is the ``frozenset[str]`` of carried values that land there
+      (the gate's benign-extract procedure keys on this, §3.2).  These do NOT
+      cross-frame propagate — that is rule (c), Subtask 2a/2b.
+    * ``source_escapes`` — ``(name, reason)`` per carried value flowing INTO a callee
+      not in the chain function set as an argument (``ga34* -> ql::Real``, §2.4).
+      Purely diagnostic: a source escape does NOT block the escaping name from the
+      closure (``ga34*`` stays widenable), and does NOT on its own fire the terminal.
+    * ``destination_escapes`` — ``(name, reason)`` per rule-(b) WRITE that lands in
+      shared state (global / class member / output container) not a per-integral kernel
+      output, AND per rule-(b) local write whose producing source-line escaped.  A
+      destination escape BLOCKS that name from widening and, when it materially blocks
+      dd flow to a designed exit, fires ``chain_closure_escapes``.
+    * ``blocking_escapes`` — the subset of ``destination_escapes`` that materially
+      severs a carried value not reaching any designed exit (§2.4); non-empty drives the
+      terminal.
+    * ``escape_reasons`` — compat union of ``source_escapes`` + ``destination_escapes``
+      (Subtask 1a shape); retained for existing readers, superseded by the split.
     * ``return_widens`` — rule (c) variant-return-type widenings; empty in this
       subtask (populated in Stage 2 / Subtask 2a/2b).
     """
@@ -219,12 +266,24 @@ class CarrierClosure:
     unwidenable_reasons: list[tuple[str, str]] = field(default_factory=list)
     external_reasons: list[tuple[str, str]] = field(default_factory=list)
     decl_widens: list[tuple[str, int, str, str, str]] = field(default_factory=list)
-    # --- enlarged value closure (rules (a)+(b), §2.3); not consumed until Subtask 1b -
+    # --- enlarged value closure (rules (a)+(b), §2.3) ---------------------------
     closure_widenable: list[tuple[str, int, str, str]] = field(default_factory=list)
     closure_decl_widens: list[tuple[str, int, str, str, str]] = field(default_factory=list)
-    designed_exits: list[tuple[str, int, str, str]] = field(default_factory=list)
-    escape_reasons: list[tuple[str, str]] = field(default_factory=list)
+    designed_exits: list[tuple[str, int, str, frozenset, str]] = field(default_factory=list)
+    source_escapes: list[tuple[str, str]] = field(default_factory=list)
+    destination_escapes: list[tuple[str, str]] = field(default_factory=list)
+    # The subset of ``destination_escapes`` that MATERIALLY blocks dd flow: a carried
+    # value severed here that does not reach ANY designed exit elsewhere (§2.4).  Non-empty
+    # => the ``chain_closure_escapes`` terminal fires; a destination escape whose severed
+    # values all still reach a designed exit is recorded but does NOT block.
+    blocking_escapes: list[tuple[str, str]] = field(default_factory=list)
     return_widens: frozenset = field(default_factory=frozenset)
+
+    @property
+    def escape_reasons(self) -> list[tuple[str, str]]:
+        """Compat union of ``source_escapes`` + ``destination_escapes`` (Subtask 1a
+        shape).  Retained for existing readers; new code should consult the split."""
+        return sorted(set(self.source_escapes) | set(self.destination_escapes))
 
     @property
     def carrier_names(self) -> set[str]:
@@ -687,6 +746,27 @@ def _scan_container_stores(line_text: str) -> list[tuple[str, set[str]]]:
     return stores
 
 
+def _has_binary_addsub(line_text: str) -> bool:
+    """True iff ``line_text`` contains a *binary* ``+`` / ``-`` (a cancellation-prone
+    op), as opposed to only unary sign or ``+=`` compound tokens.
+
+    A ``+``/``-`` is binary when its preceding token is a value terminator — an
+    identifier, a closing ``)`` / ``]``, or a numeric literal.  This is the decidable
+    proxy the benign-extract procedure (§3.2 clause iii) uses for "the producing chain
+    line performs a subtraction/addition": the near-equal difference that produces a
+    carried value (B13's ``ga34m = TOutput(...) - root``) is exactly this shape.
+    """
+    toks = region_scan._tokenize(line_text)
+    for i, t in enumerate(toks):
+        if t.text not in ("+", "-"):
+            continue
+        prev = toks[i - 1].text if i > 0 else ""
+        if prev and (region_scan._is_ident_tok(prev) or prev in (")", "]")
+                     or prev[:1].isdigit()):
+            return True
+    return False
+
+
 def _expand_value_closure(out: CarrierClosure, *, frames, frame_names, func_src,
                           func_line_start, chain_lineset, scalar_type,
                           complex_type, complex_tokens) -> None:
@@ -714,13 +794,14 @@ def _expand_value_closure(out: CarrierClosure, *, frames, frame_names, func_src,
     line_calls: dict = {}
     line_stores: dict = {}
     line_return: dict = {}
+    line_addsub: dict = {}                   # fkey -> {line: has a binary +/-}
     frame_writes: dict = {}                 # fkey -> every name written in the frame
     chain_lines_in_frame: dict = {}
     for fkey in frames:
         ls0 = func_line_start[fkey]
         le0 = fkey[2]
         src_lines = func_src[fkey].split("\n")
-        lr, lw, lc, lst, lret = {}, {}, {}, {}, {}
+        lr, lw, lc, lst, lret, ladd = {}, {}, {}, {}, {}, {}
         fw: set[str] = set()
         for L in range(ls0, le0 + 1):
             idx = L - ls0
@@ -731,12 +812,14 @@ def _expand_value_closure(out: CarrierClosure, *, frames, frame_names, func_src,
             lc[L] = _scan_calls(txt)
             lst[L] = _scan_container_stores(txt)
             lret[L] = any(tk.text == "return" for tk in region_scan._tokenize(txt))
+            ladd[L] = _has_binary_addsub(txt)
             fw |= writes
         line_reads[fkey] = lr
         line_writes[fkey] = lw
         line_calls[fkey] = lc
         line_stores[fkey] = lst
         line_return[fkey] = lret
+        line_addsub[fkey] = ladd
         frame_writes[fkey] = fw
         cl = chain_lineset.get(fkey[0], set())
         chain_lines_in_frame[fkey] = {L for L in cl if ls0 <= L <= le0}
@@ -755,8 +838,36 @@ def _expand_value_closure(out: CarrierClosure, *, frames, frame_names, func_src,
         W[fkey] = seed
 
     widen_groups: dict = {}                 # (file, decl_line) -> _DeclStmt
-    designed: set = set()                    # (file, line, kind, detail)
-    escapes: dict = {}                       # name -> reason
+    # Designed exits accumulate carried values across rounds; keyed by
+    # (file, line, kind, target) -> set of carried values landing there (§3.2 / A.2).
+    designed: dict = {}
+    # A.1 — the escape record split.  ``source_escapes`` (carried value flowing INTO a
+    # non-F callee argument) is purely diagnostic and does NOT block the source from the
+    # closure.  ``dest_escapes`` (rule-(b) writes to shared state, and non-benign
+    # extract destinations, decided after the fixed point) block their name from
+    # widening and drive the ``chain_closure_escapes`` terminal.
+    source_escapes: dict = {}                # name -> reason
+    dest_escapes: dict = {}                  # name -> reason
+    # Per destination escape, the carried values it severs — used after the fixed point
+    # to decide which escapes MATERIALLY block (a severed value reaching no designed exit).
+    dest_escape_carried: dict = {}           # dest name -> set of carried values severed
+    # Deferred extract landings: a rule-(b) local write whose producing line passed a
+    # carried value into a non-F callee (``x34* = ql::Real(ga34*)``).  Its benign
+    # (designed exit) vs severance (destination escape) classification needs the FINAL
+    # carried set + widened siblings, so it is decided after the fixed point (§3.2 iii).
+    extract_cands: dict = {}                 # (file, line, dest) -> {carried, callee}
+
+    def _mark_designed(dfile, dline, kind, target, carried) -> bool:
+        k = (dfile, dline, kind, target)
+        prev = designed.get(k)
+        if prev is None:
+            designed[k] = set(carried)
+            return True
+        if not carried <= prev:
+            prev |= carried
+            return True
+        return False
+
     MAX_ROUNDS = 64
     changed = True
     rounds = 0
@@ -799,71 +910,149 @@ def _expand_value_closure(out: CarrierClosure, *, frames, frame_names, func_src,
                 carried_here = line_reads[fkey].get(L, set()) & wf
                 if not carried_here:
                     continue
-                # escape: a carried value passed into a callee NOT in F (not a cast)
-                escaped_line = False
+                # source escape: a carried value passed into a callee NOT in F (not a
+                # cast).  Diagnostic only — does NOT block the source (A.1).
+                escaped_here: set = set()
+                escape_callee: dict = {}
                 for (qual, last, args) in line_calls[fkey].get(L, []):
                     if last in frame_names or last in type_tokens:
                         continue            # chain-internal edge (rule c) / a type cast
                     esc = args & wf
-                    if esc:
-                        escaped_line = True
-                        for nm in sorted(esc):
-                            if nm not in escapes:
-                                escapes[nm] = (
-                                    f"carried value {nm!r} enters callee {qual!r} (not "
-                                    f"in the chain function set) as an argument at "
-                                    f"{Path(file).name}:{L} — v1 does not widen its "
-                                    f"signature")
-                                changed = True
+                    for nm in sorted(esc):
+                        escaped_here.add(nm)
+                        escape_callee.setdefault(nm, qual)
+                        if nm not in source_escapes:
+                            source_escapes[nm] = (
+                                f"carried value {nm!r} enters callee {qual!r} (not "
+                                f"in the chain function set) as an argument at "
+                                f"{Path(file).name}:{L} — v1 does not widen its "
+                                f"signature")
+                            changed = True
                 # rule (b) -> out-param / local write
                 for w in line_writes[fkey].get(L, set()):
                     if w in params:
-                        d = (file, L, "out_param", w)
-                        if d not in designed:
-                            designed.add(d)
+                        # carried_values = {w} (A.2): the out-param IS the landing.
+                        if _mark_designed(file, L, "out_param", w, {w}):
                             changed = True
                         continue
                     if decls.get(w) is None:
                         # neither local nor param -> global / class member / shared
-                        # output container (§2.4): a chain_closure_escapes refusal.
-                        if w not in escapes:
-                            escapes[w] = (
+                        # output container (§2.4): a destination escape (blocks).
+                        if w not in dest_escapes:
+                            dest_escapes[w] = (
                                 f"rule (b) writes shared global/member {w!r} at "
                                 f"{Path(file).name}:{L} — v1 does not widen shared state")
                             changed = True
+                        dest_escape_carried.setdefault(w, set()).update(carried_here)
                         continue
-                    if escaped_line:
-                        continue            # producer escaped -> destination blocked
+                    if escaped_here:
+                        # producer escaped into a non-F callee: an EXTRACT to caller
+                        # precision.  Defer benign (designed exit) vs severance
+                        # (destination escape) to after the fixed point (§3.2 iii).
+                        key = (file, L, w)
+                        if key not in extract_cands:
+                            callee = escape_callee[sorted(escape_callee)[0]]
+                            extract_cands[key] = dict(
+                                carried=set(carried_here), callee=callee)
+                            changed = True
+                        continue
                     if w not in wf:
                         wf.add(w)
                         changed = True
                 # rule (b) -> indexed kernel-output store (res(i,k)) -> designed exit
                 for (container, rhs) in line_stores[fkey].get(L, []):
-                    if rhs & wf:
-                        d = (file, L, "kernel_output", container)
-                        if d not in designed:
-                            designed.add(d)
-                            changed = True
+                    rc = rhs & wf
+                    if rc and _mark_designed(file, L, "kernel_output", container, rc):
+                        changed = True
                 # rule (b) -> return -> designed exit
                 if line_return[fkey].get(L):
-                    d = (file, L, "return", ",".join(sorted(carried_here)))
-                    if d not in designed:
-                        designed.add(d)
+                    if _mark_designed(file, L, "return", "", set(carried_here)):
                         changed = True
 
     # -- expand each widened decl line to all its declarators (siblings, §2) ------
+    widened_names: set[str] = set()
     for (dfile, dline), stmt in widen_groups.items():
         dd_type = _carrier_dd_type(stmt.core_type, scalar_type,
                                    complex_type, complex_tokens)
         for nm in stmt.names:
             out.closure_widenable.append((dfile, dline, nm, dd_type))
+            widened_names.add(nm)
         out.closure_decl_widens.append(
             (dfile, dline, stmt.core_type, dd_type, stmt.names[0]))
 
+    # -- classify deferred extract landings (§3.2 clause iii, benign-extract) ------
+    # Both checks are decidable from the closure result alone (no source re-scan):
+    #   (1) >=1 carried value landing at the extract has a producing chain line that
+    #       performs a binary +/- (a cancellation) with a carried/widened operand — the
+    #       dd cancellation residual is already resolved before the projection; and
+    #   (2) the extract's destination does not feed another carrier downstream in the
+    #       frame (no line reads it and writes a carried value).
+    # Benign  -> a designed exit (kind "extract"); the projection to caller precision
+    #            loses nothing double could keep (B13's x34*).
+    # Else    -> a destination escape (conservative reject): the residual is not
+    #            provably resolved, so the extract is a genuine severance (§3.3).
+    def _producing_line_cancels(v: str) -> bool:
+        for fk in frames:
+            wfk = W[fk]
+            operands = wfk | widened_names
+            for L in chain_lines_in_frame[fk]:
+                if (v in line_writes[fk].get(L, set())
+                        and line_addsub[fk].get(L)
+                        and (line_reads[fk].get(L, set()) & operands)):
+                    return True
+        return False
+
+    def _dest_feeds_carrier(dest: str, efile: str) -> bool:
+        for fk in frames:
+            if fk[0] != efile:
+                continue
+            wfk = W[fk]
+            for L in range(func_line_start[fk], fk[2] + 1):
+                if (dest in line_reads[fk].get(L, set())
+                        and (line_writes[fk].get(L, set()) & wfk)):
+                    return True
+        return False
+
+    for (efile, eline, dest) in sorted(extract_cands):
+        info = extract_cands[(efile, eline, dest)]
+        carried = info["carried"]
+        check1 = any(_producing_line_cancels(v) for v in carried)
+        check2 = not _dest_feeds_carrier(dest, efile)
+        if check1 and check2:
+            _mark_designed(efile, eline, "extract", dest, carried)
+        else:
+            if dest not in dest_escapes:
+                dest_escapes[dest] = (
+                    f"rule (b) local {dest!r} at {Path(efile).name}:{eline} receives a "
+                    f"carried value truncated by extract {info['callee']!r} to caller "
+                    f"precision whose cancellation residual is not provably resolved — "
+                    f"conservative chain_closure_escapes (design §3.2 clause iii)")
+            dest_escape_carried.setdefault(dest, set()).update(carried)
+
     out.closure_widenable.sort(key=lambda w: (w[0], w[1], w[2]))
     out.closure_decl_widens.sort(key=lambda w: (w[0], w[1]))
-    out.designed_exits = sorted(designed)
-    out.escape_reasons = sorted(escapes.items())
+    # designed_exits 5-tuple (A.2): (file, line, kind, carried_values, detail); sort by
+    # a key that avoids ordering the frozenset (unorderable across sets).
+    exits: list = []
+    for (dfile, dline, kind, target), carried in designed.items():
+        detail = ",".join(sorted(carried)) if kind == "return" else target
+        exits.append((dfile, dline, kind, frozenset(carried), detail))
+    out.designed_exits = sorted(exits, key=lambda d: (d[0], d[1], d[2], d[4]))
+    out.source_escapes = sorted(source_escapes.items())
+    out.destination_escapes = sorted(dest_escapes.items())
+
+    # A destination escape MATERIALLY blocks (§2.4) iff it severs a carried value that
+    # reaches NO designed exit anywhere else — the value's dd flow is truly lost.  A
+    # severance whose values all still land at a designed exit is recorded but does not
+    # fire the terminal (the chain still delivers its dd result to a designed landing).
+    reaches_exit: set = set()
+    for carried in designed.values():
+        reaches_exit |= carried
+    blocking: dict = {}
+    for dest, reason in dest_escapes.items():
+        if dest_escape_carried.get(dest, set()) - reaches_exit:
+            blocking[dest] = reason
+    out.blocking_escapes = sorted(blocking.items())
 
 
 def chain_promote(*, manifest: ChainManifest, graph: CallGraph,
@@ -890,7 +1079,7 @@ def chain_promote(*, manifest: ChainManifest, graph: CallGraph,
     # rejects, so abandon the chain cleanly with the diagnostic status instead.  A
     # widenable carrier's name is threaded into every region's boundary transform so it
     # is neither demoted at a region exit nor read as inert, and its declaration is
-    # widened in the variant (VariantSpec.carrier_decls, applied per file below).
+    # widened in the variant (VariantSpec.closure_decls, applied per file below).
     closure = compute_value_closure(
         manifest=manifest, graph=graph, scalar_type=scalar_type,
         complex_type=complex_type, complex_tokens=complex_tokens, max_paths=max_paths)
@@ -904,7 +1093,15 @@ def chain_promote(*, manifest: ChainManifest, graph: CallGraph,
         return ChainFanoutResult(
             declared_variants=[], files_touched=[],
             chain_carrier_external=True, carrier_detail=names)
-    carrier_names = closure.carrier_names
+    # CLOSURE_SCOPED_CHAINS_DESIGN §2.4 — a destination escape that materially severs a
+    # carried value's dd flow to a designed exit: abandon the chain cleanly rather than
+    # emit a truncating seam the interior gate would then reject.
+    if closure.blocking_escapes:
+        names = ", ".join(f"{n} ({r})" for n, r in closure.blocking_escapes)
+        return ChainFanoutResult(
+            declared_variants=[], files_touched=[],
+            chain_closure_escapes=True, carrier_detail=names)
+    closure_names = closure.closure_names
 
     new_specs: dict[str, dict[str, VariantSpec]] = {}
     root_reroutes: dict[str, str] = {}
@@ -942,13 +1139,13 @@ def chain_promote(*, manifest: ChainManifest, graph: CallGraph,
         complex_names = _complex_reads(func_src, reads, complex_tokens) if complex_type else []
         ckw = dict(complex_type=complex_type, complex_tokens=list(complex_tokens),
                    complex_names=complex_names, caller_complex=caller_complex,
-                   carrier_names=list(carrier_names))
+                   closure_names=list(closure_names))
 
         _, promoted = boundary.promote_region_block(
             region_text, reads, writes, scalar_type, caller_type, two_limb,
             complex_type=complex_type, complex_tokens=frozenset(complex_tokens),
             complex_names=frozenset(complex_names), caller_complex=caller_complex,
-            carrier_names=frozenset(carrier_names))
+            closure_names=frozenset(closure_names))
         per_region_promoted.append(promoted)
 
         if fd.name == graph.root:
@@ -972,31 +1169,32 @@ def chain_promote(*, manifest: ChainManifest, graph: CallGraph,
                 scalar_type=scalar_type, two_limb=two_limb, shim_include=shim_include,
                 caller_type=caller_type, ckw=ckw,
                 new_specs=new_specs, root_reroutes=root_reroutes, name_maps=name_maps,
-                carrier_names=carrier_names)
+                closure_names=closure_names)
             depth = min(len(p) for p in paths) - 1     # hops from root (shallower = outer)
 
-        region_meta.append(dict(depth=depth, region_text=region_text,
+        region_meta.append(dict(depth=depth, span=(fd.file, ls, le),
+                                region_text=region_text,
                                 reads=reads, writes=writes, promoted=promoted))
 
     assert_no_collisions(name_maps)
 
-    # --- Blocker A: attach carrier decl-widens to the variants that own them ----
-    # Each decl-widen record is (file, decl_line, orig_type, dd_type, name).  A carrier
-    # lives in exactly one interior (non-entry) chain function (§4: len(funcs)==1, its
+    # --- closure: attach decl-widens to the variants that own them --------------
+    # Each decl-widen record is (file, decl_line, orig_type, dd_type, name).  A closure
+    # local lives in exactly one interior (non-entry) chain function (its rule-(a)/(b)
     # writes are interior so the function is never the in-place entry point), which the
     # fan-out copied to one variant PER caller path — the widened decl must ride on
     # EVERY such variant (the decl line is inside each copy's original extent).  The
     # emission pass (render_variant) rewrites the leading type token, widening the whole
     # multi-declarator in one edit (§2).
-    for (dfile, dline, orig_type, dd_type, name) in closure.decl_widens:
+    for (dfile, dline, orig_type, dd_type, name) in closure.closure_decl_widens:
         for spec in new_specs.get(dfile, {}).values():
             if spec.orig_start <= dline <= spec.orig_end:
-                cd = CarrierDecl(decl_line=dline, orig_type=orig_type,
+                cd = ClosureDecl(decl_line=dline, orig_type=orig_type,
                                  dd_type=dd_type, name=name)
                 key = (cd.decl_line, cd.orig_type, cd.dd_type)
                 if key not in {(c.decl_line, c.orig_type, c.dd_type)
-                               for c in spec.carrier_decls}:
-                    spec.carrier_decls.append(cd)
+                               for c in spec.closure_decls}:
+                    spec.closure_decls.append(cd)
 
     # --- one merge per touched file (the whole chain's specs for that file) ----
     declared: list[str] = []
@@ -1023,7 +1221,8 @@ def chain_promote(*, manifest: ChainManifest, graph: CallGraph,
         write_truncation = chain_write_truncation(
             region_meta, two_limb=two_limb, caller_type=caller_type,
             complex_tokens=frozenset(complex_tokens), caller_complex=caller_complex,
-            carrier_names=frozenset(carrier_names))
+            closure_names=frozenset(closure_names),
+            designed_exits=closure.designed_exits)
 
     return ChainFanoutResult(
         declared_variants=sorted(set(declared)),
@@ -1031,4 +1230,4 @@ def chain_promote(*, manifest: ChainManifest, graph: CallGraph,
         in_place_regions=in_place_regions, paths_enumerated=paths_enumerated,
         truncated=truncated, promotion_applied=promotion_applied,
         write_truncation=write_truncation, reroutes=dict(root_reroutes),
-        reads_used=reads_used, carrier_names=sorted(carrier_names))
+        reads_used=reads_used, closure_names=sorted(closure_names))

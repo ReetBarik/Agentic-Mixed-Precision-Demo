@@ -306,6 +306,9 @@ def test_cell_status_map_covers_fanout_modes():
     assert sc.cell_status_for("chain_carrier_external") == sc.STATUS_PATCHER_FAILED
     assert sc.cell_status_for("ok", "chain_carrier_unwidenable") == sc.STATUS_PATCHER_FAILED
     assert sc.cell_status_for("ok", "chain_carrier_external") == sc.STATUS_PATCHER_FAILED
+    # closure §2.4: same fold to patcher_failed
+    assert sc.cell_status_for("chain_closure_escapes") == sc.STATUS_PATCHER_FAILED
+    assert sc.cell_status_for("ok", "chain_closure_escapes") == sc.STATUS_PATCHER_FAILED
     # unknown -> conservative patcher_failed
     assert sc.cell_status_for("something_new") == sc.STATUS_PATCHER_FAILED
     assert sc.cell_status_for(None) == sc.STATUS_PATCHER_FAILED

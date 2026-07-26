@@ -46,6 +46,9 @@ _FANOUT_FAILURE_PREFIXES = (
     # (external).  The dd value re-narrows between chain links → the fix is inert.
     "chain_carrier_unwidenable",
     "chain_carrier_external",
+    # Closure-scoped generalisation (§2.4): a destination escape severs a carried value's
+    # dd flow to a designed exit (shared-state write / non-benign extract).
+    "chain_closure_escapes",
 )
 
 

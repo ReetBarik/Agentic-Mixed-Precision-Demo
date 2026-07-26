@@ -383,7 +383,7 @@ def test_integer_local_not_promoted():
 
 
 # --------------------------------------------------------------------------- #
-# Blocker A §8 — carrier_names awareness in the boundary transform.
+# Blocker A §8 — closure_names awareness in the boundary transform.
 # A carrier is a chain variable declared OUTSIDE the region whose decl the emission
 # layer widens to the extended type.  The boundary transform must treat it as
 # already-promoted: excluded from pure_reads/caseB/decl_writes, no r__/w__ alias,
@@ -402,7 +402,7 @@ def test_carrier_write_only_region_is_not_a_no_op():
     region = "    Y = a + b;"
     block, promoted = boundary.promote_region_block(
         region, reads=["a", "b"], writes=["Y"], scalar_type=_DD,
-        caller_type="double", two_limb=True, carrier_names={"Y"},
+        caller_type="double", two_limb=True, closure_names={"Y"},
     )
     assert promoted is True
     body = "\n".join(block)
@@ -425,7 +425,7 @@ def test_carrier_write_excluded_from_caseB_caller_write_gate_unchanged():
     )
     block_carrier, _ = boundary.promote_region_block(
         region, reads=["a"], writes=["acc", "Y"], scalar_type=_DD,
-        caller_type="double", two_limb=True, carrier_names={"Y"},
+        caller_type="double", two_limb=True, closure_names={"Y"},
     )
     body_c = "\n".join(block_carrier)
     # acc treated as Case-B exactly as usual: seeded + renamed + demoted.
@@ -438,7 +438,7 @@ def test_carrier_write_excluded_from_caseB_caller_write_gate_unchanged():
     assert "Y = acc__ext * a__ff;" in body_c
 
     # The acc reasoning is identical when Y is NOT a carrier's difference — compare
-    # against the same region with Y absent from carrier_names but present as a plain
+    # against the same region with Y absent from closure_names but present as a plain
     # Case-B write: acc's three boundary lines are unchanged either way.
     region_acc_only = "    acc = acc + a;"
     block_plain, _ = boundary.promote_region_block(
@@ -459,7 +459,7 @@ def test_carrier_seeds_dataflow_for_dependent_local():
     region = "    double h = Y + Y - one;"
     block, promoted = boundary.promote_region_block(
         region, reads=["one"], writes=[], scalar_type=_DD,
-        caller_type="double", two_limb=True, carrier_names={"Y"},
+        caller_type="double", two_limb=True, closure_names={"Y"},
     )
     assert promoted is True
     body = "\n".join(block)
@@ -480,7 +480,7 @@ def test_write_truncation_inert_ignores_carrier_writes():
     # With Y as a carrier: excluded from caseB; no other landing → not inert.
     assert boundary.write_truncation_inert(
         region, reads=["a", "b"], writes=["Y"], two_limb=True,
-        caller_type="double", carrier_names={"Y"}) is False
+        caller_type="double", closure_names={"Y"}) is False
 
 
 def test_write_truncation_inert_noncarrier_reasoning_unchanged():
@@ -493,7 +493,7 @@ def test_write_truncation_inert_noncarrier_reasoning_unchanged():
     )
     assert boundary.write_truncation_inert(
         region, reads=["a", "b"], writes=["acc", "Y"], two_limb=True,
-        caller_type="double", carrier_names={"Y"}) is True
+        caller_type="double", closure_names={"Y"}) is True
 
 
 def test_scan_bare_decls_multi_declarator():
@@ -530,8 +530,8 @@ def test_scan_bare_decls_forms_and_rejections():
     assert "obj" not in decls and "member" not in decls
 
 
-def test_carrier_names_default_empty_no_regression():
-    # With carrier_names defaulting to empty, the transform is byte-identical to the
+def test_closure_names_default_empty_no_regression():
+    # With closure_names defaulting to empty, the transform is byte-identical to the
     # pre-carrier behavior (the whole existing suite already covers this; this pins
     # the default explicitly).
     region = "    double r = a + b;"
@@ -539,5 +539,5 @@ def test_carrier_names_default_empty_no_regression():
         region, reads=["a", "b"], writes=[], scalar_type=_DD, caller_type="double")
     b2, p2 = boundary.promote_region_block(
         region, reads=["a", "b"], writes=[], scalar_type=_DD, caller_type="double",
-        carrier_names=frozenset())
+        closure_names=frozenset())
     assert b1 == b2 and p1 == p2

@@ -13,6 +13,7 @@ def test_all_statuses_present():
         "empty_candidate", "patch_inapplicable", "promotion_no_op",
         "write_truncation", "awaiting_algorithmic_rewrite",
         "chain_carrier_unwidenable", "chain_carrier_external",
+        "chain_closure_escapes",
     }
 
 
@@ -105,7 +106,10 @@ def test_chain_carrier_statuses_are_terminal_and_free():
     # value re-narrows between links so the fix is inert — deterministic + rung-fixed, so
     # like write_truncation both are terminal for the intent, git-only (free vs budget), a
     # real reject, and dd_untested (skipped, not measured, at the dd rung).
-    for status in ("chain_carrier_unwidenable", "chain_carrier_external"):
+    # `chain_closure_escapes` (closure §2.4) is the same terminal shape — a destination
+    # escape severs a carried value's dd flow to a designed exit.
+    for status in ("chain_carrier_unwidenable", "chain_carrier_external",
+                   "chain_closure_escapes"):
         e = dispatch(status)
         assert e.action == "advance_terminal"
         assert e.log_tag == status

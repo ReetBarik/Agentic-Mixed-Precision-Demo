@@ -1,0 +1,44 @@
+=== Tier-B Stage-1 config ===
+  integrals   : ['B13', 'B14']
+  report      : runs/qcdloop/report_5k.json
+  out         : /home/rbarik/Agentic-Mixed-Precision-Demo/runs/qcdloop/tier_b_stage1_subtask1b
+  starting_sha: f7fb2c139e5dbac012ebe2947447752484240ad0
+  gate        : chain lift >= 0.5 digits vs accumulated
+=============================
+
+=== Tier-B Stage-1: B13 ===
+  chains total/computed : 9962 / 9962
+  dominant chain        : cascade_B13_79fc5b8f_f080f240
+  tightness             : 7.080e-02
+  measured max_rel_err  : 1.849e+02
+  predicted dd lift     : +17.10 digits
+  chain_lines (8):
+      B2m.h:300
+      B2m.h:301
+      B2m.h:305
+      B2m.h:306
+      B2m.h:355
+      B2m.h:533
+      kokkosUtils.h:212
+      kokkosUtils.h:702
+  cascade_B13_79fc5b8f_f080f240 -> apply_failed min None->None (patcher write_truncation (truncation): chain write_truncation: an INTERIOR region of chain cascade_B13_79fc5b8f_f080f240 truncates every landing back to double (no wider persistent sink) — an intra-chain write injects double roundoff betwe) [54.2s]
+  -> whole-app baseline None final None (lift None); kernel[B13] baseline None final None (lift None) outcome apply_failed
+
+=== Tier-B Stage-1: B14 ===
+  chains total/computed : 260 / 32
+  dominant chain        : cascade_B14_3429b1d4_01bf2ff3
+  tightness             : 1.986e-01
+  measured max_rel_err  : 3.269e+05
+  predicted dd lift     : +16.66 digits
+  chain_lines (3):
+      B2m.h:401
+      B2m.h:578
+      kokkosUtils.h:1208
+  cascade_B14_3429b1d4_01bf2ff3 -> rejected [chain_no_lift] min 13.1855->13.1855 ([kernel=B14] chain chain_no_lift: p100 13.1855 < accumulated 13.1855 + lift 0.5 = 13.6855) [59.9s]
+  -> whole-app baseline 3.6906 final 3.6906 (lift 0.0); kernel[B14] baseline 13.1855 final 13.1855 (lift 0.0) outcome rejected
+
+=== Tier-B Stage-1 summary (kernel-scoped) ===
+  B13   apply_failed                 kernel_lift=None (pred +17.10454907468422) app_lift=None
+  B14   rejected                     kernel_lift=0.0 (pred +16.656606583267937) app_lift=0.0
+  wrote /home/rbarik/Agentic-Mixed-Precision-Demo/runs/qcdloop/tier_b_stage1_subtask1b/TIER_B_STAGE1_2026-07-26.md
+  STOP after Stage-1 — Reet reviews before Group B / all 21.

@@ -220,15 +220,15 @@ class Promote:
     complex_names: list[str] = field(default_factory=list)
     caller_complex: str | None = None
     # Blocker A (design §8): chain-carrier names whose declaration the emission layer
-    # widens to the extended type (CarrierDecl below).  At THIS region's boundary a
+    # widens to the extended type (ClosureDecl below).  At THIS region's boundary a
     # carrier is neither a read-only input nor a truncating sink, so promote_region_block
     # must not seed / alias / demote it — the widened decl carries the extended value
     # end-to-end.  Defaults empty so a pre-Blocker-A manifest re-renders identically.
-    carrier_names: list[str] = field(default_factory=list)
+    closure_names: list[str] = field(default_factory=list)
 
 
 @dataclass
-class CarrierDecl:
+class ClosureDecl:
     """One carrier declaration widened in a variant (Blocker A, design §7).
 
     A **carrier** is a variable declared OUTSIDE a chain's line set but written by
@@ -259,7 +259,7 @@ class VariantSpec:
 
     A variant is rebuilt from scratch on every merge by copying the original
     function's source (``orig_start..orig_end`` in ``file``), applying every
-    :class:`Promote` (region → extended scalar), every :class:`CarrierDecl`
+    :class:`Promote` (region → extended scalar), every :class:`ClosureDecl`
     (carrier decl line → widened type token) and every reroute (call to a child
     function → the child's variant name), and renaming the definition (and any
     self-calls) ``orig_name -> variant_name``.  Being a pure function of this spec
@@ -277,7 +277,7 @@ class VariantSpec:
     # Blocker A (design §7): carrier declarations widened to the chain's dd type at
     # emission time.  Defaults empty so a pre-Blocker-A manifest re-renders
     # identically; populated by the chain coordinator in Subtask 5.
-    carrier_decls: list[CarrierDecl] = field(default_factory=list)
+    closure_decls: list[ClosureDecl] = field(default_factory=list)
 
     def to_json(self) -> dict:
         d = asdict(self)
@@ -286,13 +286,13 @@ class VariantSpec:
     @classmethod
     def from_json(cls, d: dict) -> "VariantSpec":
         promotes = [Promote(**p) for p in d.get("promotes", [])]
-        carrier_decls = [CarrierDecl(**c) for c in d.get("carrier_decls", [])]
+        closure_decls = [ClosureDecl(**c) for c in d.get("closure_decls", [])]
         return cls(
             variant_name=d["variant_name"], orig_name=d["orig_name"],
             file=d["file"], orig_start=d["orig_start"], orig_end=d["orig_end"],
             promotes=promotes, reroutes=dict(d.get("reroutes", {})),
             shim_includes=list(d.get("shim_includes", [])),
-            carrier_decls=carrier_decls)
+            closure_decls=closure_decls)
 
     def merge(self, other: "VariantSpec") -> None:
         """Fold ``other`` (same variant) into this spec: union reroutes / shim
@@ -306,10 +306,10 @@ class VariantSpec:
         for p in other.promotes:
             if (p.region_start, p.region_end) not in have:
                 self.promotes.append(p)
-        have_cd = {(c.decl_line, c.orig_type, c.dd_type) for c in self.carrier_decls}
-        for c in other.carrier_decls:
+        have_cd = {(c.decl_line, c.orig_type, c.dd_type) for c in self.closure_decls}
+        for c in other.closure_decls:
             if (c.decl_line, c.orig_type, c.dd_type) not in have_cd:
-                self.carrier_decls.append(c)
+                self.closure_decls.append(c)
                 have_cd.add((c.decl_line, c.orig_type, c.dd_type))
 
 
@@ -476,7 +476,7 @@ def _accumulate_region_specs(
     caller_type: str, ckw: dict,
     new_specs: dict[str, dict[str, "VariantSpec"]],
     root_reroutes: dict[str, str], name_maps: list[dict[str, str]],
-    carrier_names=(),
+    closure_names=(),
 ) -> None:
     """Accumulate the variant specs + root reroutes for ONE region's caller paths.
 
@@ -522,7 +522,7 @@ def _accumulate_region_specs(
                     scalar_type=scalar_type, two_limb=two_limb, caller_type=caller_type,
                     complex_type=complex_type, complex_tokens=list(complex_tokens),
                     complex_names=list(complex_names), caller_complex=caller_complex,
-                    carrier_names=list(carrier_names)))
+                    closure_names=list(closure_names)))
                 if shim_include and shim_include not in spec.shim_includes:
                     spec.shim_includes.append(shim_include)
 
@@ -551,7 +551,7 @@ def render_variant(spec: VariantSpec) -> str:
     self-calls ``orig_name -> variant_name``.
 
     Region promotions (:class:`Promote`, a multi-line block replacement) and
-    carrier decl-widens (:class:`CarrierDecl`, a single-line type-token rewrite,
+    carrier decl-widens (:class:`ClosureDecl`, a single-line type-token rewrite,
     Blocker A §7) share ONE descending-line-order pass.  Sorting both by their
     starting line, highest first, guarantees each edit's file coordinates are still
     valid when it runs regardless of the length delta an earlier (lower-line) edit
@@ -560,11 +560,11 @@ def render_variant(spec: VariantSpec) -> str:
     """
     lines = _original_text(spec.file, spec.orig_start, spec.orig_end)
     # Descending by start line; both edit kinds carry a file-absolute start.  Promote
-    # is tagged 0 and CarrierDecl 1 so that, in the degenerate case of a decl line
+    # is tagged 0 and ClosureDecl 1 so that, in the degenerate case of a decl line
     # equal to a region start (should not occur — a widened carrier is by definition
     # outside the chain line set), the region replacement runs first deterministically.
     edits = ([(p.region_start, 0, p) for p in spec.promotes]
-             + [(c.decl_line, 1, c) for c in spec.carrier_decls])
+             + [(c.decl_line, 1, c) for c in spec.closure_decls])
     for start, kind, e in sorted(edits, key=lambda t: (t[0], t[1]), reverse=True):
         if kind == 0:
             p = e
@@ -581,7 +581,7 @@ def render_variant(spec: VariantSpec) -> str:
                 complex_tokens=frozenset(p.complex_tokens),
                 complex_names=frozenset(p.complex_names),
                 caller_complex=p.caller_complex,
-                carrier_names=frozenset(p.carrier_names))
+                closure_names=frozenset(p.closure_names))
             lines = lines[:local_s] + block + lines[local_e + 1:]
         else:
             c = e
@@ -746,7 +746,7 @@ def _promote_in_place(tree: Path, fd: FuncDef, line_start: int, line_end: int,
         complex_tokens=frozenset(ckw.get("complex_tokens", [])),
         complex_names=frozenset(ckw.get("complex_names", [])),
         caller_complex=ckw.get("caller_complex"),
-        carrier_names=frozenset(ckw.get("carrier_names", [])))
+        closure_names=frozenset(ckw.get("closure_names", [])))
     if promoted:
         lines = lines[:line_start - 1] + block + lines[line_end:]
     if shim_include:

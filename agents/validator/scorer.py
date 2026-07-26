@@ -103,6 +103,9 @@ _PATCHER_STATUS_TO_CELL_STATUS = {
     # manifest failure_modes histogram.
     "chain_carrier_unwidenable": STATUS_PATCHER_FAILED,
     "chain_carrier_external": STATUS_PATCHER_FAILED,
+    # Closure-scoped generalisation (§2.4): a destination escape severs a carried value's
+    # dd flow to a designed exit — same codegen/precision gap class → patcher_failed.
+    "chain_closure_escapes": STATUS_PATCHER_FAILED,
     "timeout": STATUS_PATCHER_FAILED,
     "build_failed": STATUS_BUILD_FAILED,
     "call_graph_build_failed": STATUS_BUILD_FAILED,

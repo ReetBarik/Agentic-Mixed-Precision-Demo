@@ -547,6 +547,12 @@ def _gen_chain(intent: RemediationIntent, deps: PatchDeps, attempt: int) -> Gen:
                    f"chain_carrier_external: chain {manifest.chain_id} has a strict "
                    f"carrier whose declaration is global / a class member / an output "
                    f"container (v1 refuses to widen shared state): {cr.carrier_detail}")
+    if cr.chain_closure_escapes:
+        return Gen(False, R.CHAIN_CLOSURE_ESCAPES, R.ERR_CLOSURE_ESCAPES,
+                   f"chain_closure_escapes: chain {manifest.chain_id} has a destination "
+                   f"escape that materially severs a carried value's dd flow to a designed "
+                   f"exit (a write to shared state, or a non-benign extract to caller "
+                   f"precision): {cr.carrier_detail}")
 
     # 3b. Chain-scope 2c / 2d-B gates (envelope, not individual links).
     if not cr.promotion_applied:

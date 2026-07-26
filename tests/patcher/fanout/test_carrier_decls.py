@@ -7,7 +7,7 @@ chain link and read by another; leaving its decl at caller precision truncates t
 widened value at the interior write (the 2d-B ``chain_write_truncation`` bug).
 
 These tests are self-contained: a synthetic header is written to a tmp file and a
-:class:`VariantSpec` with synthetic ``carrier_decls`` is rendered directly, so no
+:class:`VariantSpec` with synthetic ``closure_decls`` is rendered directly, so no
 call graph / libclang is required.  They cover the single-declarator rewrite, the
 multi-declarator sibling inheritance (§2 conservative policy), the shared
 descending-line-order pass with promotes, and json/merge round-trip of the field.
@@ -18,7 +18,7 @@ from __future__ import annotations
 from pathlib import Path
 
 from agents.patcher.fanout import (
-    CarrierDecl, Promote, VariantSpec, render_variant,
+    ClosureDecl, Promote, VariantSpec, render_variant,
 )
 
 DD = "quad::ddfun::ddouble"
@@ -71,7 +71,7 @@ TMass f(TMass T) {
     p = _write(tmp_path, text)
     spec = VariantSpec(variant_name="f_B10", orig_name="f", file=str(p),
                        orig_start=2, orig_end=7,
-                       carrier_decls=[CarrierDecl(decl_line=4, orig_type="TMass",
+                       closure_decls=[ClosureDecl(decl_line=4, orig_type="TMass",
                                                   dd_type=DD, name="Y")])
     out = render_variant(spec)
     assert f"{DD} Y;" in out
@@ -88,8 +88,8 @@ def test_multi_declarator_leading_type_widens_all_siblings(tmp_path):
     # Only Y and A are strict carriers, but widening the leading type token of
     # ``TMass Y, S, A;`` widens S too (conservative, safe — a wider sibling never
     # truncates).
-    spec = _spec(p, carrier_decls=[
-        CarrierDecl(decl_line=4, orig_type="TMass", dd_type=DD, name="Y"),
+    spec = _spec(p, closure_decls=[
+        ClosureDecl(decl_line=4, orig_type="TMass", dd_type=DD, name="Y"),
     ])
     out = render_variant(spec)
     assert f"{DD} Y, S, A;" in out
@@ -98,11 +98,11 @@ def test_multi_declarator_leading_type_widens_all_siblings(tmp_path):
 
 
 def test_no_matching_type_leaves_line_verbatim(tmp_path):
-    # A CarrierDecl whose orig_type does not match the decl line is a no-op (defensive
+    # A ClosureDecl whose orig_type does not match the decl line is a no-op (defensive
     # idempotence: a re-render of an already-widened decl, or a stale coordinate).
     p = _write(tmp_path)
-    spec = _spec(p, carrier_decls=[
-        CarrierDecl(decl_line=4, orig_type="TOutput", dd_type=DD, name="Y"),
+    spec = _spec(p, closure_decls=[
+        ClosureDecl(decl_line=4, orig_type="TOutput", dd_type=DD, name="Y"),
     ])
     out = render_variant(spec)
     assert "TMass Y, S, A;" in out
@@ -120,7 +120,7 @@ def test_decl_widen_and_promote_apply_in_correct_order(tmp_path):
     # never shifts.  Assert both edits land.
     p = _write(tmp_path)
     spec = _spec(p,
-                 carrier_decls=[CarrierDecl(decl_line=4, orig_type="TMass",
+                 closure_decls=[ClosureDecl(decl_line=4, orig_type="TMass",
                                             dd_type=DD, name="Y")],
                  promotes=[Promote(region_start=6, region_end=8,
                                    reads=["T", "A"], writes=["Y", "A", "S"],
@@ -135,7 +135,7 @@ def test_decl_widen_and_promote_apply_in_correct_order(tmp_path):
     assert out.count(f"{DD} Y, S, A;") == 1
 
 
-def test_multiple_carrier_decls_all_widen(tmp_path):
+def test_multiple_closure_decls_all_widen(tmp_path):
     # Two carrier decls on different lines both widen; descending order preserves both.
     text = """\
 #pragma once
@@ -151,9 +151,9 @@ TMass f(TMass T) {
 """
     p = _write(tmp_path, text)
     spec = VariantSpec(variant_name="f_B10", orig_name="f", file=str(p),
-                       orig_start=2, orig_end=10, carrier_decls=[
-        CarrierDecl(decl_line=4, orig_type="TMass", dd_type=DD, name="a"),
-        CarrierDecl(decl_line=5, orig_type="TMass", dd_type=DD, name="b"),
+                       orig_start=2, orig_end=10, closure_decls=[
+        ClosureDecl(decl_line=4, orig_type="TMass", dd_type=DD, name="a"),
+        ClosureDecl(decl_line=5, orig_type="TMass", dd_type=DD, name="b"),
     ])
     out = render_variant(spec)
     assert f"{DD} a;" in out
@@ -164,40 +164,40 @@ TMass f(TMass T) {
 # json / merge round-trip
 # --------------------------------------------------------------------------- #
 
-def test_json_round_trip_preserves_carrier_decls(tmp_path):
+def test_json_round_trip_preserves_closure_decls(tmp_path):
     p = _write(tmp_path)
-    spec = _spec(p, carrier_decls=[
-        CarrierDecl(decl_line=4, orig_type="TMass", dd_type=DD, name="Y"),
-        CarrierDecl(decl_line=9, orig_type="TMass", dd_type=DD, name="H"),
+    spec = _spec(p, closure_decls=[
+        ClosureDecl(decl_line=4, orig_type="TMass", dd_type=DD, name="Y"),
+        ClosureDecl(decl_line=9, orig_type="TMass", dd_type=DD, name="H"),
     ])
     d = spec.to_json()
     back = VariantSpec.from_json(d)
-    assert back.carrier_decls == spec.carrier_decls
-    assert all(isinstance(c, CarrierDecl) for c in back.carrier_decls)
+    assert back.closure_decls == spec.closure_decls
+    assert all(isinstance(c, ClosureDecl) for c in back.closure_decls)
 
 
 def test_from_json_defaults_empty_when_field_absent(tmp_path):
-    # A pre-Blocker-A manifest has no carrier_decls key; from_json must default it.
+    # A pre-Blocker-A manifest has no closure_decls key; from_json must default it.
     d = {"variant_name": "v", "orig_name": "f", "file": "x.h",
          "orig_start": 1, "orig_end": 3}
     back = VariantSpec.from_json(d)
-    assert back.carrier_decls == []
+    assert back.closure_decls == []
 
 
-def test_merge_unions_carrier_decls_dedup(tmp_path):
+def test_merge_unions_closure_decls_dedup(tmp_path):
     p = _write(tmp_path)
-    a = _spec(p, carrier_decls=[
-        CarrierDecl(decl_line=4, orig_type="TMass", dd_type=DD, name="Y")])
-    b = _spec(p, carrier_decls=[
-        CarrierDecl(decl_line=4, orig_type="TMass", dd_type=DD, name="Y"),  # dup
-        CarrierDecl(decl_line=9, orig_type="TMass", dd_type=DD, name="H")])
+    a = _spec(p, closure_decls=[
+        ClosureDecl(decl_line=4, orig_type="TMass", dd_type=DD, name="Y")])
+    b = _spec(p, closure_decls=[
+        ClosureDecl(decl_line=4, orig_type="TMass", dd_type=DD, name="Y"),  # dup
+        ClosureDecl(decl_line=9, orig_type="TMass", dd_type=DD, name="H")])
     a.merge(b)
-    lines = sorted(c.decl_line for c in a.carrier_decls)
+    lines = sorted(c.decl_line for c in a.closure_decls)
     assert lines == [4, 9]  # dup collapsed, new one added
 
 
-def test_carrier_decls_default_empty_no_regression(tmp_path):
-    # A spec with no carrier_decls renders exactly as before (the field is inert).
+def test_closure_decls_default_empty_no_regression(tmp_path):
+    # A spec with no closure_decls renders exactly as before (the field is inert).
     p = _write(tmp_path)
     spec = _spec(p)
     out = render_variant(spec)

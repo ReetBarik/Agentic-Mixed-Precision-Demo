@@ -87,13 +87,21 @@ CHAIN_CARRIER_UNWIDENABLE = "chain_carrier_unwidenable"
 #   CHAIN_CARRIER_EXTERNAL — the strict carrier's decl is GLOBAL / a class member / an
 #   output container (e.g. ``res(i,0)``); v1 refuses to widen shared/persistent state.
 CHAIN_CARRIER_EXTERNAL = "chain_carrier_external"
+#   CHAIN_CLOSURE_ESCAPES — closure-scoped generalisation (CLOSURE_SCOPED_CHAINS_DESIGN
+#   §2.4, §3.2 iii): a carried value is severed at a *destination escape* that materially
+#   blocks its dd flow to a designed exit — it flows into a callee ∉ the chain function
+#   set (a shared helper signature v1 will not widen), or is written to shared state, and
+#   does not otherwise reach a return / out-param / kernel-output landing.  A purely
+#   source-side escape (a carried value merely read by such a callee while still reaching
+#   a designed exit) is NOT a terminal.  Detected at gen time, upstream of any build.
+CHAIN_CLOSURE_ESCAPES = "chain_closure_escapes"
 
 STATUSES = frozenset({
     OK, LLM_GEN_FAILED, PATCH_APPLY_FAILED, COMMIT_FAILED,
     BUILD_FAILED, RUNTIME_CRASHED, RUNTIME_NAN, TIMEOUT, EMPTY_CANDIDATE,
     PATCH_INAPPLICABLE, PROMOTION_NO_OP, WRITE_TRUNCATION,
     AWAITING_ALGORITHMIC_REWRITE,
-    CHAIN_CARRIER_UNWIDENABLE, CHAIN_CARRIER_EXTERNAL,
+    CHAIN_CARRIER_UNWIDENABLE, CHAIN_CARRIER_EXTERNAL, CHAIN_CLOSURE_ESCAPES,
 })
 
 # error.kind vocabulary (design §P2).
@@ -110,6 +118,7 @@ ERR_TRUNCATION = "truncation"   # Phase 2d-B write-boundary truncation
 ERR_AWAITING_REWRITE = "awaiting_rewrite"   # Phase 2e signal_class filter
 ERR_CARRIER_UNWIDENABLE = "carrier_unwidenable"   # Blocker A: carrier decl is a param
 ERR_CARRIER_EXTERNAL = "carrier_external"          # Blocker A: carrier decl is shared state
+ERR_CLOSURE_ESCAPES = "closure_escapes"            # closure §2.4: carried value severed at escape
 
 
 def _artifacts(shim_paths=None, boundary_patch_path=None,

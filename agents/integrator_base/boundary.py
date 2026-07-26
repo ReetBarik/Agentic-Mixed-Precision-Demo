@@ -375,7 +375,7 @@ class _Promotion:
 
 
 def _compute_promotion(region_text: str, reads: list[str], writes: list[str],
-                       carrier_names: frozenset[str] = frozenset()) -> _Promotion:
+                       closure_names: frozenset[str] = frozenset()) -> _Promotion:
     """Partition a region's identifiers into the extended-scalar promotion sets.
 
     Reads promote unconditionally (Rule R1); a region-local decl promotes iff its
@@ -384,7 +384,7 @@ def _compute_promotion(region_text: str, reads: list[str], writes: list[str],
     :func:`synthesize_boundary_patch` so the lint can reuse the exact same
     dataflow the patch will apply.
 
-    ``carrier_names`` (design §8) are chain-carrier variables whose *declaration*
+    ``closure_names`` (design §8) are chain-carrier variables whose *declaration*
     is widened to the extended type elsewhere (the emission layer, §7).  A carrier
     is neither a read-only input nor a truncating sink at this region's boundary, so
     it is **excluded** from ``pure_reads`` / ``caseB`` / ``decl_writes`` and **seeded
@@ -404,30 +404,30 @@ def _compute_promotion(region_text: str, reads: list[str], writes: list[str],
     # are excluded (§8): their decl is widened elsewhere, so they are neither seeded
     # nor demoted at this boundary.
     caseB = [w for w in _dedupe(writes)
-             if w in ident_texts and w not in decl_names and w not in carrier_names]
+             if w in ident_texts and w not in decl_names and w not in closure_names]
     # Reads: promoted unconditionally on entry (a name that is also a region-local
     # decl is fundamentally a write — exclude it).  Carriers are excluded (§8).
     pure_reads = [r for r in _dedupe(reads)
                   if r in ident_texts and r not in decl_names and r not in caseB
-                  and r not in carrier_names]
+                  and r not in closure_names]
 
     # Carriers actually referenced-as-written in this region (a landing for §8's
     # no-op guard).  A carrier's decl is outside the region, so it appears here as a
     # re-assignment reported in ``writes``.
     carrier_writes = frozenset(w for w in _dedupe(writes)
-                               if w in carrier_names and w in ident_texts)
+                               if w in closure_names and w in ident_texts)
 
     # Seed carriers into the promoted set so a region-local decl whose RHS consumes a
     # carrier chains to promotion (Rule R2), even though the carrier itself is never
     # renamed/aliased.
-    promoted: set[str] = set(pure_reads) | set(caseB) | set(carrier_names)
+    promoted: set[str] = set(pure_reads) | set(caseB) | set(closure_names)
     decl_writes: list[_Decl] = []
     changed = True
     while changed:
         changed = False
         for d in all_decls:
             if d.name in promoted or d.type_text in _INT_TYPES \
-                    or d.name in carrier_names:
+                    or d.name in closure_names:
                 continue
             if d.rhs_idents & promoted:
                 promoted.add(d.name)
@@ -569,7 +569,7 @@ def promote_region_block(
     complex_tokens=frozenset(),
     complex_names=frozenset(),
     caller_complex: str | None = None,
-    carrier_names=frozenset(),
+    closure_names=frozenset(),
 ) -> tuple[list[str], bool]:
     """Promote a region's source to ``scalar_type``; return ``(block_lines, promoted)``.
 
@@ -602,8 +602,8 @@ def promote_region_block(
     promoted block into a copied function variant) build on it, so the two realizations
     of "promote this region" stay bit-identical.
     """
-    carrier_names = frozenset(carrier_names)
-    prom = _compute_promotion(region_text, reads, writes, carrier_names)
+    closure_names = frozenset(closure_names)
+    prom = _compute_promotion(region_text, reads, writes, closure_names)
     toks = prom.toks
     pure_reads = prom.pure_reads
     caseB = prom.caseB
@@ -725,7 +725,7 @@ def write_truncation_inert(
     caller_type: str = "double",
     complex_tokens=frozenset(),
     caller_complex: str | None = None,
-    carrier_names=frozenset(),
+    closure_names=frozenset(),
 ) -> bool:
     """Phase 2d-B — provably-inert *write-boundary truncation* detector.
 
@@ -762,7 +762,7 @@ def write_truncation_inert(
     case rather than the *nothing-promotes* case; the two are mutually exclusive by
     construction (this needs a landing, that fires only when none exists).
 
-    ``carrier_names`` (design §8) are chain carriers whose decl is widened to the
+    ``closure_names`` (design §8) are chain carriers whose decl is widened to the
     extended type by the emission layer.  They are excluded from the ``caseB`` /
     ``decl_writes`` sets this gate inspects (the exclusion happens inside
     :func:`_compute_promotion`), so a region whose only "truncating" writes are
@@ -773,8 +773,8 @@ def write_truncation_inert(
     if not two_limb:
         return False
 
-    carrier_names = frozenset(carrier_names)
-    prom = _compute_promotion(region_text, reads, writes, carrier_names)
+    closure_names = frozenset(closure_names)
+    prom = _compute_promotion(region_text, reads, writes, closure_names)
     if (not prom.pure_reads and not prom.caseB and not prom.decl_writes
             and not prom.carrier_writes):
         return False  # empty payload → promotion_no_op territory, not truncation

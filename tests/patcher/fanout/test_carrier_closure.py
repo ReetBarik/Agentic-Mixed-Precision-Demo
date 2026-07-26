@@ -376,25 +376,37 @@ def test_closure_reaches_fixed_point_forward_flow(closure_graph):
     assert {(ln, n) for _f, ln, n, _t in cc.closure_widenable} == {
         (CL_DECL_C, "c"), (CL_DECL_E, "e")}
     assert cc.carrier_names == set()
-    # designed exits: the out-param write (:19) and the return (:21)
-    exits = {(ln, kind, dst) for _f, ln, kind, dst in cc.designed_exits}
+    # designed exits (A.2 5-tuple: file, line, kind, carried_values, detail): the
+    # out-param write (:19, carries {outp}) and the return (:21, carries {c}).
+    exits = {(ln, kind, detail) for _f, ln, kind, _cv, detail in cc.designed_exits}
     assert exits == {(CL_OUT_PARAM, "out_param", "outp"), (CL_RETURN, "return", "c")}
+    carried = {(ln, kind): cv for _f, ln, kind, cv, _d in cc.designed_exits}
+    assert carried[(CL_OUT_PARAM, "out_param")] == frozenset({"outp"})
+    assert carried[(CL_RETURN, "return")] == frozenset({"c"})
 
 
 @requires_libclang
 def test_closure_refusal_precedence_blocks_destination_not_source(closure_graph):
-    # `d = ext(c)` (:17) reads carried `c` and passes it into ext ∉ F → the destination
-    # `d` is refused (chain_closure_escapes) and never joins, while the rule-(a) source
-    # `c` stays widened (refusal wins for the destination, not the source).  `sink = c`
-    # (:20) is a shared-global write → a second escape.  Neither `d` nor `sink` widens.
+    # `d = ext(c)` (:17) reads carried `c` and passes it into ext ∉ F.  `c` is a SOURCE
+    # escape (diagnostic only — it still widens by rule (a)).  `d`'s producing value `c`
+    # comes from `c = a + T(1)` (an input, not a cancellation of carried operands) → `d`
+    # is a NON-benign extract → a DESTINATION escape that never joins.  `sink = c` (:20)
+    # is a shared-global write → a second destination escape.  Neither `d` nor `sink`
+    # widens; `c` (the rule-(a) source) does.
     cc = _closure_h(closure_graph, [CL_C_W])
     assert "d" not in cc.closure_names
     assert "sink" not in cc.closure_names
-    esc = {n for n, _r in cc.escape_reasons}
-    assert esc == {"c", "sink"}
-    reasons = {n: r for n, r in cc.escape_reasons}
-    assert "ext" in reasons["c"]                 # callee-∉-F escape
-    assert "global" in reasons["sink"] or "shared" in reasons["sink"]
+    # A.1 split: source escapes are purely diagnostic; destination escapes block.
+    src = {n for n, _r in cc.source_escapes}
+    dst = {n for n, _r in cc.destination_escapes}
+    assert src == {"c"}
+    assert dst == {"d", "sink"}
+    # compat union retained for legacy readers
+    assert {n for n, _r in cc.escape_reasons} == {"c", "d", "sink"}
+    src_reasons = {n: r for n, r in cc.source_escapes}
+    dst_reasons = {n: r for n, r in cc.destination_escapes}
+    assert "ext" in src_reasons["c"]             # callee-∉-F source escape
+    assert "global" in dst_reasons["sink"] or "shared" in dst_reasons["sink"]
     # the rule-(a) source survives the escape of its rule-(b) destination
     assert "c" in cc.closure_names
 
@@ -487,15 +499,19 @@ def test_real_b13_closure_widens_ga34(qcdloop_full_graph):
 @requires_qcdloop_full
 def test_real_b13_closure_escapes_at_ql_real(qcdloop_full_graph):
     # Rule (b) → local at the frontier: `x34* = ql::Real(ga34*)` reads a carried ga34*
-    # and passes it into ql::Real, a callee NOT in the chain function set → the x34*
-    # destination is refused (chain_closure_escapes) and never joins the closure, while
-    # its source ga34* stays widened (refusal precedence blocks the destination, not the
-    # rule-(a) source).
+    # and passes it into ql::Real, a callee NOT in the chain function set → ga34* is a
+    # SOURCE escape (diagnostic; ga34* still widens by rule (a)).  Its producing chain
+    # line `ga34m = TOutput(...) - root` is a binary subtraction of carried/widened
+    # operands, so the extract projection is provably BENIGN (§3.2 iii) → the x34*
+    # destinations are designed exits, NOT destination escapes.
     cc = _real_closure(qcdloop_full_graph, "B13")
-    esc_names = {n for n, _r in cc.escape_reasons}
-    assert "ga34m" in esc_names
-    assert any("ql::Real" in r for _n, r in cc.escape_reasons)
-    # the escaping extract destinations never widen; the sources do
+    src_names = {n for n, _r in cc.source_escapes}
+    assert "ga34m" in src_names
+    assert any("ql::Real" in r for _n, r in cc.source_escapes)
+    # all four extracts benign → no destination escape, so the terminal never fires
+    assert cc.destination_escapes == []
+    assert cc.blocking_escapes == []
+    # the source ga34* still widen (source escape does not block)
     assert "ga34m" in cc.closure_names and "ga34pm1" in cc.closure_names
 
 
@@ -508,7 +524,7 @@ def test_real_b14_closure_widens_fac_and_marks_output_store(qcdloop_full_graph):
     cc = _real_closure(qcdloop_full_graph, "B14")
     assert "fac" in cc.closure_names
     assert {ln for _f, ln, _n, _t in cc.closure_widenable} == {396}
-    exits = {(ln, kind) for _f, ln, kind, _d in cc.designed_exits}
+    exits = {(ln, kind) for _f, ln, kind, _cv, _d in cc.designed_exits}
     assert (404, "kernel_output") in exits
     assert (405, "kernel_output") in exits
     assert cc.carrier_names == set()           # compat view stays empty
@@ -524,7 +540,7 @@ def test_real_b10_closure_extends_to_li2omx2_but_stops_at_return(qcdloop_full_gr
     # cancellation is still unrecovered (the Subtask 2a/2b job).
     cc = _real_closure(qcdloop_full_graph, "B10")
     assert {"Y", "S", "A", "prod", "Li2omx2"} <= cc.closure_names
-    ret_exits = {ln for _f, ln, kind, _d in cc.designed_exits if kind == "return"}
+    ret_exits = {ln for _f, ln, kind, _cv, _d in cc.designed_exits if kind == "return"}
     assert 707 in ret_exits
     # no rule (c): the cancellation operands never join under rules (a),(b) alone
     assert "dilog4" not in cc.closure_names

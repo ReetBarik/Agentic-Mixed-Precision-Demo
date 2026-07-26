@@ -94,16 +94,16 @@ def test_chain_write_truncation_skips_outermost_region(monkeypatch):
     checked = []
 
     def fake(region_text, reads, writes, two_limb, *, caller_type="double",
-             complex_tokens=frozenset(), caller_complex=None, carrier_names=frozenset()):
+             complex_tokens=frozenset(), caller_complex=None, closure_names=frozenset()):
         checked.append(region_text)
         # Only the outermost region ("OUT") would trip the per-region detector.
         return region_text == "OUT"
 
     monkeypatch.setattr("agents.patcher.chain_promote.boundary.write_truncation_inert", fake)
     region_meta = [
-        dict(depth=0, region_text="OUT", reads=["a"], writes=["res"], promoted=True),
-        dict(depth=1, region_text="MID", reads=["c"], writes=["d"], promoted=True),
-        dict(depth=2, region_text="INNER", reads=["e"], writes=["f"], promoted=True),
+        dict(depth=0, span=("f.h", 1, 1), region_text="OUT", reads=["a"], writes=["res"], promoted=True),
+        dict(depth=1, span=("f.h", 2, 2), region_text="MID", reads=["c"], writes=["d"], promoted=True),
+        dict(depth=2, span=("f.h", 3, 3), region_text="INNER", reads=["e"], writes=["f"], promoted=True),
     ]
     out = chain_write_truncation(region_meta, two_limb=True, caller_type="double")
     assert out is False                       # outermost truncation is exempt
@@ -115,13 +115,13 @@ def test_chain_write_truncation_fires_on_interior_truncation(monkeypatch):
     # An INTERIOR write that truncates back to caller precision injects double roundoff
     # between links -> the chain is genuinely broken -> gate fires.
     def fake(region_text, reads, writes, two_limb, *, caller_type="double",
-             complex_tokens=frozenset(), caller_complex=None, carrier_names=frozenset()):
+             complex_tokens=frozenset(), caller_complex=None, closure_names=frozenset()):
         return region_text == "MID"           # an interior region trips it
 
     monkeypatch.setattr("agents.patcher.chain_promote.boundary.write_truncation_inert", fake)
     region_meta = [
-        dict(depth=0, region_text="OUT", reads=["a"], writes=["res"], promoted=True),
-        dict(depth=1, region_text="MID", reads=["c"], writes=["d"], promoted=True),
+        dict(depth=0, span=("f.h", 1, 1), region_text="OUT", reads=["a"], writes=["res"], promoted=True),
+        dict(depth=1, span=("f.h", 2, 2), region_text="MID", reads=["c"], writes=["d"], promoted=True),
     ]
     assert chain_write_truncation(region_meta, two_limb=True, caller_type="double") is True
 
@@ -342,7 +342,7 @@ def test_carrier_chain_widens_decl_and_gate_stays_silent(carrier_chain_tree,
         region_a, ["x"], ["carry"], True, caller_type="double") is True
     assert boundary.write_truncation_inert(
         region_a, ["x"], ["carry"], True, caller_type="double",
-        carrier_names=frozenset({"carry"})) is False
+        closure_names=frozenset({"carry"})) is False
 
     res = chain_promote(manifest=ChainManifest(
         chain_id="cascade_B10_x", integral="B10", entry_point="entry",
@@ -354,7 +354,7 @@ def test_carrier_chain_widens_decl_and_gate_stays_silent(carrier_chain_tree,
     # carrier recognized as widenable — no terminal carrier refusal
     assert res.chain_carrier_unwidenable is False
     assert res.chain_carrier_external is False
-    assert res.carrier_names == ["carry"]
+    assert res.closure_names == ["carry"]
 
     # the chain promotes AND the interior write_truncation gate does NOT fire (the
     # carrier fix is what keeps it silent — see the control assertions above)
@@ -365,8 +365,8 @@ def test_carrier_chain_widens_decl_and_gate_stays_silent(carrier_chain_tree,
     specs = _manifest_specs(carrier_chain_tree)
     inner_variant = specs["inner_mid_B10"]
     assert len(inner_variant.promotes) >= 1
-    assert len(inner_variant.carrier_decls) == 1
-    cd = inner_variant.carrier_decls[0]
+    assert len(inner_variant.closure_decls) == 1
+    cd = inner_variant.closure_decls[0]
     assert cd.decl_line == decl_line
     assert cd.orig_type == "double"
     assert cd.dd_type == DD
