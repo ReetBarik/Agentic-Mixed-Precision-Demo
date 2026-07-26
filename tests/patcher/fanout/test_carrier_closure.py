@@ -545,6 +545,6 @@ def test_real_b10_closure_extends_to_li2omx2_but_stops_at_return(qcdloop_full_gr
     # no rule (c): the cancellation operands never join under rules (a),(b) alone
     assert "dilog4" not in cc.closure_names
     assert "dilog5" not in cc.closure_names
-    assert cc.return_widens == frozenset()
+    assert cc.return_widens == []       # Subtask 2a: list (was frozenset), still empty
     # Fix-A compat subset unchanged (regression guard)
     assert cc.carrier_names == {"Y", "S", "A"}

@@ -865,6 +865,141 @@ def insert_shim_include(lines: list[str], shim_include: str) -> list[str]:
     return _insert_shim_include(lines, shim_include)
 
 
+class BoundaryError(RuntimeError):
+    """A deterministic boundary rewrite that cannot be realized safely.
+
+    Raised by :func:`widen_return_type_line` when the ``orig_type`` token is not
+    present at the given return line (and the line is not already widened) — a silent
+    no-op there would emit a variant whose *signature* says one type while its body
+    returns another, i.e. a wrong-typed variant at runtime.  The design's rule-(c)
+    safety argument (CLOSURE_SCOPED_CHAINS_DESIGN.md §7) depends on this rewrite being
+    deterministic and complete, so an unrecognized shape hard-fails rather than
+    papering over."""
+
+
+def widen_return_type_line(
+    source: str, *, return_line: int, orig_type: str, dd_type: str,
+    function_name: str,
+) -> str:
+    """Widen the return-type token of a function *declaration* in ``source``.
+
+    The mirror of :func:`widen_decl_type_line` for a callable's **return type**
+    (CLOSURE_SCOPED_CHAINS_DESIGN.md §7, rule (c)).  Where the decl-widen rewrites a
+    local's declaration so an interior chain write lands in a dd carrier, this
+    rewrites a per-integral variant's return type so a dd value carried out via
+    ``return`` survives the return instead of rounding to caller precision (B10's
+    ``:707`` severance).  It edits the variant *clone* only; the shared original is
+    never passed here (Appendix invariant).
+
+    ``return_line`` is the 1-based line (within ``source``) where the return-type
+    token *starts* — the signature line, e.g. ``KOKKOS_INLINE_FUNCTION TOutput
+    Li2omx2(...)``, NOT the ``return`` statement.  ``orig_type`` is the leading
+    return-type token as source spells it (``TOutput``); ``dd_type`` the widened
+    replacement (``ddcomplex`` / ``quad::ddfun::ddouble``); ``function_name`` the
+    variant name for diagnostics only (the rewrite operates on the source position,
+    so the source may still carry the *original* function name at this point).
+
+    Handled shapes (all via the shared :func:`_tokenize` scanner — no new parsing
+    strategy):
+
+    * **template return types** — ``TOutput``, ``std::complex<TScale>``,
+      ``typename std::conditional<...>::type``.  The return type is every token
+      before the function-name identifier that precedes the parameter-list ``(``; the
+      ``orig_type`` base token within it is swapped, so a qualified / templated type
+      keeps its qualifiers and template arguments byte-for-byte.
+    * **multi-line return types** — a long template return whose leading token is on
+      ``return_line`` and whose function name falls on the next line: the forward
+      scan spans lines until the parameter-list ``(`` and rewrites the token on
+      whichever line it lands.
+    * **const / reference-qualified returns** — ``const TOutput&``: ``const`` and
+      ``&`` are preserved; only the ``orig_type`` base token is rewritten.
+    * **static / inline / template / macro keywords before the return type**
+      (``KOKKOS_INLINE_FUNCTION``, ``static``, ``inline``): preserved — they are part
+      of the pre-name token region and are never the ``orig_type`` base token.
+
+    Idempotent: re-applying an already-widened return (``orig_type`` gone, ``dd_type``
+    present in the return-type region) returns ``source`` unchanged rather than
+    raising.  Raises :class:`BoundaryError` when ``orig_type`` is neither found nor
+    already-widened (a coordinate / type mismatch, or an unhandled shape such as an
+    ``auto`` trailing-return ``-> decltype(...)`` / SFINAE ``enable_if`` return).
+    """
+    lines = source.split("\n")
+    n = len(lines)
+    if return_line < 1 or return_line > n:
+        raise BoundaryError(
+            f"widen_return_type_line: return_line {return_line} out of range "
+            f"[1, {n}] for {function_name!r}")
+
+    # Gather tokens from return_line forward until the parameter-list '(' at
+    # angle/bracket depth 0 — the opener that follows the function name.  A few
+    # lines of span covers a multi-line template return type.
+    span: list[tuple[int, _Tok]] = []      # (line_index_0based, token)
+    paren_open: int | None = None          # index into ``span`` of the param '('
+    depth = 0
+    li = return_line - 1
+    last_li = min(n - 1, li + 6)
+    while li <= last_li and paren_open is None:
+        for t in _tokenize(lines[li]):
+            span.append((li, t))
+            if t.text in ("<", "["):
+                depth += 1
+            elif t.text in (">", "]"):
+                depth = max(0, depth - 1)
+            elif t.text == "(" and depth == 0:
+                paren_open = len(span) - 1
+                break
+        li += 1
+    if paren_open is None:
+        raise BoundaryError(
+            f"widen_return_type_line: no parameter-list '(' found within reach of "
+            f"return line {return_line} for {function_name!r}; not a function "
+            f"declaration in the recognized form")
+
+    # function name = last identifier immediately before the param '('; the
+    # return-type region is every token before it (qualifiers + type expression).
+    fn_idx: int | None = None
+    for k in range(paren_open - 1, -1, -1):
+        if _is_ident(span[k][1].text):
+            fn_idx = k
+            break
+    if fn_idx is None:
+        raise BoundaryError(
+            f"widen_return_type_line: no function-name identifier before '(' at "
+            f"return line {return_line} for {function_name!r}")
+    rt = span[:fn_idx]
+
+    # locate the orig_type base-type token (first occurrence in the return-type
+    # region).  A ``::``-qualified type's last segment is a legitimate rewrite target
+    # (``std::complex`` → orig_type ``complex``; mirrors :func:`widen_decl_type_line`,
+    # which navigates ``::`` to the last segment), so a leading ``:`` is NOT a
+    # disqualifier — only a value member access ``a.b`` is.
+    target: tuple[int, _Tok] | None = None
+    for k, (lidx, t) in enumerate(rt):
+        if t.text != orig_type:
+            continue
+        prev = rt[k - 1][1].text if k > 0 else ""
+        if prev == ".":
+            continue
+        target = (lidx, t)
+        break
+
+    if target is None:
+        # idempotent re-application: the return type is already widened → no-op.
+        dd_tail = dd_type.split("::")[-1].split("<")[0]
+        if any(t.text == dd_tail for _l, t in rt):
+            return source
+        rt_text = " ".join(t.text for _l, t in rt)
+        raise BoundaryError(
+            f"widen_return_type_line: orig_type {orig_type!r} not found in the "
+            f"return type of {function_name!r} at line {return_line} (return-type "
+            f"tokens: {rt_text!r}) and it is not already widened to {dd_type!r} — "
+            f"refusing to edit; a silent no-op would emit a wrong-typed variant")
+
+    lidx, tok = target
+    lines[lidx] = lines[lidx][:tok.start] + dd_type + lines[lidx][tok.end:]
+    return "\n".join(lines)
+
+
 def widen_decl_type_line(line: str, orig_type: str, dd_type: str) -> str | None:
     """Rewrite the leading (core) type token of a bare declaration on ``line``.
 

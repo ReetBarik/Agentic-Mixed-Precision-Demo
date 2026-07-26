@@ -50,10 +50,10 @@ from pathlib import Path
 from agents.integrator_base import boundary
 from agents.patcher.call_graph import CallGraph
 from agents.patcher.fanout import (
-    ClosureDecl, FanoutError, Promote, VariantSpec,
-    _accumulate_region_specs, _complex_reads, _merge_into_file, _original_text,
-    _pick_def, _promote_in_place, _reroute_in_function, _resolve_complex_binding,
-    _resolve_root_file,
+    ClosureDecl, FanoutError, Promote, ReturnWiden, VariantSpec,
+    _accumulate_region_specs, _complex_reads, _merge_into_file, _merge_return_widen,
+    _original_text, _pick_def, _promote_in_place, _reroute_in_function,
+    _resolve_complex_binding, _resolve_root_file,
 )
 from agents.patcher.variant_naming import assert_no_collisions
 from agents.shared import region_scan
@@ -258,8 +258,11 @@ class CarrierClosure:
       terminal.
     * ``escape_reasons`` — compat union of ``source_escapes`` + ``destination_escapes``
       (Subtask 1a shape); retained for existing readers, superseded by the split.
-    * ``return_widens`` — rule (c) variant-return-type widenings; empty in this
-      subtask (populated in Stage 2 / Subtask 2a/2b).
+    * ``return_widens`` — rule (c) variant-return-type widenings as
+      :class:`~agents.patcher.fanout.ReturnWiden` records.  Subtask 2a upgrades this
+      from a ``frozenset`` to a ``list[ReturnWiden]`` (a proper collection the
+      emission layer attaches to variants) but leaves it EMPTY — rule (c)'s algorithm
+      (:func:`_expand_value_closure` cross-frame propagation) populates it in Subtask 2b.
     """
 
     widenable: list[tuple[str, int, str, str]] = field(default_factory=list)
@@ -277,7 +280,9 @@ class CarrierClosure:
     # => the ``chain_closure_escapes`` terminal fires; a destination escape whose severed
     # values all still reach a designed exit is recorded but does NOT block.
     blocking_escapes: list[tuple[str, str]] = field(default_factory=list)
-    return_widens: frozenset = field(default_factory=frozenset)
+    # Subtask 2a: a proper collection of ReturnWiden records (was a frozenset in 1a).
+    # Stays EMPTY here; rule (c)'s cross-frame propagation (Subtask 2b) populates it.
+    return_widens: list = field(default_factory=list)
 
     @property
     def escape_reasons(self) -> list[tuple[str, str]]:
@@ -1055,6 +1060,40 @@ def _expand_value_closure(out: CarrierClosure, *, frames, frame_names, func_src,
     out.blocking_escapes = sorted(blocking.items())
 
 
+def _attach_return_widens(return_widens: list,
+                          new_specs: dict[str, dict[str, VariantSpec]]) -> None:
+    """Attach each rule-(c) :class:`ReturnWiden` to the variant(s) it names (§7).
+
+    ``return_widens`` are the closure's variant-return-type widenings — each names a
+    ``function_name`` that must match an emitted variant.  A widened-return callee is
+    copied to one variant PER caller path, so a record naming variant ``V`` attaches to
+    every spec whose ``variant_name == V`` across files.  Multiple records for one
+    variant combine via :func:`_merge_return_widen` (equal → dedup, differ →
+    :class:`FanoutError`).  A record naming a variant no emitted spec clones raises
+    :class:`FanoutError` — that is a Subtask-2b wiring bug (the closure demanded a
+    return widen on a function no variant clones); catching it here saves 2b debugging.
+
+    No-op this subtask: ``return_widens`` is empty (rule (c) is Subtask 2b).
+    """
+    if not return_widens:
+        return
+    specs_by_name: dict[str, list[VariantSpec]] = {}
+    for specs in new_specs.values():
+        for spec in specs.values():
+            specs_by_name.setdefault(spec.variant_name, []).append(spec)
+    for rw in return_widens:
+        targets = specs_by_name.get(rw.function_name)
+        if not targets:
+            raise FanoutError(
+                f"return_widen names variant {rw.function_name!r} but no emitted "
+                f"variant clones it (return {rw.orig_type}->{rw.dd_type} @line "
+                f"{rw.return_line}); the closure demanded a return-widen on a function "
+                f"no variant clones — a Subtask-2b wiring bug")
+        for spec in targets:
+            spec.return_widen = _merge_return_widen(
+                spec.return_widen, rw, spec.variant_name)
+
+
 def chain_promote(*, manifest: ChainManifest, graph: CallGraph,
                   tree_root: str | Path, scalar_type: str, two_limb: bool,
                   shim_include: str | None, caller_type: str = "double",
@@ -1195,6 +1234,17 @@ def chain_promote(*, manifest: ChainManifest, graph: CallGraph,
                 if key not in {(c.decl_line, c.orig_type, c.dd_type)
                                for c in spec.closure_decls}:
                     spec.closure_decls.append(cd)
+
+    # --- closure: attach return-type widens to the variants that own them --------
+    # Rule (c) (Subtask 2b) records, per callee frame whose return the closure widens,
+    # a ReturnWiden naming the variant, its signature line, and the orig->dd type.  Like
+    # a closure local, a widened-return callee is copied to one variant PER caller path,
+    # so the widen rides on EVERY variant of that function.  This is the wiring 2b will
+    # exercise; here ``closure.return_widens`` is empty (rule (c) not yet implemented),
+    # so this loop is a no-op.  Conflicts (two records widening one variant to different
+    # types) are caught by VariantSpec.merge/_merge_return_widen; a record naming a
+    # variant no emitted spec clones is a wiring bug (2b would create it) — fail loud.
+    _attach_return_widens(closure.return_widens, new_specs)
 
     # --- one merge per touched file (the whole chain's specs for that file) ----
     declared: list[str] = []

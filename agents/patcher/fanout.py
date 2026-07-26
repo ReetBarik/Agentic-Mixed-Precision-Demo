@@ -254,16 +254,42 @@ class ClosureDecl:
 
 
 @dataclass
+class ReturnWiden:
+    """One variant *return type* widened to the chain's dd type (design §7, rule c).
+
+    Where :class:`ClosureDecl` widens a *local's* declaration, this widens a callable's
+    **return type** so a dd value carried out via ``return`` survives the return
+    instead of rounding to caller precision (B10's ``Li2omx2`` ``:707`` severance —
+    the cross-frame capability rule (c) needs).  Populated by Subtask 2b's closure
+    algorithm; this subtask ships only the emission machinery, so no production caller
+    sets it yet.
+
+    ``return_line`` is the 1-based file line of the callable's return-type token as it
+    appears in the variant's function *declaration* (the signature line — the
+    ``TOutput`` / ``ReturnType`` token, NOT the ``return`` statement).  ``orig_type``
+    is the leading return-type token as source spells it; ``dd_type`` the widened
+    replacement (``ddcomplex`` / ``quad::ddfun::ddouble``).  ``function_name`` is the
+    variant name (e.g. ``Li2omx2_B10``) for diagnostics and collision-check purposes.
+    """
+
+    return_line: int
+    orig_type: str
+    dd_type: str
+    function_name: str
+
+
+@dataclass
 class VariantSpec:
     """The deterministic recipe for one variant function.
 
     A variant is rebuilt from scratch on every merge by copying the original
     function's source (``orig_start..orig_end`` in ``file``), applying every
     :class:`Promote` (region → extended scalar), every :class:`ClosureDecl`
-    (carrier decl line → widened type token) and every reroute (call to a child
-    function → the child's variant name), and renaming the definition (and any
-    self-calls) ``orig_name -> variant_name``.  Being a pure function of this spec
-    makes fan-out idempotent across retries and mergeable across intents.
+    (carrier decl line → widened type token), the optional :class:`ReturnWiden`
+    (return-type token → dd type) and every reroute (call to a child function → the
+    child's variant name), and renaming the definition (and any self-calls)
+    ``orig_name -> variant_name``.  Being a pure function of this spec makes fan-out
+    idempotent across retries and mergeable across intents.
     """
 
     variant_name: str
@@ -278,6 +304,12 @@ class VariantSpec:
     # emission time.  Defaults empty so a pre-Blocker-A manifest re-renders
     # identically; populated by the chain coordinator in Subtask 5.
     closure_decls: list[ClosureDecl] = field(default_factory=list)
+    # Closure Subtask 2a (design §7, rule c): the variant's return type widened to the
+    # chain's dd type so a dd value carried out via ``return`` is not rounded to caller
+    # precision.  ``None`` (default) means "no return-type widening" — every existing
+    # construction site keeps its byte-identical behaviour.  Populated by Subtask 2b's
+    # closure algorithm.
+    return_widen: "ReturnWiden | None" = None
 
     def to_json(self) -> dict:
         d = asdict(self)
@@ -287,17 +319,27 @@ class VariantSpec:
     def from_json(cls, d: dict) -> "VariantSpec":
         promotes = [Promote(**p) for p in d.get("promotes", [])]
         closure_decls = [ClosureDecl(**c) for c in d.get("closure_decls", [])]
+        rw = d.get("return_widen")
+        return_widen = ReturnWiden(**rw) if rw else None
         return cls(
             variant_name=d["variant_name"], orig_name=d["orig_name"],
             file=d["file"], orig_start=d["orig_start"], orig_end=d["orig_end"],
             promotes=promotes, reroutes=dict(d.get("reroutes", {})),
             shim_includes=list(d.get("shim_includes", [])),
-            closure_decls=closure_decls)
+            closure_decls=closure_decls, return_widen=return_widen)
 
     def merge(self, other: "VariantSpec") -> None:
         """Fold ``other`` (same variant) into this spec: union reroutes / shim
         includes and append any region promotion or carrier decl-widen not already
-        present."""
+        present.
+
+        ``return_widen`` combines: if both are ``None`` the result is ``None``; if
+        exactly one is set the set one wins; if both are set and *equal* (same
+        ``return_line`` / ``orig_type`` / ``dd_type``) the value is deduplicated; if
+        both are set and *differ* it is a real conflict — two chains trying to widen
+        the same variant's return to different types is a merge-time bug — and raises
+        :class:`FanoutError`.
+        """
         self.reroutes.update(other.reroutes)
         for inc in other.shim_includes:
             if inc not in self.shim_includes:
@@ -311,6 +353,27 @@ class VariantSpec:
             if (c.decl_line, c.orig_type, c.dd_type) not in have_cd:
                 self.closure_decls.append(c)
                 have_cd.add((c.decl_line, c.orig_type, c.dd_type))
+        self.return_widen = _merge_return_widen(self.return_widen, other.return_widen,
+                                                self.variant_name)
+
+
+def _merge_return_widen(a: "ReturnWiden | None", b: "ReturnWiden | None",
+                        variant_name: str) -> "ReturnWiden | None":
+    """Combine two variants' ``return_widen`` per :meth:`VariantSpec.merge`.
+
+    ``None`` + ``None`` → ``None``; one set → the set one; both equal → deduplicated;
+    both differing → :class:`FanoutError` (a genuine conflict — two chains widening
+    the same variant's return to different types)."""
+    if a is None:
+        return b
+    if b is None:
+        return a
+    if (a.return_line, a.orig_type, a.dd_type) == (b.return_line, b.orig_type, b.dd_type):
+        return a
+    raise FanoutError(
+        f"conflicting return_widen for variant {variant_name!r}: "
+        f"{a.orig_type}->{a.dd_type} @line {a.return_line} vs "
+        f"{b.orig_type}->{b.dd_type} @line {b.return_line}")
 
 
 @dataclass
@@ -550,21 +613,30 @@ def render_variant(spec: VariantSpec) -> str:
     coordinates), reroutes calls to child variants, and renames the definition +
     self-calls ``orig_name -> variant_name``.
 
-    Region promotions (:class:`Promote`, a multi-line block replacement) and
-    carrier decl-widens (:class:`ClosureDecl`, a single-line type-token rewrite,
-    Blocker A §7) share ONE descending-line-order pass.  Sorting both by their
-    starting line, highest first, guarantees each edit's file coordinates are still
-    valid when it runs regardless of the length delta an earlier (lower-line) edit
-    would introduce — a carrier decl above a promoted region is rewritten after the
-    region has already been replaced, so its ``decl_line`` never shifts.
+    Region promotions (:class:`Promote`, a multi-line block replacement), carrier
+    decl-widens (:class:`ClosureDecl`, a single-line type-token rewrite, Blocker A §7)
+    and the optional return-type widen (:class:`ReturnWiden`, closure Subtask 2a §7,
+    rule c) share ONE descending-line-order pass.  Sorting all three by their starting
+    line, highest first, guarantees each edit's file coordinates are still valid when
+    it runs regardless of the length delta an earlier (lower-line) edit would
+    introduce — a decl / return type above a promoted region is rewritten after the
+    region has already been replaced, so its line never shifts.
+
+    Tag ordering on same-line ties: promotes 0, closure_decls 1, return_widen 2.  The
+    return-type token sits on the *signature* line, which is the function's first line
+    and thus strictly above every promotable region body and every closure-decl line;
+    a same-line collision therefore should not occur.  The tag puts return_widen last
+    if it ever did, so a decl on the signature line is rewritten before the return-type
+    edit (deterministic; neither shifts the other since both are single-line token
+    swaps).
     """
     lines = _original_text(spec.file, spec.orig_start, spec.orig_end)
-    # Descending by start line; both edit kinds carry a file-absolute start.  Promote
-    # is tagged 0 and ClosureDecl 1 so that, in the degenerate case of a decl line
-    # equal to a region start (should not occur — a widened carrier is by definition
-    # outside the chain line set), the region replacement runs first deterministically.
+    # Descending by start line; every edit kind carries a file-absolute start.  Promote
+    # is tagged 0, ClosureDecl 1, ReturnWiden 2 (see the docstring for the tie policy).
     edits = ([(p.region_start, 0, p) for p in spec.promotes]
-             + [(c.decl_line, 1, c) for c in spec.closure_decls])
+             + [(c.decl_line, 1, c) for c in spec.closure_decls]
+             + ([(spec.return_widen.return_line, 2, spec.return_widen)]
+                if spec.return_widen is not None else []))
     for start, kind, e in sorted(edits, key=lambda t: (t[0], t[1]), reverse=True):
         if kind == 0:
             p = e
@@ -583,7 +655,7 @@ def render_variant(spec: VariantSpec) -> str:
                 caller_complex=p.caller_complex,
                 closure_names=frozenset(p.closure_names))
             lines = lines[:local_s] + block + lines[local_e + 1:]
-        else:
+        elif kind == 1:
             c = e
             local = c.decl_line - spec.orig_start
             if local < 0 or local >= len(lines):
@@ -594,6 +666,23 @@ def render_variant(spec: VariantSpec) -> str:
                                                     c.dd_type)
             if widened is not None:
                 lines[local] = widened
+        else:
+            rw = e
+            local = rw.return_line - spec.orig_start
+            if local < 0 or local >= len(lines):
+                raise FanoutError(
+                    f"return widen line {rw.return_line} out of range for "
+                    f"{spec.orig_name} [{spec.orig_start}-{spec.orig_end}]")
+            # widen_return_type_line spans lines from the signature line forward to the
+            # parameter list; hand it the remaining variant slice so a multi-line
+            # template return type is rewritten in place.  It hard-fails (BoundaryError)
+            # if the orig_type token is absent — a silent no-op would emit a wrong-typed
+            # variant (design §7).
+            sub = "\n".join(lines[local:])
+            widened = boundary.widen_return_type_line(
+                sub, return_line=1, orig_type=rw.orig_type, dd_type=rw.dd_type,
+                function_name=rw.function_name)
+            lines = lines[:local] + widened.split("\n")
 
     text = "\n".join(lines)
     rename_map = {spec.orig_name: spec.variant_name}
