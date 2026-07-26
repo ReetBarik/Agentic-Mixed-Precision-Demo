@@ -1,0 +1,3 @@
+{"iter_id": 0, "rationale_id": "cascade_B10_612f1391_494252c4", "target": "B1m.h:227", "kind": "double-to-dd", "attempt": 0, "outcome": "build_failed", "status": "build_failed", "elapsed_sec": 125.526, "backoff_sec": 2.399}
+{"iter_id": 0, "rationale_id": "cascade_B10_612f1391_494252c4", "target": "B1m.h:227", "kind": "double-to-dd", "attempt": 1, "outcome": "build_failed", "status": "build_failed", "elapsed_sec": 143.898, "backoff_sec": 4.124}
+{"iter_id": 0, "rationale_id": "cascade_B10_612f1391_494252c4", "target": "B1m.h:227", "kind": "double-to-dd", "attempt": 2, "outcome": "build_failed", "status": "llm_gen_failed", "elapsed_sec": 128.974, "backoff_sec": 0.0}
