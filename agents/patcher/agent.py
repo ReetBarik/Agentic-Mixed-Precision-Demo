@@ -24,6 +24,7 @@ from __future__ import annotations
 
 import json
 import random
+import re
 import time
 from pathlib import Path
 from typing import Callable
@@ -34,7 +35,13 @@ from agents.patcher.dispatch import PatchDeps
 from agents.patcher.intent import IntentError, parse_intent, precheck, resolve_in_tree
 from agents.state import PipelineState
 
-MAX_INTEGRATOR_RETRIES = 3      # P4b — single shared budget: integrator + build
+MAX_INTEGRATOR_RETRIES = 6      # P4b — single shared budget: integrator + build.
+# Bumped 3→6 (Subtask 4): Subtask 3 STOP #F showed a 3-attempt budget lost B10 to
+# LLM non-determinism on ql::Lnrat<ddouble> (an R4 #error "requires manual
+# classification" escape) — a symbol B12 recovered on attempt 2 in the SAME shim
+# silo. More attempts can only help a retryable misgen; backoff spacing widens
+# naturally.  (Durable fix — a deterministic forwarding-overload emitter — is
+# tracked separately as Subtask 3 option 2.)
 
 # Wave-2 backoff — space out the (unchanged) MAX_INTEGRATOR_RETRIES attempts on a
 # retryable llm-driven failure so a transient LLM/service hiccup gets a fresh roll
@@ -46,6 +53,44 @@ BACKOFF_BASE_SEC = 2.0
 BACKOFF_JITTER_SEC = 0.5
 
 _REPO = Path(__file__).resolve().parents[2]
+
+# Subtask 4 — R4 escape-hatch detector (diagnostic ONLY; never changes dispatch).
+# The chain integrator emits `#error "DD Chain Integrator: <name> requires manual
+# classification"` when the LLM takes the Rule R4 escape hatch on a symbol it could
+# not classify.  This build failure is already retryable (is_retryable_misgen); we
+# only want to *measure* the per-attempt variance rate (which symbol, how often) so
+# the report can quantify the LLM non-determinism the retry-budget bump absorbs.
+_R4_ESCAPE_RE = re.compile(
+    r'#error\s+"[^"]*?requires manual classification"')
+_R4_SYMBOL_RE = re.compile(
+    r'#error\s+"[^"]*?:\s*(?P<symbol>.+?)\s+requires manual classification"')
+
+
+def _r4_escape_symbol(*texts: str | None) -> str | None:
+    """Return the escape-hatch symbol if any of ``texts`` carries an R4 ``#error``.
+
+    The gate's short ``detail`` ("cmake configure/build failed") never holds the
+    ``#error`` — the escape-hatch line lands in the build log — so callers pass
+    BOTH the detail and the build-log contents.  Matches any integrator's
+    ``... <name> requires manual classification`` #error (chain/dd/ff/float share
+    the phrasing); returns the ``<name>`` when parseable, otherwise the empty
+    string (escape fired but symbol not recoverable).  ``None`` = no R4 escape.
+    """
+    for text in texts:
+        if text and _R4_ESCAPE_RE.search(text):
+            m = _R4_SYMBOL_RE.search(text)
+            return m.group("symbol").strip() if m else ""
+    return None
+
+
+def _read_build_log(path: Path | None) -> str | None:
+    """Best-effort read of a gate build log (for R4 escape-hatch detection)."""
+    if not path:
+        return None
+    try:
+        return Path(path).read_text(encoding="utf-8", errors="ignore")
+    except OSError:
+        return None
 
 
 def _backoff_delay(attempt: int) -> float:
@@ -143,10 +188,11 @@ class _Patcher:
         # iterations.jsonl in the same run_dir; deterministic paths don't log.
         attempts_log = run_dir / "patcher_attempts.jsonl"
 
-        def _record_attempt(attempt, outcome, status, elapsed, backoff):
+        def _record_attempt(attempt, outcome, status, elapsed, backoff,
+                            detail=None, build_log=None):
             if not llm_driven:
                 return
-            _append_attempt(attempts_log, {
+            record = {
                 "iter_id": iter_id,
                 "rationale_id": intent.rationale_id,
                 "target": intent.target.location,
@@ -156,7 +202,16 @@ class _Patcher:
                 "status": status,
                 "elapsed_sec": round(elapsed, 3),
                 "backoff_sec": round(backoff, 3),
-            })
+            }
+            # Subtask 4 — tag build failures that took the R4 #error escape hatch so
+            # the report can measure the per-attempt variance rate (diagnostic only).
+            # The #error lands in the build log, not the short gate detail, so scan
+            # both.
+            r4_symbol = _r4_escape_symbol(detail, _read_build_log(build_log))
+            if r4_symbol is not None:
+                record["r4_escape"] = True
+                record["r4_symbol"] = r4_symbol
+            _append_attempt(attempts_log, record)
 
         last_detail = None
         for attempt in range(attempts):
@@ -235,12 +290,14 @@ class _Patcher:
             if llm_driven and retryable and attempt < attempts - 1:
                 delay = _backoff_delay(attempt)
                 _record_attempt(attempt, "build_failed", gate.status,
-                                time.monotonic() - t0, delay)
+                                time.monotonic() - t0, delay, detail=gate.detail,
+                                build_log=gate.build_log_path)
                 time.sleep(delay)
                 continue
             if llm_driven and retryable:
                 _record_attempt(attempt, "build_failed", R.LLM_GEN_FAILED,
-                                time.monotonic() - t0, 0.0)
+                                time.monotonic() - t0, 0.0, detail=gate.detail,
+                                build_log=gate.build_log_path)
                 # P4a: exhausted retries on a retryable failure → llm_gen_failed
                 # (P6a: at the DD rung Strategy treats this as dd_untested, not a
                 # physics ceiling).
@@ -252,7 +309,8 @@ class _Patcher:
                                  llm_tokens=gen.llm_tokens)
             # deterministic path OR non-retryable → Bucket-A status verbatim
             _record_attempt(attempt, "build_failed", gate.status,
-                            time.monotonic() - t0, 0.0)
+                            time.monotonic() - t0, 0.0, detail=gate.detail,
+                            build_log=gate.build_log_path)
             gitops.reset_hard(repo_root, parent)
             return R.failure(gate.status, parent, err_kind=gate.err_kind,
                              detail=gate.detail,
