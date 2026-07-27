@@ -49,6 +49,7 @@ from pathlib import Path
 
 from agents.integrator_base import boundary
 from agents.patcher.call_graph import CallGraph
+from agents.patcher.clonable_leaf import clonable_leaf, is_dd_boundary
 from agents.patcher.fanout import (
     ClosureDecl, FanoutError, Promote, ReturnWiden, VariantSpec,
     _accumulate_region_specs, _complex_reads, _merge_into_file, _merge_return_widen,
@@ -118,6 +119,20 @@ class ChainFanoutResult:
     carrier_detail: str = ""
     # The closure names actually threaded into the promotion (forensics/tests).
     closure_names: list[str] = field(default_factory=list)
+    # --- rule (d): leaf-callee promotion (LEAF_CALLEE_PROMOTION_DESIGN.md §2.8) ----
+    # Set BEFORE any tree mutation when rule (d) would grow F past the §2.8 circuit
+    # breaker (>8 frames or recursion depth >3): abandon the chain cleanly (graceful
+    # degradation), ``oversized_detail`` naming the offending leaf.
+    chain_closure_oversized: bool = False
+    oversized_detail: str = ""
+    # Rule-(d) discovery result (recorded, NOT emitted — L3 materialises the clones):
+    # ``leaf_reroutes`` maps each promoted leaf's ORIGINAL name to its per-integral
+    # clone name (``Lnrat`` -> ``Lnrat_B10``); ``leaf_frames`` is the ordered leaf-name
+    # list added to F; ``leaf_escapes`` is ``(name, reason)`` per leaf the predicate
+    # refused (a narrowed ``chain_closure_escapes`` frontier, §4.2).
+    leaf_reroutes: dict = field(default_factory=dict)
+    leaf_frames: list = field(default_factory=list)
+    leaf_escapes: list = field(default_factory=list)
 
 
 def chain_promotion_no_op(per_region_promoted: list[bool]) -> bool:
@@ -291,6 +306,21 @@ class CarrierClosure:
     # @704).  Threaded into ``closure_names`` so ``promote_region_block`` does not demote
     # them at their decl-init landing.
     closure_body_names: set = field(default_factory=set)
+    # --- rule (d): leaf-callee promotion (LEAF_CALLEE_PROMOTION_DESIGN.md §1.1) ---
+    # A leaf callee ``g`` (called from a chain line, no chain line in its own body) that
+    # the ``clonable_leaf`` predicate accepts is added to F as a new *cloned* frame.
+    # ``leaf_reroutes`` maps the ORIGINAL callee name to its per-integral clone name
+    # (``Lnrat`` -> ``Lnrat_B10``); L3 materialises the clone body + reroutes the call
+    # sites — this subtask only RECORDS the reroute (design §8 non-goal: no emission).
+    # ``leaf_frames`` is the ordered list of original leaf names pulled into F.
+    leaf_reroutes: dict = field(default_factory=dict)
+    leaf_frames: list = field(default_factory=list)
+    # A leaf on a chain line the predicate REFUSED (not clonable): a narrowed
+    # ``chain_closure_escapes`` frontier (§4.2) — ``(name, reason)`` per refused leaf.
+    leaf_escapes: list = field(default_factory=list)
+    # §2.8 circuit breaker: rule (d) would grow F past 8 frames or recurse past depth 3.
+    chain_closure_oversized: bool = False
+    oversized_detail: str = ""
 
     @property
     def escape_reasons(self) -> list[tuple[str, str]]:
@@ -314,6 +344,41 @@ class CarrierClosure:
 
 
 @dataclass
+class LeafPromotionContext:
+    """Everything rule (d) (leaf-callee promotion) needs — supplied ONLY when a
+    caller opts leaf promotion in (LEAF_CALLEE_PROMOTION_DESIGN.md §1.1, L2).
+
+    When this is ``None`` (the default for every pre-L2 caller, including
+    :func:`chain_promote`'s production path), rule (d) is inert and the closure is
+    byte-identical to before — the STOP #B guarantee.  When supplied,
+    :func:`_expand_value_closure` runs the rule-(d) frame-discovery fixed point,
+    growing ``F`` with cloned leaf frames before rules (a)/(b)/(c) run over the
+    enlarged set.  L2 records the discovery (``leaf_reroutes`` / ``leaf_frames`` /
+    ``leaf_escapes`` on the :class:`CarrierClosure`); L3 owns emission.
+
+    * ``graph`` — the :class:`~agents.patcher.call_graph.CallGraph`, for resolving a
+      leaf's :class:`~agents.patcher.call_graph.FuncDef` extent + clause-(3) overload
+      count.
+    * ``surface`` — the L1′ :class:`~agents.integrator_base.shallow_wrapper.VendoredSurface`.
+    * ``is_class1_synthesizable`` — the pure L1′ manifest query (clause 2(ii)).
+    * ``source_instantiates_at_dd`` — ``name -> bool`` (clause 2(iii)).
+    * ``resolve_primary_body`` — ``name -> str | None`` primary-body lookup, for the
+      predicate's clause-(2) classification and recursion.
+    * ``integral`` — the per-integral clone suffix (``B10`` -> ``Lnrat_B10``).
+    * ``max_frames`` / ``max_depth`` — the §2.8 circuit-breaker thresholds.
+    """
+
+    graph: object
+    surface: object
+    is_class1_synthesizable: object
+    source_instantiates_at_dd: object
+    resolve_primary_body: object
+    integral: str
+    max_frames: int = 8
+    max_depth: int = 3
+
+
+@dataclass
 class _DeclStmt:
     """One statement-level local declaration recovered from a function body.
 
@@ -330,7 +395,7 @@ class _DeclStmt:
 def compute_value_closure(
     *, manifest: ChainManifest, graph: CallGraph, scalar_type: str,
     complex_type: str | None = None, complex_tokens=frozenset(),
-    max_paths: int = 1024,
+    max_paths: int = 1024, leaf_ctx: "LeafPromotionContext | None" = None,
 ) -> CarrierClosure:
     """Compute a chain's value closure (CLOSURE_SCOPED_CHAINS_DESIGN.md §2).
 
@@ -483,7 +548,7 @@ def compute_value_closure(
         out, frames=frames, frame_names=frame_names, func_src=func_src,
         func_line_start=func_line_start, chain_lineset=chain_lineset,
         scalar_type=scalar_type, complex_type=complex_type,
-        complex_tokens=complex_tokens)
+        complex_tokens=complex_tokens, leaf_ctx=leaf_ctx)
     return out
 
 
@@ -950,12 +1015,18 @@ def _return_type_signature(func_src: str, func_line_start: int):
 
 def _expand_value_closure(out: CarrierClosure, *, frames, frame_names, func_src,
                           func_line_start, chain_lineset, scalar_type,
-                          complex_type, complex_tokens) -> None:
-    """Populate ``out``'s enlarged-closure fields (rules (a)+(b) fixed point, §2.3).
+                          complex_type, complex_tokens,
+                          leaf_ctx: "LeafPromotionContext | None" = None) -> None:
+    """Populate ``out``'s enlarged-closure fields (rules (a)+(b)+(c) fixed point, §2.3).
 
     ``frames`` maps each chain frame key ``(file, ls, le)`` to its function decl;
     ``frame_names`` is the set of chain function names ``F`` (a call whose target is
     in ``F`` is a chain-internal edge — rule (c) territory, not an escape).
+
+    When ``leaf_ctx`` is supplied (L2 opt-in), rule (d) leaf-callee promotion runs
+    AFTER the a/b/c fixed point (:func:`_discover_leaf_frames`), recording clone
+    reroutes / refusals / the circuit breaker on ``out``.  With ``leaf_ctx=None`` the
+    a/b/c result is byte-identical to before (STOP #B).
     """
     # type tokens that, used as a call target, denote a cast rather than an escape
     type_tokens: set[str] = set(complex_tokens) | {scalar_type}
@@ -1391,6 +1462,127 @@ def _expand_value_closure(out: CarrierClosure, *, frames, frame_names, func_src,
             blocking[dest] = reason
     out.blocking_escapes = sorted(blocking.items())
 
+    # -- rule (d): leaf-callee promotion (LEAF_CALLEE_PROMOTION_DESIGN.md §1.1) -----
+    # Runs only under an explicit opt-in (L2); inert otherwise so the a/b/c result
+    # above is byte-identical (STOP #B).  Frame-discovery ONLY — it records clone
+    # reroutes / refusals / the §2.8 circuit breaker on ``out``; L3 owns emission.
+    if leaf_ctx is not None:
+        _discover_leaf_frames(
+            out, leaf_ctx=leaf_ctx, frames=frames, frame_names=frame_names,
+            line_calls=line_calls, line_stores=line_stores,
+            chain_lines_in_frame=chain_lines_in_frame,
+            type_tokens=type_tokens, scalar_type=scalar_type)
+
+
+def _discover_leaf_frames(out: CarrierClosure, *, leaf_ctx, frames, frame_names,
+                          line_calls, line_stores, chain_lines_in_frame, type_tokens,
+                          scalar_type) -> None:
+    """Rule (d): grow ``F`` with clonable leaf callees (design §1.1, §2.6–2.8).
+
+    A leaf callee is a call ``ql::g<…>(…)`` on a chain line whose target ``g`` is
+    NOT already a chain frame (``g ∉ F``), not a functional cast, and not a
+    dd-boundary symbol — the frontier today's a/b/c fixed point refuses as a
+    ``chain_closure_escapes``.  For each such ``g`` this runs the ``clonable_leaf``
+    predicate; if it accepts, ``g`` (and every transitive clonable dep it names) is
+    recorded as a new frame with a per-integral clone name ``g_<integral>`` and a
+    reroute (``leaf_reroutes[g] = g_<integral>``); if it refuses, ``g`` is a narrowed
+    ``leaf_escapes`` frontier.  The §2.8 circuit breaker aborts (``chain_closure_
+    oversized``) if F would exceed ``max_frames`` frames or a leaf recurses past
+    ``max_depth``.  Records only — no tree mutation, no emission (L3).
+    """
+    graph = leaf_ctx.graph
+    resolve = leaf_ctx.resolve_primary_body
+
+    def _boundary(qual: str, last: str) -> bool:
+        return is_dd_boundary(
+            qual, last, surface=leaf_ctx.surface,
+            source_instantiates_at_dd=leaf_ctx.source_instantiates_at_dd,
+            is_class1_synthesizable=leaf_ctx.is_class1_synthesizable,
+            resolve_primary_body=resolve)
+
+    # Candidate leaf callees: every call ON a chain line whose target is (1) not already
+    # a chain frame, (2) not a functional cast, (3) not an indexed kernel-output store
+    # (``res(i,0) = …`` — a store, not a callee), and (4) not a dd-boundary symbol (a
+    # vendored op / Class-1 wrapper / source constant the pipeline synthesizes or reads
+    # rather than clones, §2.6).  Deterministic first-appearance order so discovery is
+    # reproducible; the SAME boundary classifier :func:`clonable_leaf` clause (2) uses,
+    # so the two never disagree on what is a leaf.
+    candidates: list[tuple[str, str]] = []
+    seen_cand: set[str] = set()
+    for fkey in frames:
+        cif = sorted(chain_lines_in_frame.get(fkey, set()))
+        for L in cif:
+            store_names = {c for c, _rhs in line_stores[fkey].get(L, [])}
+            for (qual, last, _args) in line_calls[fkey].get(L, []):
+                if last in frame_names or last in type_tokens:
+                    continue                 # chain-internal edge / a functional cast
+                if last in store_names:
+                    continue                 # indexed kernel-output store, not a callee
+                if last in seen_cand:
+                    continue
+                seen_cand.add(last)
+                if _boundary(qual, last):
+                    continue                 # vendored / Class-1 / source — not a leaf
+                candidates.append((qual, last))
+
+    # F starts at the existing chain frame count; each accepted leaf (and its clonable
+    # deps) adds one.  The circuit breaker (§2.8) trips on frame count or recursion
+    # depth — the predicate's own depth cap surfaces the latter as a refusal, which we
+    # promote to ``chain_closure_oversized`` when the reason names the depth cap.
+    n_frames = len(frames)
+    reroutes: dict = {}
+    frame_list: list = []
+    escapes: list = []
+
+    def _record_clone(name: str) -> None:
+        nonlocal n_frames
+        if name in reroutes:
+            return
+        reroutes[name] = f"{name}_{leaf_ctx.integral}"
+        frame_list.append(name)
+        n_frames += 1
+
+    for (qual, g) in candidates:
+        if n_frames >= leaf_ctx.max_frames:
+            out.chain_closure_oversized = True
+            out.oversized_detail = (
+                f"rule (d) would grow F past {leaf_ctx.max_frames} frames "
+                f"(§2.8 circuit breaker) at leaf {g!r}")
+            break
+        body = resolve(g)
+        res = clonable_leaf(
+            qual, body, None,
+            call_graph=graph, surface=leaf_ctx.surface,
+            is_class1_synthesizable=leaf_ctx.is_class1_synthesizable,
+            source_instantiates_at_dd=leaf_ctx.source_instantiates_at_dd,
+            resolve_primary_body=resolve, scalar_type=scalar_type,
+            frame_names=frame_names, type_tokens=type_tokens,
+            binds_shared_param=None,
+            depth=1, max_depth=leaf_ctx.max_depth)
+        if res.ok:
+            # count this leaf + its transitive clonable deps against the breaker
+            new_names = [g] + [d for d in res.transitive_deps if d not in reroutes]
+            if n_frames + len(new_names) > leaf_ctx.max_frames:
+                out.chain_closure_oversized = True
+                out.oversized_detail = (
+                    f"rule (d) would grow F past {leaf_ctx.max_frames} frames "
+                    f"(§2.8 circuit breaker) admitting leaf {g!r} + "
+                    f"{len(res.transitive_deps)} transitive dep(s)")
+                break
+            _record_clone(g)
+            for dep in res.transitive_deps:
+                _record_clone(dep)
+        elif "§2.8 circuit breaker" in res.reason:
+            out.chain_closure_oversized = True
+            out.oversized_detail = res.reason
+            break
+        else:
+            escapes.append((g, res.reason))
+
+    out.leaf_reroutes = dict(sorted(reroutes.items()))
+    out.leaf_frames = sorted(frame_list)
+    out.leaf_escapes = sorted(escapes)
+
 
 def _attach_return_widens(return_widens: list,
                           new_specs: dict[str, dict[str, VariantSpec]]) -> None:
@@ -1435,7 +1627,8 @@ def chain_promote(*, manifest: ChainManifest, graph: CallGraph,
                   tree_root: str | Path, scalar_type: str, two_limb: bool,
                   shim_include: str | None, caller_type: str = "double",
                   complex_type: str | None = None, max_paths: int = 1024,
-                  app_source_roots=()) -> ChainFanoutResult:
+                  app_source_roots=(),
+                  leaf_ctx: "LeafPromotionContext | None" = None) -> ChainFanoutResult:
     """Widen a whole cascade chain to ``scalar_type`` (dd) as one coordinated envelope.
 
     Mutates the tree under ``tree_root`` in place (per-file AMP-FANOUT blocks + the
@@ -1443,6 +1636,11 @@ def chain_promote(*, manifest: ChainManifest, graph: CallGraph,
     chain-scope 2c/2d gate verdicts.  Raises :class:`FanoutError` if a chain region
     is not inside a known function or its function is unreachable from the entry
     point.
+
+    ``leaf_ctx`` (L2 opt-in) enables rule (d) leaf-callee promotion: the closure runs
+    the frame-discovery fixed point, and the §2.8 circuit breaker is a terminal
+    (``chain_closure_oversized``) computed BEFORE any tree mutation.  With
+    ``leaf_ctx=None`` the pass is byte-identical to the pre-L2 behaviour (STOP #B).
     """
     tree = Path(tree_root).resolve()
     complex_tokens, caller_complex = _resolve_complex_binding(
@@ -1458,7 +1656,15 @@ def chain_promote(*, manifest: ChainManifest, graph: CallGraph,
     # widened in the variant (VariantSpec.closure_decls, applied per file below).
     closure = compute_value_closure(
         manifest=manifest, graph=graph, scalar_type=scalar_type,
-        complex_type=complex_type, complex_tokens=complex_tokens, max_paths=max_paths)
+        complex_type=complex_type, complex_tokens=complex_tokens, max_paths=max_paths,
+        leaf_ctx=leaf_ctx)
+    # Rule (d) §2.8 circuit breaker — abandon cleanly before any mutation (graceful
+    # degradation, not a scope choice; for Group A this never fires — B10 frontier is
+    # depth-1, 3 frames).
+    if closure.chain_closure_oversized:
+        return ChainFanoutResult(
+            declared_variants=[], files_touched=[],
+            chain_closure_oversized=True, oversized_detail=closure.oversized_detail)
     if closure.unwidenable_reasons:
         names = ", ".join(f"{n} ({r})" for n, r in closure.unwidenable_reasons)
         return ChainFanoutResult(
@@ -1617,4 +1823,7 @@ def chain_promote(*, manifest: ChainManifest, graph: CallGraph,
         in_place_regions=in_place_regions, paths_enumerated=paths_enumerated,
         truncated=truncated, promotion_applied=promotion_applied,
         write_truncation=write_truncation, reroutes=dict(root_reroutes),
-        reads_used=reads_used, closure_names=sorted(closure_names))
+        reads_used=reads_used, closure_names=sorted(closure_names),
+        leaf_reroutes=dict(closure.leaf_reroutes),
+        leaf_frames=list(closure.leaf_frames),
+        leaf_escapes=list(closure.leaf_escapes))
