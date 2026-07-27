@@ -11,7 +11,7 @@ why :func:`compute_source_hash` takes it as a parameter rather than hashing a
 module-level prompt.
 
 Lifted verbatim (logic-identical) from ``agents/tracked_integrator/agent.py`` so
-the tracked shim's historical ``SOURCE_HASH`` (``cfad2410…``) is preserved
+the tracked shim's ``SOURCE_HASH`` (``247c8b86…``) is preserved
 byte-for-byte across the refactor.
 """
 

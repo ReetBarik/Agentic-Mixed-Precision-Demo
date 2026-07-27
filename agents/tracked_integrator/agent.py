@@ -25,7 +25,7 @@ name it hands to the C8 patcher.  The generation is driven by an LLM call when a
 ``cfg`` is supplied; when ``cfg`` is ``None`` (the offline path exercised by the
 scaffold smoke tests) it falls back to writing a benign placeholder header.  The
 signature and the hash/caching contract are unchanged, and the tracked shim's
-historical ``SOURCE_HASH`` (``cfad2410…``) is preserved byte-for-byte.
+``SOURCE_HASH`` (``247c8b86…``) is preserved byte-for-byte.
 """
 
 from __future__ import annotations

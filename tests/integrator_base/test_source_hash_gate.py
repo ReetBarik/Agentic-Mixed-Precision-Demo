@@ -19,9 +19,11 @@ REPO = Path(__file__).resolve().parents[2]
 HEADERS_FULL = REPO / "runs" / "qcdloop_headers_full"
 COMMITTED_SHIM = REPO / "runs" / "qcdloop" / "src" / "ql_tracked_interop.hpp"
 
-# Locked historical values (see runs/qcdloop/VALIDATION.md).
+# Locked values (see runs/qcdloop/VALIDATION.md).  SOURCE_HASH was re-pinned
+# cfad2410… → 247c8b86… when e3d2e45 added kokkosMaths_dd.h to qcdloop_headers_full
+# (a legitimate source-snapshot enrichment; RULESET_HASH is unchanged).
 RULESET_HASH = "473ccee3385392101f03d66f7d3fe8f6be11b3a57c38d9abe16e4b7a65fc914c"
-SOURCE_HASH = "cfad2410c3ddc32ab520cc03f18dd5e38f62b9fd0359678851e50da9f40a0ac8"
+SOURCE_HASH = "247c8b866ffc94b2f8ae0ffa80b69ad9efda47a1d492db8c4053b318fc603762"
 
 _needs_tree = pytest.mark.skipif(
     not HEADERS_FULL.is_dir() or not COMMITTED_SHIM.is_file(),

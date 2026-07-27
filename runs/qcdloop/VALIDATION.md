@@ -17,7 +17,8 @@ the whole-app compile diagnostics.
 - **C8 patch: byte-identical to the Stage-2 B16/BIN3/BIN4 patch**
   (`md5 f0726269…`) — 9 sites, `{a:3, b:5, c:1}`, files `box/B3m.h`,
   `box/B4m.h`. Passes the STOP-#1 byte-identity gate.
-- **Shim:** `Sign(Tracked<T>) → Tracked<T>` (527 lines, `SOURCE_HASH cfad2410…`).
+- **Shim:** `Sign(Tracked<T>) → Tracked<T>` (527 lines, `SOURCE_HASH 247c8b86…`
+  — re-pinned from `cfad2410…` when e3d2e45 enriched the source snapshot).
 
 ### STOP #1 — Sign classification non-determinism (resolved)
 
