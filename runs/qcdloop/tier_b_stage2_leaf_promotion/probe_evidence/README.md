@@ -9,6 +9,14 @@ whose body computes in dd and never names `ql::Lnrat`.
 pipeline SYNTHESIZES qcdloop-specific dd support (Class 1) or uses SOURCE-resident data
 (Class 2) — it does **not** vendor a hand-ported `dd_ql_support.hpp` (v1's §3.4, rejected).
 
+**v3 (2026-07-27) added P5** after commit `e3d2e45` enriched the vendored
+qcdloop-under-test snapshot with `runs/qcdloop_headers_full/kokkosMaths_dd.h` — qcdloop's
+own dd-precision `Constants<T>` (43-term Chebyshev `_C`, 25-term Bernoulli `_B`, dd `_pi()`).
+P5 discharges **STOP #E** (source doesn't provide what the design claims): the enriched
+source now hands the pipeline the **43-coeff** dd table directly, so v2's Option-B
+19-coeff-at-dd concession (and its truncation-ceiling caveat, §2.4) **no longer applies for
+Group A** — Class 2 resolves via source enrichment, not a synthesis/vendoring capability gap.
+
 ```sh
 module use /soft/modulefiles && module load gcc/13.3.0
 P=runs/qcdloop/tier_b_stage2_leaf_promotion/probe_evidence
@@ -22,6 +30,9 @@ g++ -std=c++20 -w -DWITH_SYNTH -Isrc -Ithird_party/include -I$KI/include $P/prob
 g++ -std=c++20 -w -Isrc -Ithird_party/include -I$KI/include $P/probe_constants_dd.cpp -L$KI/lib64 -lkokkoscore -lkokkoscontainers -ldl -o /tmp/pC && /tmp/pC
 # P4 (v2) — Option-B lift ceiling (pure dd Clenshaw, no Kokkos):
 g++ -std=c++17 -O2 $P/probe_optionB_ceiling.cpp -o /tmp/ceil && /tmp/ceil
+# P5 (v3) — enriched source: Constants<ddouble> from kokkosMaths_dd.h has 43 coeffs, bit-exact:
+g++ -std=c++20 -w -Ithird_party/include -I$KI/include -Iruns/qcdloop_headers_full \
+    $P/probe_constants_dd43.cpp -L$KI/lib64 -lkokkoscore -lkokkoscontainers -ldl -o /tmp/pC43 && /tmp/pC43
 ```
 
 ## Results
@@ -33,7 +44,8 @@ g++ -std=c++17 -O2 $P/probe_optionB_ceiling.cpp -o /tmp/ceil && /tmp/ceil
 | **P2-A_synth** | vendored-only | **FAIL** (5 errors) |
 | **P2-B_synth** | + **Class-1 synthesized overlay only** (mechanical wrappers, NO hand-written Constants) | **OK**, `\|diff\|=0.000e+00` vs double |
 | **P3** | does source `Constants<ddouble>` instantiate at dd? | **YES** — `num_C=19`, `_C` promotes to dd, `sum_C.hi=0.8224670334241132` |
-| **P4** | how much lift does Option-B (19-coeff dd) buy? | roundoff removed ~1e-16→~1e-32; **truncation floor ~1e-16 dd can't reduce** |
+| **P4** | how much lift does Option-B (19-coeff dd) buy? | roundoff removed ~1e-16→~1e-32; **truncation floor ~1e-16 dd can't reduce** (v3: SUPERSEDED — source now ships 43 coeffs) |
+| **P5** | does the enriched source (`kokkosMaths_dd.h`) provide the 43-coeff dd table? | **YES** — `num_C=43`, `_C(0/18/42)` bit-exact, `_pi()`=`dd_pi()` bit-exact, `sum_C(43).hi=0.8224670334241132` (π²/12, refined `lo` vs 19-coeff) |
 
 P1/P2 build-A distinct errors (the Class-1 gap, verbatim):
 
@@ -87,4 +99,5 @@ dd recurrence residual |lo/hi| @Y=0.55  = 1.037e-18   (dd carries ~18 extra digi
 * `probe_clone.cpp` / `build_A.err` — P1 (v1, retained).
 * `probe_clone_synth.cpp` / `build_A_synth.err` / `build_B_synth.err` — P2 (v2, synthesized overlay).
 * `probe_constants_dd.cpp` / `probe_constants_dd.out` — P3 (v2, Class-2 source instantiation).
-* `probe_optionB_ceiling.cpp` / `probe_optionB_ceiling.out` — P4 (v2, Option-B ceiling).
+* `probe_optionB_ceiling.cpp` / `probe_optionB_ceiling.out` — P4 (v2, Option-B ceiling; v3-superseded).
+* `probe_constants_dd43.cpp` / `probe_constants_dd43.out` — P5 (v3, enriched-source 43-coeff dd table).

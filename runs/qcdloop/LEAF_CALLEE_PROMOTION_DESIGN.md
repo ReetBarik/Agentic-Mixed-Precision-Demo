@@ -1,51 +1,94 @@
 # Leaf-Callee Promotion — Design Notes (Group A precision-lift unblock)
 
-Status: **v2 — design + falsification probes done, STOP before implementation** (2026-07-27).
-v1 was 2026-07-26. Scope unchanged: extend closure-scoped dd promotion
-(`CLOSURE_SCOPED_CHAINS_DESIGN.md`) so leaf callees like `ql::Lnrat` / `ql::ddilog`
-become **cloned, promoted frames** instead of a `chain_closure_escapes` refusal frontier.
-Discipline: **design only** — no changes to `agents/`, `tests/`. The §7 probes were built
+Status: **v3 — design + falsification probes done, STOP before implementation** (2026-07-27).
+v2 was 2026-07-27 (earlier same day); v1 was 2026-07-26. Scope unchanged: extend
+closure-scoped dd promotion (`CLOSURE_SCOPED_CHAINS_DESIGN.md`) so leaf callees like
+`ql::Lnrat` / `ql::ddilog` become **cloned, promoted frames** instead of a
+`chain_closure_escapes` refusal frontier.
+Discipline: **design only** — no changes to `agents/`, `tests/`. The §6 probes were built
 and run (Subtask-5-style single-TU); nothing else moved.
 
-> ## What changed v1 → v2 (read this first)
+> ## What changed v2 → v3 (read this first)
 >
-> **v1's central resolution (§3.4) was to *vendor* a hand-ported `dd_ql_support.hpp` from
+> **The source input got richer.** Commit `e3d2e45`
+> ("qcdloop-under-test: add kokkosMaths_dd.h (43-coeff Constants<T> at dd) as source
+> input") added `runs/qcdloop_headers_full/kokkosMaths_dd.h` (402 lines) to the vendored
+> qcdloop snapshot. This is **qcdloop's own dd-precision `Constants<T>`**, copied verbatim
+> from `ReetBarik/qcdloop@ddfun_enabled` commit `2229ec4` — the same fork whose validation
+> build is the oracle, but this *specific header* is qcdloop-authored **library data**, not
+> oracle-only knowledge. It is exactly parallel to how the mainline
+> `scarrazza/qcdloop:tools.cc` publishes both the 19-double and the 43-quadmath `_C` tables
+> side by side. A one-line namespace shim at the top
+> (`namespace ql { namespace ddfun = ::quad::ddfun; }`) aliases the fork's `ql::ddfun` to
+> this repo's vendored `quad::ddfun` primitives (`third_party/include/dd_math.hpp` etc.);
+> the body is otherwise verbatim upstream. `kokkosMaths.h` (the double primary) is
+> **byte-identical to before** — the double build path is unchanged.
+>
+> **What this gives the pipeline (proven by §6 probe P5, `probe_constants_dd43.cpp`):**
+>
+> * `ql::Constants<quad::ddfun::ddouble>::_num_C()` = **43** (not 19).
+> * `_C(i)` returns **bit-exact** dd Chebyshev coefficients from the source table
+>   (`_C(0)/_C(18)/_C(42)` bit-verified against the header's `make_dd()` literals).
+> * `_pi()` returns `ddfun::dd_pi()` — **bit-exact dd π**, not `T(M_PI)`.
+> * dd-appropriate scalar tolerances (`_eps=1e-12`, `_reps=1e-30`, `_neglig=1e-28`,
+>   `_qlonshellcutoff=1e-20`, `_ieps50`, …) and a 25-term Bernoulli `_B` table, all as source.
+>
+> **Net effect on the plan — the v2 Class-2 problem dissolves for Group A:**
+>
+> 1. **§2.3 collapses.** v2's Option B ("accept the library's 19-coeff series at dd and
+>    bound the truncation floor") no longer applies, because the pipeline now sees the
+>    **43-coeff** table directly from source. Class 2 resolves via **source enrichment**, no
+>    synthesis and no vendoring — the pipeline consumes qcdloop's published dd table as
+>    source input, exactly as it consumes the double primary. Options A/B/C from v2 become
+>    *historical alternatives* ("what we would have done if the library didn't publish dd
+>    tables"), retained for the reasoning trail, not funded.
+> 2. **§2.4 is repurposed.** The v2 "+8-to-+16 predicted band" + truncation-cancellation
+>    caveat existed **only** because Option B forfeited the 43-coeff tail. With the 43-coeff
+>    table available, ddilog's dd accuracy is **not truncation-limited** within dd's ~1e-32
+>    arithmetic floor. v3 **restores the closure design's original +18.43-digit ceiling**
+>    (Item 7's prediction) as the headline B10 prediction; the v2 band analysis is noted as
+>    superseded. The falsifier keeps its shape (measured lift < +8 → STOP #A, value-flow
+>    model wrong) but is **no longer diagnostic of a truncation problem**.
+> 3. **The dispatch shape simplifies.** v2's optional **Subtask L4** (Option-A DCT
+>    coefficient generator) is **removed from the Group-A plan** — no longer needed, because
+>    the library publishes the table. It is retained only as a named contingency for a
+>    *future* library-under-test that omits a needed dd table. Sequence becomes
+>    L1′ → L2 → L3 → L-measure, **~10–15 days** (drops the ~2–3 wk L4).
+> 4. **STOP #O softens.** The Class-2 capability-gap STOP is retained as a general safety
+>    net but **does not fire for B10/B12/B13** under v3 — it is only reachable if a
+>    library-under-test omits a dd-precision table the pipeline needs (not the case for the
+>    current qcdloop-under-test after `e3d2e45`).
+>
+> **Everything from v2 that was independent of the coefficient-table question stands and is
+> carried forward:** the Class-1 synthesized-wrapper story (§2.2, the whole point that the
+> pipeline synthesizes the mechanical `ql::kAbs/kLog/…` overloads rather than vendoring
+> them), the clone/STOP-#K rename discipline (§3), rules a/b/c interaction (§4), the
+> termination/acyclicity proof (§2.6–2.8), per-integral clones, and the four v2 probes.
+
+> ## What changed v1 → v2 (retained for the trail)
+>
+> v1's central resolution (§3.4) was to *vendor* a hand-ported `dd_ql_support.hpp` from
 > `qcdloop@ddfun_enabled:src/qcdloop/kokkosMaths_dd.h` — importing qcdloop-specific dd
-> knowledge (the 43-term Chebyshev series, the `ql::` dd helper overloads) the pipeline
-> should synthesize.** Reet's architectural line rejects this: `third_party/include/` is
-> vendored, **app-independent** dd/ff primitives that know nothing about qcdloop and never
-> will; anything qcdloop-specific is the **pipeline's job to synthesize** from qcdloop's own
-> source + the vendored primitives. `qcdloop@ddfun_enabled` is a **validation oracle, not a
-> generation cheat-sheet**.
+> knowledge (the Chebyshev series, the `ql::` dd helper overloads) the pipeline should
+> synthesize. Reet's architectural line rejected this: `third_party/include/` is vendored,
+> **app-independent** dd/ff primitives that know nothing about qcdloop; anything
+> qcdloop-specific is the **pipeline's job to synthesize** from qcdloop's own source + the
+> vendored primitives. `qcdloop@ddfun_enabled` is a **validation oracle, not a generation
+> cheat-sheet**. v2 confronted this by splitting the category-(d) support surface into
+> **Class 1 (pipeline-synthesizable mechanical wrappers)** and **Class 2 (precision-target
+> coefficient tables)**, choosing Option B for Class 2 (19-coeff at dd from the unmodified
+> double primary). v1's Subtask L1 ("vendor + port dd_ql_support.hpp") was deleted and
+> replaced by L1′ (synthesize Class-1 in the agents tree).
 >
-> v2 confronts this by **splitting the category-(d) support surface into two classes**
-> (§2), and — critically — by discovering through two new probes that **the split is far
-> more favourable than v1 assumed**:
->
-> * **Class 1 (mechanical wrappers — `kAbs/kLog/Real/Imag/Sign/iszero`)** is
->   *pipeline-synthesizable today* via an extension of the existing **Gap-A qualified-math
->   bridge** machinery (`agents/integrator_base/regional.py`). Each is a one-line delegation
->   whose dd overload is a namespace redirect (`Kokkos::abs`→`quad::ddfun::abs`) or a member
->   accessor (`.real()`) — exactly the bridge shape the shim generator already emits. **No
->   vendored header.**
-> * **Class 2 (precision-target coefficient tables — the 43-term `Constants<ddouble>::_C`)**
->   is the one genuine capability question. v2 **chooses Option B** (§2.3): accept the
->   library's own 19-coeff series at dd. The load-bearing discovery: **`Constants<ddouble>`
->   already instantiates directly from the unmodified source primary** (probe
->   `probe_constants_dd.cpp`: `_num_C()=19`, `_C(i)` promotes to dd, `_pi/_half/_ipio2`
->   resolve at `T=ddouble`) — so Option B needs **zero synthesis and zero vendoring**. The
->   43-coeff table is *not* needed to compile or run; it is only needed to reach the full
->   theoretical accuracy, and §2.4 **bounds exactly how much lift the 19-coeff series
->   forfeits** (measured by `probe_optionB_ceiling.cpp`).
->
-> **Net effect on the plan:** v1's Subtask **L1 ("vendor + port dd_ql_support.hpp") is
-> deleted.** It is replaced by L1′ (extend Gap-A to synthesize Class-1 wrappers, in the
-> agents tree) and a *measurement* subtask for Class 2 (Option B). The demo's claim is
-> restored to "the pipeline synthesizes what it needs from source + primitives," with an
-> honest, quantified precision demarcation for coefficient tables.
->
-> Everything else in v1 (rules a/b/c interaction, the rename/STOP-#K refutation,
-> per-integral clones, termination proof) **stands** and is carried forward.
+> **v3 note on the v1/v2 vendoring debate:** the `e3d2e45` header is *not* a return to v1's
+> `dd_ql_support.hpp`. v1 proposed vendoring a hand-ported support header into
+> `third_party/include/` (app-independent primitives) and having the pipeline *depend on
+> it as a primitive*. v3's header lives in `runs/qcdloop_headers_full/` — the **vendored
+> snapshot of the library under test** — as qcdloop's own published data, consumed as
+> *source input* exactly like `kokkosMaths.h`. `third_party/include/` remains app-independent
+> (§4 architectural invariant preserved). The distinction is load-bearing: v1 wanted the
+> pipeline's *primitive layer* to know qcdloop; v3 lets the pipeline *read qcdloop's own
+> source*, which is what it is supposed to do.
 
 Reads as the successor to two docs, both of which stand:
 * `CLOSURE_SCOPED_CHAINS_DESIGN.md` — rules (a)/(b)/(c), the §2.4 refusal frontier, the
@@ -55,9 +98,9 @@ Reads as the successor to two docs, both of which stand:
 * `tier_b_stage2_subtask5/TIER_B_STAGE2_SUBTASK_5_2026-07-26.md` (STOP #K) — proved the
   *forwarding-overload* path is unsound (self-recursion). This design takes STOP #K's own
   recommended option 2 ("make `Lnrat`/`ddilog` chain-frames") and works out whether it is
-  actually buildable. **The v2 answer is: yes, and the support surface it needs is
-  pipeline-synthesizable (Class 1) plus a source-resident coefficient table used as-is
-  (Class 2 / Option B) — no vendored qcdloop-specific header.**
+  actually buildable. **The answer is: yes** — the support surface it needs is
+  pipeline-synthesizable (Class 1) plus a **source-resident 43-coeff coefficient table**
+  the library now publishes (Class 2, v3) — no vendored qcdloop-specific *primitive* header.
 
 > **Load-bearing correction up front (read before §1).** The closure design's §2.4
 > lists `ql::Lnrat` as a hard refusal because "its signature we will not touch." That is
@@ -65,12 +108,13 @@ Reads as the successor to two docs, both of which stand:
 > **clone** it to `Lnrat_B10` (a new symbol, reachable only from the chain's rerouted
 > call sites) and promote the clone's body, exactly as the pipeline already clones
 > `ddilog`/`Li2omx2` whose bodies sit *on* the chain. STOP #K's recursion pit was a
-> property of a same-name *overload*, not of a *renamed clone*. The §7 probes confirm the
+> property of a same-name *overload*, not of a *renamed clone*. The §6 probes confirm the
 > renamed clone builds and runs on the exact inputs that segfaulted the overload. The real
 > blocker is not recursion and not signatures — it is the dd **support surface** the
-> clone's body names. **v2's finding: that surface is not an un-vendored monolith (as v1
-> claimed) but two separable classes, one synthesizable and one already in source.** §2 is
-> the whole ballgame.
+> clone's body names. **v2's finding: that surface splits into a synthesizable class
+> (Class 1) and a coefficient-table class (Class 2). v3's finding: the coefficient-table
+> class is now source-resident at full 43-coeff precision, so it stops being a capability
+> question at all.** §2 is the whole ballgame.
 
 ---
 
@@ -105,8 +149,8 @@ Rules (a)/(b)/(c) then run **unchanged** over the enlarged `F`. Rule (d) is pure
 ### 1.2 The clonable-leaf predicate
 
 Reet's suggestion — "primary template compiles clean at dd against the vendored surface" —
-is the right shape, and v2's Class-1/Class-2 split (§2) makes it decidable **without
-vendoring**. Refined predicate, all clauses required:
+is the right shape, and the Class-1/Class-2 split (§2) makes it decidable **without
+vendoring a support header**. Refined predicate, all clauses required:
 
 ```
 clonable_leaf(g) :=
@@ -118,12 +162,13 @@ clonable_leaf(g) :=
              (i)   vendored quad::ddfun ops (abs/log/…, ddcomplex ops),
              (ii)  a Class-1 SYNTHESIZED wrapper (§2.2) — pipeline-emittable
                    mechanically from that wrapper's own primary + (i),
-             (iii) a Class-2 data accessor that the SOURCE primary already
-                   instantiates at dd (§2.3, Constants<ddouble>::…),
+             (iii) a Class-2 data accessor the SOURCE instantiates at dd
+                   (§2.3): the double primary at T=ddouble, OR the enriched
+                   dd source `kokkosMaths_dd.h` (43-coeff _C, dd _pi, …),
        i.e. rule (d)'s transitive closure over g terminates at the boundary;
                                                              # body instantiable at dd
  ∧ (3) g is NOT self-recursive under a SAME-NAME overload set that a rename
-       cannot separate (STOP #K guard — §4);               # rename discipline safe
+       cannot separate (STOP #K guard — §3);               # rename discipline safe
  ∧ (4) cloning g does not require widening a shared g PARAMETER that a
        non-chain caller also binds — the clone gets its own params, so this
        is automatically satisfied for a pure clone, but a leaf whose promotion
@@ -131,15 +176,16 @@ clonable_leaf(g) :=
        the closure design still holds).
 ```
 
-Clause (2) is now decidable **against a synthesis manifest, not a vendored header**. A leaf
-is clonable iff every dd symbol its promoted body names is (i) vendored, (ii) a Class-1
-wrapper the extended Gap-A machinery **can synthesize** (predicate: primary body is a
-straight-line delegation to a vendored/ADL-reachable op or a member accessor — §2.2), or
-(iii) a Class-2 accessor the **source primary already instantiates at dd** (§2.3). Anything
-else → the leaf is **not** clonable → `chain_closure_escapes` (honest terminal, not a
-doomed emission). This keeps the conservative-parser contract: false-negative (refuse a
-clonable leaf) is safe; false-positive (clone an un-instantiable leaf) is the STOP #K
-hard-fail we must never ship.
+Clause (2) is decidable **against a synthesis manifest + a source-instantiation check, not
+a vendored primitive header**. A leaf is clonable iff every dd symbol its promoted body
+names is (i) vendored, (ii) a Class-1 wrapper the extended Gap-A machinery **can
+synthesize** (predicate: primary body is a straight-line delegation to a vendored/ADL
+op or a member accessor — §2.2), or (iii) a Class-2 accessor the **source instantiates at
+dd** (§2.3 — either the double primary at `T=ddouble`, or, for coefficient tables, the
+enriched dd source `kokkosMaths_dd.h`). Anything else → the leaf is **not** clonable →
+`chain_closure_escapes` (honest terminal, not a doomed emission). This keeps the
+conservative-parser contract: false-negative (refuse a clonable leaf) is safe;
+false-positive (clone an un-instantiable leaf) is the STOP #K hard-fail we must never ship.
 
 ### 1.3 Which frames become eligible
 
@@ -147,33 +193,37 @@ For the Group-A chains, rule (d) makes exactly these leaves eligible:
 
 | leaf | called from | primary | promotable body? |
 |------|-------------|---------|------------------|
-| `ql::Lnrat` (TScale overload, `:153`) | `Li2omx2:701,706` | straight-line `kLog/kAbs/Sign/_ipio2` | yes — all Class-1 (§2.2) + source Constants (§2.3); **§7 v2 probe: builds+runs** |
-| `ql::ddilog` (`:163`) | `Li2omx2:702,708` (leaf on B12/B13) | Chebyshev series over `_C` | already IN `F` for B10 (chain lines inside it); **needed for B12/B13**; uses Class-2 `_C` (§2.3, Option B) |
-| `ql::kfn`, `ql::ltspence`, `ql::cspence` | Group-B chains | series / branch | out of scope (Group-B dd-insufficient, §6) |
+| `ql::Lnrat` (TScale overload, `:153`) | `Li2omx2:701,706` | straight-line `kLog/kAbs/Sign/_ipio2` | yes — all Class-1 (§2.2) + source Constants (§2.3); **§6 probe: builds+runs** |
+| `ql::ddilog` (`:163`) | `Li2omx2:702,708` (leaf on B12/B13) | Chebyshev series over `_C` | already IN `F` for B10 (chain lines inside it); **needed for B12/B13**; uses Class-2 `_C` (§2.3, now **43-coeff source**) |
+| `ql::kfn`, `ql::ltspence`, `ql::cspence` | Group-B chains | series / branch | out of scope (Group-B dd-insufficient, §7) |
 
 So for **B10** specifically, rule (d) is needed for **`Lnrat` only** — `ddilog`/`Li2omx2`
 are already cloned frames. This narrows the headline case to a single leaf whose entire
 support surface is Class-1 wrappers plus the source's own `Constants<ddouble>::_ipio2`
 (no `_C` — Lnrat has no series). **The B10 unblock therefore needs no Class-2 coefficient
 work at all.** Class 2 becomes relevant only when `ddilog` is itself a rule-(d) leaf
-(B12/B13), where Option B applies (§2.3–2.4).
+(B12/B13), where under v3 it is served by the **43-coeff source table** (§2.3).
 
 ---
 
 ## 2. Support-surface scoping — the two classes (the crux)
 
-This is the section the whole design turns on, and where the §7 probes did their work. v1
-treated the category-(d) surface as one un-vendored monolith. v2 splits it.
+This is the section the whole design turns on, and where the §6 probes did their work. v1
+treated the category-(d) surface as one un-vendored monolith. v2 split it into Class 1
+(synthesizable) and Class 2 (coefficient tables). **v3 resolves Class 2 by source
+enrichment** — the library now publishes its dd table.
 
 ### 2.1 The B10 support-surface bill of materials, re-classified
 
 Every dd symbol the B10 closure's promoted bodies name, sourced from `Lnrat` body
 `kokkosUtils.h:141-155`, `ddilog` `:163-232`, `Li2omx2` `:692-712`; helper defs
-`src/kokkosMaths.h:250-372`; vendored `third_party/include/*`. **The `qcdloop@ddfun_enabled`
-oracle is NOT a source here** — the classification is derived from qcdloop-under-test +
-vendored primitives only.
+`src/kokkosMaths.h:250-372`; vendored `third_party/include/*`; and — for coefficient
+tables — the enriched dd source `runs/qcdloop_headers_full/kokkosMaths_dd.h`. **The
+`qcdloop@ddfun_enabled` oracle is NOT consulted here except through that one vendored
+header** — the classification is derived from qcdloop-under-test source + vendored
+primitives only.
 
-| symbol (at dd) | used by | vendored? | source primary at dd? | **v2 class** |
+| symbol (at dd) | used by | vendored? | source primary at dd? | **class** |
 |---|---|---|---|---|
 | `ddadd/sub/mul/div`, `ddouble`/`ddcomplex` ops | all | ✅ `dd_math`/`dd_complex` | — | boundary (vendored) |
 | `abs/log/sqrt/exp/pow` on dd | ddilog, Lnrat | ✅ `quad::ddfun::*` | — | boundary (vendored) |
@@ -184,15 +234,20 @@ vendored primitives only.
 | `ql::Sign(ddouble)` | Lnrat, ddilog | ❌ | primary `(0<x)-(x<0)`, T-generic ±1/0 | **Class 1** |
 | `ql::iszero<…>(ddouble)` | ddilog (`:116`) | ❌ | template; body = `kAbs(x)<_qlonshellcutoff` | **Class 1** (transitive: `kAbs` + source cutoff) |
 | `ql::kPow<…>(ddouble,int)` | ddilog (`:117…`) | ❌ | template `TOutput(1.0); temp*=base` — clean at dd | **source (already instantiates)** |
-| `_pi2o6/_ipio2/_half/_pi/_zero/_one` at dd | ddilog, Lnrat, Li2omx2 | partial (`dd_pi()`) | source `Constants<T>` primary at dd (M_PI→ddouble) | **Class 2 / source** (§2.3) |
-| `Constants<ddouble>::_C(i)`, `_num_C()` | ddilog | ❌ | source primary: **19** coeffs, promotes to dd | **Class 2** (§2.3, Option B) |
+| `_pi2o6/_ipio2/_half/_pi/_zero/_one` at dd | ddilog, Lnrat, Li2omx2 | partial (`dd_pi()`) | double primary at dd; **or dd source (`_pi()`=`dd_pi()` bit-exact)** | **Class 2 / source** (§2.3) |
+| `Constants<ddouble>::_C(i)`, `_num_C()` | ddilog | ❌ | **enriched dd source: 43 coeffs, bit-exact** (P5) | **Class 2 / source** (§2.3, v3) |
 
-**Only two rows are not vendored-boundary or already-in-source: the Class-1 wrappers (which
-the pipeline synthesizes, §2.2) and the Class-2 coefficient table `_C` (Option B, §2.3).**
-This is the whole re-classification. v1's "single un-vendored file" framing conflated these
-and concluded (wrongly) that a vendored header was required.
+**Only the Class-1 wrappers are not vendored-boundary or already-in-source.** The Class-2
+coefficient table `_C` — v2's one genuine capability question — is now **source-resident at
+full 43-coeff precision** via `kokkosMaths_dd.h`. The whole re-classification is: Class 1 is
+synthesized (§2.2), Class 2 is read from source (§2.3). v1's "single un-vendored file"
+framing conflated these and concluded (wrongly) that a vendored primitive header was
+required.
 
 ### 2.2 Class 1 — pipeline-synthesizable via extended Gap-A machinery
+
+*(Unchanged from v2 — this class is orthogonal to the coefficient-table enrichment. Carried
+forward; the §6 P2 probe re-confirms it against the current tree.)*
 
 **Definition.** A Class-1 wrapper is a shallow app-specific function whose primary body is a
 **straight-line delegation** to (a) a vendored/ADL-reachable op, or (b) a member accessor,
@@ -208,7 +263,7 @@ transform** of that primary body.
 | `ql::kSqrt`/`kConj` | `:295/301` `Kokkos::sqrt/conj` | analogous redirect to `quad::ddfun::sqrt/conj` | **needs extension** |
 | `ql::Real`/`Imag` | `:320-326` `.real()/.imag()` accessors on `complex<double>` | emit `ddouble Real(ddcomplex z){ return z.real(); }` etc. | **needs extension** (accessor form) |
 | `ql::Sign` | `:328` `int Sign(double x){ return (0<x)-(x<0); }` | re-emit with dd operands: `int Sign(ddouble x){ return (ddouble(0.0)<x)-(x<ddouble(0.0)); }` | **needs extension** (scalar-expr form) |
-| `ql::iszero` | `:307` template, body `kAbs(x)<_qlonshellcutoff` | already a template — instantiates at dd once `kAbs(dd)` exists + `_qlonshellcutoff` (source literal `T(1e-10)`) | **transitive** (falls out once the above land) |
+| `ql::iszero` | `:307` template, body `kAbs(x)<_qlonshellcutoff` | already a template — instantiates at dd once `kAbs(dd)` exists + `_qlonshellcutoff` (source literal) | **transitive** (falls out once the above land) |
 
 **Why this is an *extension* of Gap-A, not a new capability.** The existing Gap-A bridge
 (`regional.py:64-199`) already synthesizes overloads that inject into a namespace to
@@ -237,7 +292,7 @@ pattern one delegation-hop removed**: `ql::kAbs`'s *body* is `Kokkos::abs(x)`, a
 2. **A synthesized-overload emitter** that, given `(g, primary_body, dd_target)`, produces
    the dd overload text and injects it into namespace `ql` alongside the existing shim —
    reusing the same injection/using-declaration remedy the Gap-A lint already sanctions
-   (`_shim_bridges_qualifier`). The emitted overloads are exactly the §7 v2 probe's
+   (`_shim_bridges_qualifier`). The emitted overloads are exactly the §6 P2 probe's
    `WITH_SYNTH` block, produced mechanically instead of hand-written.
 
 3. **`_MATH_FN_NAMES` stays a `<cmath>` vocabulary.** The extension does **not** bake in
@@ -246,148 +301,132 @@ pattern one delegation-hop removed**: `ql::kAbs`'s *body* is `Kokkos::abs(x)`, a
    (body is a straight-line delegation to a `_MATH_FN_NAMES` op or an accessor), so it
    works for any app's shallow math wrappers, not qcdloop's specifically.
 
-**Empirical proof (§7 v2).** Probe `probe_clone_synth.cpp` build B compiles and runs
-`Lnrat_B10` with a `WITH_SYNTH` overlay that is **only** these mechanical Class-1 overloads
-(no hand-written `Constants`), against the unmodified source `Constants<ddouble>` primary.
-`|diff| = 0` vs the double primary. This is the exact surface the extended Gap-A machinery
-would emit.
+**A v3 subtlety worth stating explicitly.** The enriched `kokkosMaths_dd.h` *also* contains
+the fork's own hand-written Class-1 dd wrappers (`kAbs`/`kLog`/`Sign`/`Real`/`Imag` at dd,
+lines 294–400). **The pipeline does not consume those wrapper definitions** — it synthesizes
+its own Class-1 overlay (§2.2 point 2) from the *double* primary's one-line bodies, keeping
+Class-1 app-independent and the "pipeline synthesizes what it needs" claim intact. From
+`kokkosMaths_dd.h` the pipeline consumes only the **data** the double primary cannot derive
+from its own body: the 43-coeff `_C` table, the 25-term `_B` table, and the bit-exact dd
+`_pi()` (§2.3). The wrapper *code* in that header is redundant with what §2.2 emits and is
+ignored, so the two paths never collide (per-region shim vs source header; §4).
 
-### 2.3 Class 2 — coefficient tables the primary can't derive from its body
+**Empirical proof (§6 P2).** Probe `probe_clone_synth.cpp` build B compiles and runs
+`Lnrat_B10` with a `WITH_SYNTH` overlay that is **only** these mechanical Class-1 overloads
+(no hand-written `Constants`, and NOT the fork's wrappers), against the source
+`Constants<ddouble>` primary. `|diff| = 0` vs the double primary. This is the exact surface
+the extended Gap-A machinery would emit.
+
+### 2.3 Class 2 — coefficient tables, resolved via source enrichment (v3)
 
 **Definition.** Class-2 data is a value the primary template **cannot derive from its own
 body** — precision-target-specific *data*, not code. The load-bearing example is
-`Constants<ddouble>::_C`, the Chebyshev series for Li₂: the source primary
-(`kokkosMaths.h:26`) carries **19** coefficients chosen for double precision; a dd-accurate
-ddilog would want **~43** (the count the oracle uses). The pipeline **cannot invent 43
-dd-appropriate coefficients from the 19-coeff primary alone** — they are the DCT of Li₂
-sampled at more Chebyshev nodes, external data.
+`Constants<ddouble>::_C`, the Chebyshev series for Li₂: a dd-accurate ddilog wants **43**
+coefficients (the DCT of Li₂ sampled at 43 Chebyshev nodes), which cannot be invented from a
+19-coeff double table.
 
-**Decisive discovery (probe `probe_constants_dd.cpp`).** The 19-coeff table is **not a
-compile blocker and needs no synthesis to exist at dd.** The source primary
-`template<typename T> struct Constants` instantiates *directly* at `T = ddouble`:
-`_num_C()` returns 19, `_C(i)` returns `ddouble(coeffs[i])` (the double literal promoted
-honestly to `make_dd(bits, 0)`), and `_pi()/_half()/_ipio2()` all resolve. Build + run:
+**v3 resolution — the library publishes its own dd table.** After commit `e3d2e45`, the
+vendored qcdloop-under-test snapshot carries `runs/qcdloop_headers_full/kokkosMaths_dd.h`:
+qcdloop's own dd-precision `Constants<T>`, with `_num_C()=43` and bit-exact dd `_C(i)`. This
+is qcdloop-authored **library data**, exactly parallel to how the mainline
+`scarrazza/qcdloop:tools.cc` publishes both the 19-double and the 43-quadmath `_C` tables
+side by side. **The pipeline consumes it as source, no synthesis needed** — the same way it
+consumes the double primary `kokkosMaths.h`. The namespace shim
+(`namespace ql { namespace ddfun = ::quad::ddfun; }`) lets the fork-authored header resolve
+against this repo's vendored `quad::ddfun` primitives unchanged (§4).
 
-```
-num_C=19  sum_C.hi=0.8224670334241132  sum_C.lo=-4.971e-17
-```
-
-So the 19-coeff series **already runs at dd from source, zero synthesis, zero vendoring.**
-The only question Class-2 raises is *accuracy*: how much of ddilog's dd headroom does the
-19-coeff truncation forfeit?
-
-**The three options the brief poses, and v2's choice.**
-
-* **Option A — pipeline computes the 43-coeff table offline (chebfun-style DCT).** A real
-  capability extension: a coefficient-generation utility that, given a primary annotated
-  "this `_C` is the Chebyshev series for Li₂ on `[−1,1]`", samples Li₂ at N Chebyshev nodes
-  in dd, DCTs to N coefficients, emits a `Constants<ddouble>::_C` specialisation. Run once
-  per (function, precision) pair, offline, not per-integral LLM synthesis. **Cost: ~2–3
-  weeks** (dd-accurate Li₂ node sampler + DCT + emitter + a bit-exactness gate vs the oracle
-  *for drift detection only*). **Demonstrates the pipeline can bootstrap coefficient tables
-  from qcdloop source + math** — the strongest form of the demo's claim.
-
-* **Option B — accept the 19-coeff series at dd (v2's CHOICE for the first cut).** Compute
-  ddilog at dd using the source's own 19 coefficients. Zero synthesis, zero vendoring, ships
-  with L1′ + the measurement subtask. The 19-coeff truncation caps ddilog's dd accuracy;
-  §2.4 bounds exactly where. **Cost: ~0 beyond the measurement run.**
-
-* **Option C — declare precision-target tables an out-of-scope pre-condition.** State the
-  pipeline synthesizes everything derivable from source + primitives, and coefficient tables
-  at target precision are the **library author's** responsibility to publish alongside the
-  primary (an annotated `Constants<ddouble>` as *source input*). Ships fastest, shrinks the
-  claim, honest about the demarcation.
-
-**v2 chooses Option B as the first cut, with Option A named as the principled follow-on.**
-Justification:
-
-1. **B10 — the headline case — needs *no* Class-2 work at all** (§1.3: Lnrat has no series;
-   `ddilog`/`Li2omx2` are already-cloned frames, not rule-(d) leaves, for B10). So the
-   coefficient-table question is **orthogonal to the B10 unblock** and must not gate it.
-2. **B is measurable now and bounds the promise honestly.** Option A is weeks of work whose
-   payoff is unknown until measured; Option B measures the payoff first. If the 19-coeff
-   ceiling (§2.4) already clears B10's lift bar, Option A is unnecessary. If it does not,
-   Option A's cost is justified by a *measured* gap, not a hoped-for one.
-3. **B preserves the architectural line** — it uses only source + vendored primitives, no
-   oracle knowledge. It neither vendors (v1's sin) nor over-claims.
-4. **Option A is the honest upgrade path** when a coefficient table is the proven binding
-   constraint. It is real synthesis-from-source (sample + DCT), not a port. v2 **specifies**
-   it (§2.3 above, §9 L4-optional) so it is ready if §2.4's measurement demands it, but does
-   **not** fund it speculatively.
-
-Option C is rejected as the *default* because it shrinks the claim further than necessary —
-Option A shows the claim is *achievable*, so conceding the table to the library author is
-premature. C remains the correct fallback **iff** Option A proves intractable for some
-function (a series with no closed-form node sampler), guarded by **STOP #O** (§5).
-
-### 2.4 Bounding the Option-B lift ceiling (the brief's explicit demand)
-
-The closure design's Item-7 assumed the full **+18.43-digit** dd ceiling, which *implicitly
-assumes the 43-coeff series*. Option B uses 19 coeffs, so v2 must **predict a numerical
-ceiling for the achievable lift, not promise the full +18.43**.
-
-Probe `probe_optionB_ceiling.cpp` isolates the two error sources in the Clenshaw-summed
-Chebyshev recurrence (`ddilog:220-227`) by summing the **identical 19 coeffs** at double vs
-dd across a battery of arguments:
+**Decisive discovery (probe `probe_constants_dd43.cpp`, P5).** `ql::Constants<ddouble>`
+instantiated from the enriched source:
 
 ```
-max |dd19 - double| over battery      = 1.110e-16   (roundoff dd BUYS BACK)
-dd recurrence residual |lo/hi| @Y=0.55 = 1.037e-18   (dd carries ~18 extra digits of the SUM)
-19-term truncation floor ~ |C[18]|     = 1.000e-16   (dd CANNOT reduce — needs 43 coeffs)
+num_C = 43  (expect 43)
+C[0]  hi=0.42996693560813698   lo=-7.726e-18  bit-exact=1
+C[18] hi=-1.4226020855112447e-16 lo=4.699e-33 bit-exact=1
+C[42] hi=-1.11772e-35          lo=4.466e-52   bit-exact=1
+_pi() hi=3.1415926535897931    lo=1.225e-16   bit-exact dd_pi=1
+sum_C(43) hi=0.8224670334241132  lo=1.520e-17
+P5 PASS: enriched source provides 43-coeff dd table
 ```
 
-**Interpretation — the two components of ddilog's error, and which dd fixes:**
+`_num_C()=43`; `_C(0)/_C(18)/_C(42)` are **bit-exact** vs the source table's `make_dd()`
+literals; `_pi()` is bit-exact `dd_pi()` (not `T(M_PI)`). The 43-coeff sum
+`0.8224670334241132` matches the v2 19-coeff sum's `hi` (both → π²/12) with a *refined* `lo`
+tail — the "same value, more accurate" signature of the extra coefficients. **STOP #E
+(source doesn't provide what the design claims) is discharged.**
+
+**The three options v2 posed, now historical for Group A.** Retained for the reasoning
+trail — these describe *what we would have done if the library did not publish dd tables*:
+
+* **~~Option A — pipeline computes the 43-coeff table offline (chebfun-style DCT).~~**
+  *(No longer needed for Group A.)* A real capability extension: sample Li₂ at 43 dd
+  Chebyshev nodes, DCT, emit a `Constants<ddouble>::_C` specialisation, run once per
+  (function, precision) pair offline. **Superseded by source enrichment** — the library
+  already ships the table. Retained only as the contingency an unspecified *future*
+  library-under-test would trigger via STOP #O (§5).
+* **~~Option B — accept the 19-coeff series at dd.~~** *(v2's choice; no longer applies.)*
+  The double primary at `T=ddouble` gives 19 coeffs; v2 measured the truncation ceiling this
+  forfeits (v2 §2.4). **Superseded** — with 43 coeffs in source there is no truncation
+  concession to bound.
+* **~~Option C — declare precision-target tables an out-of-scope library-author
+  pre-condition.~~** *(Fallback only.)* Under v3 the library-author *has* published the
+  table, so C is satisfied *by the source itself* rather than by shrinking the claim.
+
+**v3's Class-2 stance:** consume the source's 43-coeff dd table directly. Zero synthesis,
+zero capability gap, preserves the architectural line (source + vendored primitives only,
+no oracle-for-generation). If a *future* library-under-test omits a needed dd table, Option A
+becomes live and STOP #O (§5) fires; that is not the case for qcdloop after `e3d2e45`.
+
+### 2.4 Predicted lift ceiling (v3 — full +18.43 restored)
+
+v2 §2.4 predicted a **+8-to-+16 band** with a truncation-cancellation caveat, *only*
+because Option B forfeited the 43-coeff tail: the 19-term Chebyshev truncation floored
+ddilog's absolute accuracy at ~1e-16, and v2 had to argue about how much of that cancels in
+the `dilog4−dilog5` difference. **That entire analysis is superseded by v3's source
+enrichment.**
+
+With the 43-coeff table in source (§2.3), ddilog's dd accuracy is **not truncation-limited**
+within dd's arithmetic floor. The two error sources v2's P4 probe isolated in the
+Clenshaw-summed Chebyshev recurrence (`ddilog:220-227`):
 
 1. **Recurrence roundoff (the cancellation dd is *for*).** The Clenshaw loop
    `B0 = C_i + ALFA·B1 − B2` accumulates catastrophic cancellation; at double this
-   contributes ~1e-16 error. dd carries ~18 extra digits through the recurrence (residual
-   `|lo/hi| ≈ 1e-18`), shrinking this component to ~1e-32. **This is exactly the error
-   B10's downstream `dilog4−dilog5` cancellation amplifies, and Option B removes it in
-   full.** dd buys back the roundoff regardless of coefficient count.
+   contributes ~1e-16 error. dd carries ~18 extra digits through the recurrence, shrinking
+   this to ~1e-32. This is exactly the error B10's downstream `dilog4−dilog5` cancellation
+   amplifies, and dd removes it in full.
+2. **Series truncation.** With 43 coefficients the Chebyshev tail is driven to ~`|C[42]| ≈
+   1e-35` (P5: `C[42].hi = -1.1e-35`) — **below dd's ~1e-32 arithmetic floor**. Truncation
+   is therefore **no longer the binding constraint**; the 19-coeff floor (~1e-16) that
+   forced v2's band is gone.
 
-2. **Series truncation (a property of the 19 coeffs, *not* the arithmetic).** The 19-term
-   Chebyshev tail is bounded by `|C[18]| ≈ 1e-16`. This is **independent of arithmetic
-   width** — dd cannot shrink it. It caps ddilog's *absolute* accuracy at ~1e-16 **at the
-   point where the truncation, not the roundoff, dominates.**
+**Restored prediction (closure design Item 7).** With both error sources at or below dd's
+~1e-32 floor, the design predicts B10 recovers the **full +18.43-digit** cancellation lift —
+the closure design's original Item-7 ceiling, which implicitly assumed the 43-coeff series.
+No truncation shortfall, no band.
 
-**Predicted ceiling.** Option B's ddilog is accurate to **≈ max(1e-32 roundoff, 1e-16
-truncation) = ~1e-16** in the regions where the 19-term tail is the floor. **But B10's lift
-does not come from ddilog's absolute accuracy — it comes from removing the *cancellation
-roundoff* in the `dilog4−dilog5` difference at `B1m.h:240`.** The two ddilog calls share the
-same truncation error (same series, nearby arguments), so **the truncation error largely
-*cancels in the difference*, while the roundoff error (uncorrelated between the two calls)
-does not.** Option B removes the uncorrelated roundoff (component 1) — which is the part
-that survives the difference — and leaves the correlated truncation (component 2), which
-mostly cancels anyway.
+**Falsifier (same shape as v2, different meaning).** Measured B10 `kernel_measured_lift`
+**< +8** falsifies the design's **value-flow model** (STOP #A) — an intervening double
+narrowing on the chain, a mis-scoped closure, or a promotion that didn't land — **not** a
+truncation problem, since v3 removed truncation as a possible cause. The v2 "truncation
+decorrelates across a Chebyshev branch boundary" caveat **no longer applies**: with 43
+coeffs the truncation is below the dd floor regardless of which range-reduction branch the
+two ddilog arguments land in. So a sub-+8 measurement points squarely at the value-flow
+plumbing, which is the far more actionable diagnosis.
 
-**Therefore the design predicts:** Option B recovers **most** of B10's cancellation lift —
-bounded **below** by "the roundoff component that survives the `dilog4−dilog5` difference"
-and **above** by the full +18.43 only in the idealized no-truncation limit. A conservative
-design prediction: **Option B yields a lift in the +8 to +16 digit band** (clears the
-closure design's **≥ +8** acceptance bar), with the residual gap to +18.43 attributable to
-the truncation error that does *not* cancel in the difference. **If the measured B10 lift
-lands below +8, that falsifies the "truncation cancels in the difference" premise and is the
-signal to fund Option A** (43 coeffs, which drives component 2 to ~1e-32 and recovers the
-full ceiling). This is the STOP-#A measurement wired to a concrete numerical prediction —
-exactly the "bound, don't promise" the brief demands.
-
-> **Caveat the measurement must check.** The above assumes the two ddilog arguments in
-> `dilog4−dilog5` fall in the *same* Chebyshev range-reduction branch (`:174-211`), so their
-> truncation errors are correlated. If B10's kinematics straddle a branch boundary, the
-> truncation errors decorrelate and the ceiling drops toward +8. The e2e run measures which
-> regime B10 is in; the design does not assume — it predicts a band and names the falsifier.
+> **v2 §2.4 (the +8…+16 band + truncation-cancellation reasoning) is retained in the git
+> history and the v2 probe P4 output for the trail, but is SUPERSEDED and does not govern
+> the v3 prediction.**
 
 ### 2.5 Does B10's read flow through `ddcomplex` or `Kokkos::complex<ddouble>`?
 
-Unchanged from v1 (this was correct). The chain's `TOutput` is `Kokkos::complex<double>`;
+Unchanged from v1/v2 (this was correct). The chain's `TOutput` is `Kokkos::complex<double>`;
 the existing pipeline promotes complex containers to `quad::ddfun::ddcomplex`
 (`dispatch.py:308`, `fanout.py:243/271`, `shim_normalise.py:60-63`), and the
 `ddilog`/`Li2omx2` clones already do this (B12 built + executed, Subtask 3). So B10's reads
 flow through **`quad::ddfun::ddcomplex` directly**, via vendored `dd_complex.hpp` — no
-`Kokkos::complex<ddouble>`, no container-axis bridging. The §7 v2 probe confirms:
+`Kokkos::complex<ddouble>`, no container-axis bridging. The §6 probe confirms:
 `Lnrat_B10<ddcomplex,double,ddouble>` compiles and runs with `ddcomplex` as `TOutput`.
 
-### 2.6 The termination boundary (updated)
+### 2.6 The termination boundary (updated for v3)
 
 Rule (d) recurses; it terminates because every call in a promoted body resolves to exactly
 one of four **boundary** kinds, none re-entering rule (d):
@@ -395,10 +434,9 @@ one of four **boundary** kinds, none re-entering rule (d):
 1. **Vendored `quad::ddfun` math** — `abs/sqrt/log/exp/pow/…` on `ddouble`/`ddcomplex`
    (`dd_math.hpp`, `dd_complex.hpp`). Resolve at dd, no cloning. **Boundary.**
 2. **Class-2 / source constants** — `_pi2o6`, `_ipio2`, `_C`, `_num_C` at dd, instantiated
-   **from the source `Constants<T>` primary** (§2.3, proven by `probe_constants_dd.cpp`);
-   π-family entries may additionally be routed through the Subtask-3 catalog for
-   bit-exactness where the primary's `M_PI` literal is insufficiently precise (an optional
-   refinement, not required to build). **Boundary — a value, not a frame.**
+   **from source**: either the double primary `Constants<T>` at `T=ddouble`, or (for the
+   coefficient tables and bit-exact dd π) the enriched dd source `kokkosMaths_dd.h`
+   (§2.3, proven by `probe_constants_dd43.cpp`). **Boundary — a value, not a frame.**
 3. **Class-1 synthesized wrappers** — `ql::{kAbs,kLog,kSqrt,Real,Imag,Sign,iszero}` at dd,
    **emitted by the extended Gap-A machinery** (§2.2), not vendored. Once emitted they are
    ordinary overloads that bottom out in boundary 1. **Boundary.**
@@ -409,7 +447,7 @@ Rule (d) adds a frame only for **none-of-the-above** = an app template whose bod
 available and calls into these boundaries. Recursion adds a frame at most once per app
 template in the finite header set.
 
-### 2.7 Bounded, acyclic — the proof (unchanged from v1)
+### 2.7 Bounded, acyclic — the proof (unchanged from v1/v2)
 
 * The universe of clonable app templates is **finite**.
 * Rule (d) is **monotone** and records each app template as a clone at most once → halts
@@ -418,12 +456,12 @@ template in the finite header set.
   chains is a **DAG**. `Lnrat`'s body (`:141-155`) calls `kLog/kAbs/Sign/Imag/Real/_ipio2`
   — all boundary kinds, **no app-template callee** → `Lnrat` is a **sink**; rule (d) adds it
   and stops. `ddilog`'s body calls `kLog/kPow/Real/Sign/iszero/_C/_pi2o6` — all boundary
-  (`kPow`/`iszero` instantiate from source at dd) → also a sink. `Li2omx2` calls
-  `Lnrat`/`ddilog`/`kLog`/`kAbs`/`_ipio2` → its only app-template callees are the two sinks.
-  So the B10 rule-(d) frontier is depth-1 and closed:
+  (`kPow`/`iszero` instantiate from source at dd; `_C` now the 43-coeff source table) → also
+  a sink. `Li2omx2` calls `Lnrat`/`ddilog`/`kLog`/`kAbs`/`_ipio2` → its only app-template
+  callees are the two sinks. So the B10 rule-(d) frontier is depth-1 and closed:
   `{Li2omx2_B10 → Lnrat_B10 (sink), ddilog_B10 (sink)}`. **Bounded, acyclic. QED.**
 * **Self-recursion is not a cycle in `F`** — `ddilog`/`Lnrat` have no self-call (verified);
-  and the rename (§4) binds any hypothetical self-call to the clone name.
+  and the rename (§3) binds any hypothetical self-call to the clone name.
 
 ### 2.8 The circuit breaker (backstop, unchanged)
 
@@ -436,7 +474,7 @@ depth-1, 3 frames). Graceful degradation, not a scope choice.
 
 ## 3. Rename discipline (how the clone avoids the Subtask-5 self-recursion pit)
 
-*(Unchanged from v1 — carried forward verbatim; the §7 v2 probe re-confirms it.)*
+*(Unchanged from v1/v2 — carried forward verbatim; the §6 probes re-confirm it.)*
 
 ### 3.1 Why the forwarding overload recursed, and why the clone does not
 
@@ -451,7 +489,7 @@ A **clone** breaks every link:
 * the call site `Li2omx2_B10:706` is **rerouted** to `Lnrat_B10` by the existing
   topological callee-before-caller reroute (`_reroute_in_function`).
 
-The §7 probes are the empirical proof: `Lnrat_B10<ddcomplex,double,ddouble>(1.5,2.5)`
+The §6 probes are the empirical proof: `Lnrat_B10<ddcomplex,double,ddouble>(1.5,2.5)`
 **builds and runs to completion (exit 0), no segfault**, on the exact inputs that made the
 Subtask-5 forwarding overload stack-overflow — under both the v1 hand overlay and the v2
 synthesized-surface overlay.
@@ -469,30 +507,52 @@ overload set** a rename cannot separate (STOP-#K guard, generalised).
 **Per-integral clones** (recommended, and what the pipeline already does): `ddilog_B10` vs
 `ddilog_B12`, `Lnrat_B10` vs `Lnrat_B12` live in distinct per-integral variant trees
 (`per_integral_orchestrator`), never coexist in one TU → no collision, no shared-instantiation
-hazard. Preserves the Appendix invariant. Shared dd instantiation **rejected for v1/v2**
-(re-introduces cross-integral coupling). No new collision surface beyond
+hazard. Preserves the Appendix invariant. Shared dd instantiation **rejected** (re-introduces
+cross-integral coupling). No new collision surface beyond
 `variant_naming.py`/`assert_no_collisions`.
 
 ---
 
 ## 4. Interaction with the existing tree
 
+### 4.1 Vendored-snapshot policy change (v3)
+
+`runs/qcdloop_headers_full/README.md` was updated (commit `e3d2e45`) to document a
+**two-source snapshot**:
+
+| file(s) | source | role |
+|---|---|---|
+| `boxGPU.h`, `kokkosMaths.h`, `kokkosMaths_wrapper.h`, `kokkosUtils.h`, `timer.h`, `box/*.h` | `qcdloop@master` `8de2089` | double-precision primary — the library under test |
+| `kokkosMaths_dd.h` | `qcdloop@ddfun_enabled` `2229ec4` (+ 1-line namespace shim) | qcdloop's own dd-precision `Constants<T>` (43-coeff `_C`, 25-term `_B`, dd `_pi()`, dd tolerances) — consumed as **source input** for dd support |
+
+The vendored snapshot is now the pipeline's **canonical view of "the qcdloop under test,"
+including its dd-precision `Constants<T>`.** The README's edit policy keeps both files as
+verbatim upstream mirrors (modulo the documented shim) and states explicitly that any dd
+support the tables *don't* cover (e.g. the Class-1 `ql::kAbs`/`ql::kLog` wrappers at dd) is
+**synthesized by the pipeline, not written into the snapshot** — i.e. the §2.2 Class-1
+machinery, not the fork's wrapper code (§2.2 v3 subtlety). `third_party/include/` remains
+**app-independent** vendored primitives (`quad::ddfun`), untouched by this change; the
+namespace shim in `kokkosMaths_dd.h` bridges the fork's `ql::ddfun` authorship onto it.
+
+### 4.2 Component-by-component
+
 | component | change |
 |---|---|
 | **rule (c)** (`chain_promote._apply_rule_c`) | **unchanged** — rule (d) feeds it a larger `F`; `Lnrat_B10`'s dd return flows into `Li2omx2_B10` via the same rule-(c) return-widen already applied to `ddilog_B10`. |
 | **rule (a)** (`_expand_value_closure`) | eligible-frame set grows to include rule-(d) frames; decl-widen logic unchanged, applied inside `Lnrat_B10`/`ddilog_B10` too. |
 | **NEW rule (d)** (`chain_promote`) | frame-discovery fixed point: walk promoted-body calls, test `clonable_leaf`, add clones to `F`, seed bodies, record reroutes. Reuses `CallGraph` + `region_scan`. |
-| **Gap-A bridge** (`regional.py`) | **EXTENDED (v2's L1′)** — shallow-wrapper recognizer + synthesized-overload emitter (§2.2). This is where Class-1 support is *produced*. Was v1's vendored-header work; now lives in the agents tree as synthesis. |
-| **π-family catalog** (`constant_derive.py`) | **used, optionally** — the source `Constants<ddouble>` primary already supplies `_pi2o6/_ipio2` at dd; the catalog is an *optional* bit-exactness refinement, not a requirement (§2.6 boundary 2). |
-| **`Constants<ddouble>`** | **NOT specialised, NOT vendored** — instantiates from the source primary at dd (§2.3, proven). 19-coeff `_C` used as-is (Option B). |
+| **Gap-A bridge** (`regional.py`) | **EXTENDED (L1′)** — shallow-wrapper recognizer + synthesized-overload emitter (§2.2). This is where Class-1 support is *produced*. Lives in the agents tree as synthesis; no vendored primitive header. |
+| **π-family catalog** (`constant_derive.py`) | **optional** — both the double primary and the enriched dd source supply `_pi2o6/_ipio2` at dd; the dd source's `_pi()` is bit-exact `dd_pi()`. Catalog is an *optional* bit-exactness refinement, not a requirement (§2.6 boundary 2). |
+| **`Constants<ddouble>`** | **NOT specialised by the pipeline, NOT vendored as a primitive** — instantiates from **source**: coefficient tables + dd π from the enriched `kokkosMaths_dd.h` (43 coeffs, §2.3, P5); the rest from the double primary at `T=ddouble`. |
+| **enriched dd source** (`runs/qcdloop_headers_full/kokkosMaths_dd.h`) | **NEW source input** — consumed for its 43-coeff `_C`, 25-term `_B`, dd `_pi()`, dd tolerances. Its hand-written Class-1 wrapper *code* is NOT consumed (pipeline synthesizes its own, §2.2 v3 subtlety). |
 | **shim normaliser** (`shim_normalise.py`) | **used more** (more clone bodies → more shims). No logic change. |
 | **fanout manifest** (`fanout.py`) | **grows** — `Lnrat_B10` becomes a new `VariantSpec` with a `return_widen` (TOutput→ddcomplex). First time `Lnrat` appears in a manifest. No schema change. |
-| **clonable-leaf predicate** | **new predicate**, evaluated against the §2.2 synthesis manifest + §2.3 source-instantiation check. The false-positive guard. |
+| **clonable-leaf predicate** | **new predicate**, evaluated against the §2.2 synthesis manifest + the §2.3 source-instantiation check (double primary at dd + enriched dd source). The false-positive guard. |
 | **`chain_closure_escapes`** (`result.py`) | **still fires** — for leaves failing `clonable_leaf` (body not a synthesizable shape, or demands inward param widening). Now a *smaller* set. |
-| **support surface** (`third_party/include`) | **NO new header.** v1's `dd_ql_support.hpp` is deleted from the plan. Class-1 is synthesized into the per-region shim; Class-2 is source-resident. |
+| **support surface** (`third_party/include`) | **NO new primitive header.** v1's `dd_ql_support.hpp` stays deleted from the plan. Class-1 is synthesized into the per-region shim; Class-2 is source-resident in the vendored snapshot. |
 | **kernel-scope + positive-lift gates** | **unchanged.** B10 now reaches the positive-lift gate for the first time. |
 
-### What tests break / what's new
+### 4.3 What tests break / what's new
 
 * **Break (assertions invert):** any `test_chain_promote` case asserting `Lnrat` is a
   `chain_closure_escapes` frontier. Under rule (d), B10 emits `Lnrat_B10`.
@@ -501,86 +561,71 @@ hazard. Preserves the Appendix invariant. Shared dd instantiation **rejected for
     `Li2omx2`; **non**-clonable leaf whose body is not a synthesizable shape → refuse);
   * Class-1 **shallow-wrapper recognizer + emitter** unit tests (kAbs/kLog redirect;
     Real/Imag accessor; Sign scalar-expr; a non-delegating body → not Class-1);
+  * a **source-instantiation** test for Class-2 (`Constants<ddouble>::_num_C()==43`,
+    `_C(i)` bit-exact from the enriched dd source — the §6 P5 probe made permanent);
   * rule-(d) frame-discovery + termination test (B10 frontier = `{Lnrat_B10}`, depth 1);
-  * a synthesized-shim compile test (the §7 v2 `probe_clone_synth.cpp` made permanent);
+  * a synthesized-shim compile test (the §6 P2 `probe_clone_synth.cpp` made permanent);
   * e2e: B10 emits dd-returning `Lnrat_B10` + `ddilog_B10`/`Li2omx2_B10`, and the
-    `dilog4−dilog5` cancellation at `B1m.h:240` executes at dd.
+    `dilog4−dilog5` cancellation at `B1m.h:240` executes at dd against a **43-coeff** series.
 * **Stay green:** all Layer 0–5 mechanical tests; rules (a)/(b)/(c); scorer; non-chain path.
 
-### STOP-condition impact
+### 4.4 STOP-condition impact
 
 * **STOP #A (measurement falsification)** — unchanged in meaning, now *reachable* for B10,
-  and now wired to the **§2.4 numerical prediction**: lift below +8 falsifies the
-  "truncation cancels in the difference" premise → fund Option A.
+  and now wired to the **§2.4 restored prediction**: lift below +8 falsifies the
+  **value-flow model** (not truncation — v3 removed truncation as a cause).
 * **STOP #B (accept↔reject flip)** — unchanged; B13/B14 stay byte-identical unless rule (d)
   legitimately changes their `F`.
+* **STOP #E (source doesn't provide what the design claims)** — **discharged** by §6 P5
+  (`probe_constants_dd43.cpp`): the enriched source provides `_num_C()=43` and bit-exact dd
+  `_C`. This was the v3-specific pre-implementation risk; it is closed.
 * **STOP #K (emitted transform breaks build/runtime)** — **re-armed and central.** The
   `clonable_leaf` predicate + the synthesized-shim compile test are the guards. If a clone
   is emitted whose body names a symbol neither synthesizable (Class-1) nor source-resident
-  (Class-2), the build fails → STOP #K. The predicate must refuse *before* emission. The §7
-  v2 probe is the pre-implementation discharge of STOP #K for `Lnrat`.
-* **~~STOP #N (support-surface drift)~~ — DELETED.** v1's STOP #N guarded drift between a
-  *vendored* `dd_ql_support.hpp` and the oracle. There is no vendored header in v2, so there
-  is nothing to drift. (If Option A is later funded, its emitter gets its own drift check —
-  see STOP #O.)
-* **NEW STOP #O (Class-2 capability gap)** — if a rule-(d) leaf's body names a Class-2
-  coefficient table that (a) the source primary does **not** instantiate at dd *and* (b)
-  Option B's as-is series is measured insufficient (lift < +8 traced to truncation, §2.4),
-  then the leaf's dd accuracy is bounded by data the pipeline cannot yet synthesize. **STOP
-  and decide: fund Option A (build the DCT coefficient generator) or fall back to Option C
-  (declare the table a library-author pre-condition).** For Group A this never fires (B10
-  needs no `_C`; B12/B13 lift is not promised — closure design §7 outcome ii).
+  (Class-2), the build fails → STOP #K. The predicate must refuse *before* emission. The §6
+  probes are the pre-implementation discharge of STOP #K for `Lnrat`.
+* **~~STOP #N (support-surface drift)~~ — DELETED (v2).** There is no vendored *primitive*
+  header to drift. (The enriched dd source in the snapshot is a verbatim upstream mirror,
+  refreshed by the README's script, not a pipeline-maintained artifact — no drift surface.)
+* **STOP #O (Class-2 capability gap) — RETAINED as a safety net, DOES NOT FIRE for Group
+  A.** Under v3 the library-under-test **publishes** its dd coefficient table, so a rule-(d)
+  leaf's coefficient needs are met from source. STOP #O is only reachable if a *future*
+  library-under-test omits a dd-precision table the pipeline needs — which would then
+  trigger the (now-unfunded) Option-A DCT-synthesis path (§2.3). **It does not fire for
+  B10/B12/B13** (B10 needs no `_C`; B12/B13 read the 43-coeff source table). See §5.
 
 ---
 
-## 5. Cost estimate
+## 5. STOP #O — retained safety net, not reachable for Group A (v3)
 
-### 5.1 Frames added per integral
+v2 introduced STOP #O as the Class-2 capability-gap STOP. v3 keeps the *definition* but
+records that it **does not fire** under the current source:
 
-| integral | clonable leaves rule (d) adds | new frames | Class-2 needed? | past "surgical" threshold? |
-|---|---|---|---|---|
-| **B10** | `Lnrat` only (`ddilog`/`Li2omx2` already in `F`) | **+1** (`Lnrat_B10`) | **no** — Lnrat has no series; source Constants suffices | no (3 frames, depth-1) |
-| **B12** | `Lnrat` (leaf via `Li2omx2`); `ddilog` already cloned | **+1** (`Lnrat_B12`) | Option B `_C` (source, as-is) | no |
-| **B13** | `Lnrat`, possibly `ddilog` if leaf on B13's chain | **+1–2** | Option B `_C` (source) | no (B13 lift not promised) |
+> **STOP #O (Class-2 capability gap).** If a rule-(d) leaf's body names a Class-2
+> coefficient table that **(a)** neither the double primary instantiates at dd *nor* the
+> vendored snapshot publishes as a dd source table, **and (b)** the leaf's dd accuracy is
+> consequently bounded by data the pipeline cannot synthesize, then **STOP and decide:**
+> fund **Option A** (build the offline DCT coefficient generator — sample the special
+> function at N dd Chebyshev nodes → DCT → emit `Constants<ddouble>::_C`, with a drift gate
+> vs the oracle *for validation only*) or fall back to **Option C** (declare the table a
+> library-author pre-condition). **Do not vendor a primitive support header.**
 
-Class-1 synthesis is **shared machinery** (one Gap-A extension, works for every wrapper),
-paid once. Class-2 for Group A is **zero cost** (source-resident 19-coeff series). No
-integral grows past the circuit breaker.
-
-### 5.2 Runtime
-
-Rule (d) adds `Lnrat`'s dd arithmetic (a handful of dd ops per call) inside frames already
-paying dd cost. Negligible delta on the closure's ~+5–15% per Group-A integral. Unmeasured
-until a full e2e build completes.
-
-### 5.3 Implementation size (v2 — L1 dissolved)
-
-```
-L1′ Extend Gap-A: shallow-wrapper recognizer + synthesized-overload
-    emitter (Class-1) + clonable-leaf synthesis manifest ...........  4–6 days
-L2  Rule (d) frame-discovery + clonable_leaf predicate +
-    reroute wiring + circuit breaker ..............................  4–6 days
-L3  Emission plumbing (Lnrat_B10 VariantSpec, return_widen reuse)
-    + test rewrites ...............................................  2–3 days
-L-measure  Option-B e2e (B10 +B12/B13) + §2.4 ceiling triage ......  2–3 days
-                                                    subtotal  ≈ 12–18 days (~2.5–3.5 wks)
-L4 (OPTIONAL, only if STOP #O fires) Option-A DCT coefficient
-    generator + drift gate ........................................  +2–3 wks
-```
-
-v1's L1 ("vendor + port dd_ql_support.hpp", 3–4 days) is **deleted**. L1′ replaces it with
-synthesis in the agents tree (comparable size, but produces a *capability*, not a vendored
-artifact). This is **on top of** the closure design's Stages 1–2 (rules a/b/c, landed).
+**Why it does not fire for the current qcdloop-under-test:** after `e3d2e45` the snapshot
+publishes the 43-coeff dd `_C` table (P5). B10 needs no `_C` at all (§1.3); B12/B13's ddilog
+reads the source 43-coeff table. Condition (a) is false — the table *is* published — so
+STOP #O is unreachable for Group A. It remains armed for any future library that does not
+publish a needed precision-target table; that scenario is not present today.
 
 ---
 
-## 6. Falsification tests (built + run — v2 rewritten overlay)
+## 6. Falsification tests (built + run)
 
 Full evidence: `runs/qcdloop/tier_b_stage2_leaf_promotion/probe_evidence/`. Single-TU,
 built against **real** headers + **real** Kokkos, gcc 13.3.0, `-std=c++20` (ceiling probe
-`-std=c++17`, no Kokkos). No changes to `agents/`/`tests/`. Four probes:
+`-std=c++17`, no Kokkos). No changes to `agents/`/`tests/`. **Five probes** (P1–P4 from
+v1/v2, P5 new in v3):
 
-**(P1) `probe_clone.cpp` (v1, retained) — clone-vs-forwarding + surface-gap enumeration.**
+**(P1) `probe_clone.cpp` (v1) — clone-vs-forwarding + surface-gap enumeration.**
 Confirms rename discipline and that the vendored-only surface fails.
 
 | build | surface | compile | runtime on `(1.5, 2.5)` (the Subtask-5 segfault inputs) |
@@ -588,63 +633,80 @@ Confirms rename discipline and that the vendored-only surface fails.
 | A | vendored-only (= pipeline today) | **FAIL, 5 errors** | — |
 | B | A + v1 **hand** overlay | OK | runs, exit 0, no segfault |
 
-**(P2) `probe_clone_synth.cpp` (v2, NEW) — the overlay is what the pipeline would SYNTHESIZE.**
-This replaces v1's hand-written overlay with **Class-1 mechanical wrappers only** (kAbs/kLog
-redirects, Real/Imag accessors, Sign scalar-expr) and **no hand-written `Constants`** — the
-source `Constants<ddouble>` primary is used as-is (Option B).
+**(P2) `probe_clone_synth.cpp` (v2) — the overlay is what the pipeline would SYNTHESIZE.**
+Class-1 mechanical wrappers only (kAbs/kLog redirects, Real/Imag accessors, Sign
+scalar-expr), no hand-written `Constants`, and NOT the fork's wrappers. Re-run at HEAD
+`e3d2e45`:
 
 | build | surface | compile | runtime |
 |---|---|---|---|
 | A_synth | vendored-only | **FAIL, 5 errors** (`abs`,`log`,`Sign`,`Constants` enable_if) | — |
 | B_synth | A + **Class-1 synthesized overlay** (no Constants hand-write) | **OK** | `Lnrat_B10(synth) dd re.hi = −0.51082562376599072  double re = −0.51082562376599072  \|diff\| = 0.000e+00` |
 
-**This is the decisive v2 result:** the exact surface the extended Gap-A machinery would emit
-(mechanical wrappers) + the unmodified source coefficient primary is sufficient to compile
-and run the clone. **No vendored qcdloop-specific header.**
+The exact surface the extended Gap-A machinery would emit + the source coefficient primary
+is sufficient to compile and run the clone. **No vendored qcdloop-specific primitive header.**
 
-**(P3) `probe_constants_dd.cpp` (v2, NEW) — the Class-2 source-instantiation proof.**
-Instantiates `ql::Constants<ddouble>::_num_C()` and `_C(i)` directly from the source primary:
+**(P3) `probe_constants_dd.cpp` (v2) — the double-primary source-instantiation proof.**
+Instantiates `ql::Constants<ddouble>` from the *double* primary (`kokkosMaths.h`):
 
 ```
 num_C=19  sum_C.hi=0.8224670334241132  sum_C.lo=-4.971e-17
 ```
 
-Proves the 19-coeff table exists at dd from source alone — Option B needs no synthesis. Also
-pins that the probe's `enable_if` build error (P1/P2 build A) traces to `ql::kLog`→`Kokkos::log`
-(a Class-1 gap), **not** to the coefficient table — the table was never the compile blocker
-v1 implied.
+Proves the double primary instantiates at dd (19-coeff series) — the v2 Option-B baseline.
+Superseded as the *coefficient source* by P5, but retained: it pins that the build-A
+`enable_if` error traces to `ql::kLog`→`Kokkos::log` (a Class-1 gap), **not** the table.
 
-**(P4) `probe_optionB_ceiling.cpp` (v2, NEW) — bounds the Option-B lift (§2.4).**
-Sums the identical 19 coeffs at double vs dd (inline two-sum/two-prod dd, no Kokkos):
+**(P4) `probe_optionB_ceiling.cpp` (v2) — Option-B lift ceiling. SUPERSEDED by v3.**
+Sums the 19 coeffs at double vs dd; established the v2 truncation floor:
 
 ```
 max |dd19 − double| over battery      = 1.110e-16   (roundoff dd buys back)
 dd recurrence residual |lo/hi| @Y=0.55 = 1.037e-18   (~18 extra digits carried)
-19-term truncation floor ~ |C[18]|     = 1.000e-16   (dd CANNOT reduce)
+19-term truncation floor ~ |C[18]|     = 1.000e-16   (dd CANNOT reduce — needs 43 coeffs)
 ```
 
-Establishes the §2.4 prediction: Option B removes the cancellation roundoff (the part that
-survives the `dilog4−dilog5` difference) but not the series truncation (which mostly cancels
-in the difference) → **predicted B10 lift +8 to +16**, falsifier = measured lift < +8.
+Under v3 the 43-coeff table drives the truncation floor to ~1e-35 (P5's `C[42]`), below dd's
+~1e-32 arithmetic floor, so the P4 "band" no longer governs. Retained for the trail.
+
+**(P5) `probe_constants_dd43.cpp` (v3, NEW) — enriched-source 43-coeff dd table.**
+Instantiates `ql::Constants<ddouble>` from the enriched dd source
+(`runs/qcdloop_headers_full/kokkosMaths_dd.h`):
+
+```
+num_C = 43  (expect 43)
+C[0]  hi=0.42996693560813698   lo=-7.726e-18  bit-exact=1
+C[18] hi=-1.4226020855112447e-16 lo=4.699e-33 bit-exact=1
+C[42] hi=-1.11772e-35          lo=4.466e-52   bit-exact=1
+_pi() hi=3.1415926535897931    lo=1.225e-16   bit-exact dd_pi=1
+sum_C(43) hi=0.8224670334241132  lo=1.520e-17
+P5 PASS: enriched source provides 43-coeff dd table
+```
+
+`_num_C()=43`; `_C(0)/_C(18)/_C(42)` bit-exact vs the source literals; `_pi()`=`dd_pi()`
+bit-exact. **Discharges STOP #E** — the source provides exactly the 43-coeff dd table the v3
+design claims, with no synthesis and no vendored primitive header.
 
 **What the probes establish (before committing weeks):**
 
 1. **Rename discipline is sound (STOP-#K refutation)** — P1/P2, both overlays run to
    completion on the segfault inputs.
-2. **The support surface is pipeline-synthesizable, not vendor-only** — P2 clears the entire
-   Class-1 gap with mechanical overloads; P3 shows Class-2 is source-resident. This is the
-   v2 correction to v1's §3.4.
-3. **Option B is bounded, not hand-waved** — P4 gives a numerical ceiling and a concrete
-   falsifier for the lift, discharging the brief's "predict a ceiling, don't promise +18.43."
+2. **The Class-1 support surface is pipeline-synthesizable, not vendor-only** — P2 clears
+   the entire Class-1 gap with mechanical overloads.
+3. **Class-2 is source-resident at full 43-coeff precision (v3)** — P5 proves the enriched
+   source provides `_num_C()=43` and bit-exact dd `_C`; P3 shows even the double primary
+   instantiates at dd (19 coeffs), so there is *no compile blocker* and *no truncation
+   concession* to bound.
 4. **The probes do NOT prove a lift** — `Lnrat`'s TScale branch has no cancellation, so
    dd==double here (`|diff|=0`). The lift is B10's `Li2omx2`/`dilog4−dilog5` story, measured
-   only at a full e2e run — STOP #A's job, predicted (not promised) by §2.4.
+   only at a full e2e run — STOP #A's job, predicted (now **+18.43**, §2.4) not promised.
 
 **What would still falsify the design at e2e (not cheaply pre-testable):** B10 emits all
-clones dd and the cancellation executes at dd, but measures lift < +8 → either an intervening
-double narrowing (STOP #A / value-flow model wrong) or the §2.4 truncation-decorrelation
-caveat (→ fund Option A / STOP #O). The probes cannot pre-empt this — it needs the full
-5000-sample kinematic battery.
+clones dd and the cancellation executes at dd, but measures lift < +8 → an intervening
+double narrowing or a mis-scoped closure (STOP #A / value-flow model wrong). Under v3 this
+is **no longer confoundable with a truncation shortfall** (43 coeffs removed that), so a
+sub-+8 measurement points squarely at the value-flow plumbing. The probes cannot pre-empt
+this — it needs the full 5000-sample kinematic battery.
 
 ---
 
@@ -655,59 +717,68 @@ caveat (→ fund Option A / STOP #O). The probes cannot pre-empt this — it nee
    Group A.
 2. **B12's floor location** — B12's dominant chain does not cover its `coeff0.imag` hotspot
    (Subtask 3). Rule (d) lets B12's `Lnrat` clone but does not move the floor; orthogonal.
-3. **Full +18.43 ddilog ceiling under Option B** — the 19-coeff truncation caps ddilog's
-   *absolute* accuracy at ~1e-16 (§2.4). Only Option A (43-coeff DCT synthesis) recovers the
-   full ceiling; funded only if STOP #O fires.
-4. **Group B (B15/B16/BIN0–4)** — dd-insufficient (Item 7); rule (d) would clone their
+3. **Group B (B15/B16/BIN0–4)** — dd-insufficient (Item 7); rule (d) would clone their
    leaves (`kfn`/`ltspence`/`cspence`) and make them *measurable*, not *sufficient*. Out of
    scope; the circuit breaker + Group-B dd-insufficiency keep them from being accepted.
-5. **Class-1 recognizer beyond straight-line delegation** — a wrapper whose body is a
+4. **Class-1 recognizer beyond straight-line delegation** — a wrapper whose body is a
    multi-statement computation (not a single delegation/accessor/scalar-expr) is **not**
    Class-1 and is refused (clause 2). Widening the recognizer to such bodies is future work;
    Group A's wrappers are all straight-line, so it is not needed now.
+5. **Coefficient tables for a library that does NOT publish a dd table** — Option A (offline
+   DCT synthesis) is specified (§2.3, §5) but **not funded**, because the current
+   qcdloop-under-test *does* publish one. A future library-under-test lacking a needed dd
+   table triggers STOP #O and the Option-A decision.
 
 ---
 
 ## 8. Implementation dispatch shape (proposal only — do NOT dispatch)
 
 Rule (d) presupposes the closure design's Stages 1–2 (rules a/b/c), which are landed
-(Subtasks 1a/1b/2a/2b). v2's dispatch (v1's L1 dissolved):
+(Subtasks 1a/1b/2a/2b). v3's dispatch (v2's L4 dropped from the Group-A plan):
 
 * **Subtask L1′ — extend the Gap-A machinery to SYNTHESIZE Class-1 wrappers.** Add the
   shallow-wrapper recognizer (structural: body = single delegation to a `_MATH_FN_NAMES` op
   / member accessor / scalar-expr over the param) + the synthesized-overload emitter (§2.2),
   producing the dd overloads into the per-region shim. **Deliverable:** the extension +
-  unit tests + the P2 probe made a permanent compile test. **No vendored header.** This is
-  the piece that restores the demo's "pipeline synthesizes what it needs" claim; land it
-  first (it is independent of rule (d)).
+  unit tests + the P2 probe made a permanent compile test. **No vendored primitive header.**
+  Restores the demo's "pipeline synthesizes what it needs" claim; land it first (independent
+  of rule (d)). *(~4–6 days.)*
 
 * **Subtask L2 — rule (d) frame-discovery + `clonable_leaf` predicate.** Frame-discovery
   fixed point in `chain_promote` (walk promoted-body calls, test predicate against the L1′
-  synthesis manifest + source-instantiation check, add clones to `F`, seed bodies, record
+  synthesis manifest + the source-instantiation check — double primary at dd **and** the
+  enriched dd source for coefficient tables — add clones to `F`, seed bodies, record
   reroutes). Wire the circuit breaker (`chain_closure_oversized`) and the narrowed
   `chain_closure_escapes`. **Gate:** predicate false-positive = STOP #K; must refuse before
-  emission.
+  emission. *(~4–6 days.)*
 
 * **Subtask L3 — emission plumbing.** `Lnrat_B10` `VariantSpec` (reuses `return_widen` from
-  Subtask 2a), test rewrites (inverted `Lnrat` assertions).
+  Subtask 2a), test rewrites (inverted `Lnrat` assertions), the P5 source-instantiation test
+  made permanent. *(~2–3 days.)*
 
-* **Subtask L-measure — Option-B e2e + §2.4 triage.** B10/B12/B13 e2e re-run (seed 12345,
-  5000 samples, kernel-scope + positive-lift gate). **Success = B10 reaches the positive-lift
+* **Subtask L-measure — B10/B12/B13 e2e + §2.4 triage.** e2e re-run (seed 12345, 5000
+  samples, kernel-scope + positive-lift gate). **Success = B10 reaches the positive-lift
   gate with `Li2omx2_B10`+`ddilog_B10`+`Lnrat_B10` all dd and measured
-  `kernel_measured_lift ≥ +8`** (closure §7 bar; §2.4 predicts +8…+16). **If lift < +8**,
-  triage per §2.4: intervening narrowing (STOP #A) vs truncation-decorrelation (STOP #O →
-  scope Option A).
+  `kernel_measured_lift ≈ +18.43`** (closure §7 bar ≥ +8; §2.4 predicts the full +18.43
+  with 43 coeffs). **If lift < +8**, triage per §2.4: value-flow model wrong (STOP #A —
+  intervening narrowing / mis-scoped closure), **not** truncation (v3 removed that cause).
+  *(~2–3 days.)*
 
-* **Subtask L4 (OPTIONAL, gated on STOP #O) — Option-A coefficient synthesis.** Only if
-  L-measure proves the 19-coeff truncation is the binding constraint. Build the offline
-  chebfun-style DCT generator (sample Li₂ at N dd Chebyshev nodes → DCT → emit
-  `Constants<ddouble>::_C`) + a drift gate that compares generated coefficients to the oracle
-  *for validation only*. This is real synthesis-from-source, not a port.
+```
+                                        subtotal  ≈ 12–18 days (~2.5–3.5 wks) → tighten to
+                                        ~10–15 days: L4 dropped, Class-2 is zero-cost source read
+```
+
+**v2's L4 (Option-A DCT coefficient generator, +2–3 wks) is REMOVED from the Group-A plan.**
+It would be required only if a *future* library-under-test failed to publish a needed dd
+table (STOP #O). It is specified (§2.3, §5) but not funded. This dispatch is **on top of**
+the closure design's Stages 1–2 (rules a/b/c, landed).
 
 **If L1′ proves a Group-A wrapper is not synthesizable** (a body shape the recognizer cannot
 handle soundly), **STOP at L1′** and hand the scope call back — that would mean the Class-1
-premise is narrower than §2.2/§7 established. **If L-measure fires STOP #O**, the coefficient
-table is the real gap: decide Option A vs C (§2.3) — do not vendor.
+premise is narrower than §2.2/§6 established. **If L-measure fires STOP #A**, the value-flow
+model is wrong — debug the chain plumbing, do not reach for coefficient synthesis (43 coeffs
+are already in source).
 
 ---
 
@@ -720,9 +791,15 @@ table is the real gap: decide Option A vs C (§2.3) — do not vendor.
   measure. B10 reaching the lift gate is the point.
 * Conservative-parser contract: false-negative (refuse a clonable leaf) safe; false-positive
   (clone an un-instantiable leaf) is STOP #K — guarded by the predicate + the L1′ synthesis
-  compile test + the §7 probes.
-* **v2 architectural invariant:** the pipeline **synthesizes** qcdloop-specific dd support
-  (Class-1 wrappers) or uses **source-resident** data (Class-2 tables at dd), and **vendors
-  nothing qcdloop-specific**. `third_party/include/` stays app-independent. The oracle
-  `qcdloop@ddfun_enabled` is consulted for **validation drift only**, never for generation.
+  compile test + the §6 probes.
+* **Architectural invariant (v2, refined in v3):** the pipeline **synthesizes**
+  qcdloop-specific dd *code* (Class-1 wrappers) and **reads** qcdloop's own dd *data*
+  (Class-2 coefficient tables) from the **vendored snapshot of the library under test**
+  (`runs/qcdloop_headers_full/`, including `kokkosMaths_dd.h`). It **vendors nothing
+  qcdloop-specific into the app-independent primitive layer** — `third_party/include/`
+  (`quad::ddfun`) stays app-independent; the namespace shim bridges the fork's `ql::ddfun`
+  authorship onto it. The oracle `qcdloop@ddfun_enabled` is consulted for **validation
+  drift only**, never for generation — with the single, documented exception of the one
+  header the snapshot now vendors verbatim as source input (`kokkosMaths_dd.h`, commit
+  `2229ec4`), which is qcdloop-authored library data, not oracle-derived generation.
 ```
