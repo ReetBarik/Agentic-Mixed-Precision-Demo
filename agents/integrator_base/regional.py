@@ -33,6 +33,11 @@ from agents.integrator_base.region import RegionIntegrationResult
 from agents.shared import constant_derive as cderive
 from agents.shared.region_scan import RegionScanError, extract_region_writes
 
+# NB: :mod:`agents.integrator_base.shallow_wrapper` imports ``_MATH_FN_NAMES`` /
+# ``_VENDORED_NS_ROOTS`` from this module at load time, so it is imported *lazily*
+# (inside :func:`run_integrate_region` / :func:`synthesize_shallow_wrappers`) to
+# avoid a top-level import cycle.
+
 # Max output tokens for a regional shim.  A regional shim is far smaller than the
 # whole-app tracked shim (a single region's types/constants), but keep generous
 # headroom so a shim is never truncated mid-file.
@@ -271,6 +276,75 @@ def _gather_constant_sources(repo_path: str | None, region_src: str) -> list[str
     return sources
 
 
+# --------------------------------------------------------------------------- #
+# Gap A (Class-1 extension) — shallow-wrapper synthesis (Subtask L1′)
+# --------------------------------------------------------------------------- #
+# The Gap-A bridge (above) redirects a namespace-qualified ``<cmath>`` call onto
+# the vendored surface.  Its Class-1 extension recognizes an *app* wrapper whose
+# primary body is a shallow delegation to such an op (or a member accessor / scalar
+# expression over the parameter) and synthesizes its extended overload
+# deterministically — no LLM, no vendored app-specific header.  See
+# :mod:`agents.integrator_base.shallow_wrapper`.
+
+
+def _vendored_include_dir() -> Path | None:
+    """The repo's vendored extended-precision header directory, or ``None``.
+
+    ``agents/integrator_base/regional.py`` → ``<repo>/third_party/include``.  Used to
+    read the vendored ``*_math.hpp`` / ``*_complex.hpp`` so the shallow-wrapper
+    STOP #S guard is grounded in the ops the surface *actually* provides.
+    """
+    cand = Path(__file__).resolve().parent.parent.parent / "third_party" / "include"
+    return cand if cand.is_dir() else None
+
+
+def _build_vendored_surface(spec: RegionalSpec):
+    """A :class:`shallow_wrapper.VendoredSurface` for this integrator's scalar type.
+
+    Reads ``spec.vendored_headers`` from the repo's ``third_party/include`` and scans
+    them for the ``_MATH_FN_NAMES`` ops they define (split scalar vs complex) so the
+    delegation recognizer refuses (STOP #S) an op the surface does not provide.  When
+    the headers are unreadable, falls back to the full ``_MATH_FN_NAMES`` vocabulary
+    (a conservative over-provision — the build gate still catches a genuinely absent
+    op, and the LLM path remains available for anything refused elsewhere).
+    """
+    from agents.integrator_base import shallow_wrapper as swrap
+
+    vend_dir = _vendored_include_dir()
+    scalar_ops = complex_ops = None
+    if vend_dir is not None:
+        texts: list[str] = []
+        for h in spec.vendored_headers:
+            p = vend_dir / h
+            if p.is_file():
+                try:
+                    texts.append(p.read_text(encoding="utf-8", errors="ignore"))
+                except OSError:
+                    pass
+        if texts:
+            scalar_ops, complex_ops = swrap.scan_vendored_ops(
+                texts, spec.cpp_scalar, spec.cpp_complex)
+    return swrap.surface_from_spelling(
+        spec.cpp_scalar, spec.cpp_complex,
+        scalar_ops=scalar_ops, complex_ops=complex_ops)
+
+
+def synthesize_shallow_wrappers(spec: RegionalSpec, region_src: str,
+                                promoted: frozenset[str], sources: list[str]):
+    """Run the Class-1 shallow-wrapper synthesis pass for a region (Subtask L1′).
+
+    Returns a :class:`shallow_wrapper.SynthesisResult`: the deterministically-emitted
+    overload block (to inject into the shim), the app-calls handled deterministically
+    (removed from the LLM hint path), and the app-calls left for the LLM.  Pure and
+    idempotent.  Only meaningful for an extended (bridge-emitting) integrator; a
+    native ``float`` never narrows through a qualified call so it is skipped upstream.
+    """
+    from agents.integrator_base import shallow_wrapper as swrap
+
+    surface = _build_vendored_surface(spec)
+    return swrap.synthesize_for_region(region_src, promoted, sources, surface)
+
+
 def derive_region_constants(region_text: str, sources: list[str], scalar: str,
                             complex_type: str | None = None):
     """Resolve + derive every source-derivable constant the region reads (Gap B).
@@ -439,7 +513,19 @@ def run_integrate_region(
         derived_constants = derive_region_constants(region_src, sources,
                                                     spec.shim_prefix, spec.cpp_complex)
     else:
+        sources = _gather_constant_sources(repo_path, src) if spec.emit_bridges else []
         derived_constants = []
+
+    # 4b. Class-1 shallow-wrapper synthesis (Subtask L1′, Gap-A extension).  For each
+    #     app-qualified call ``Ns::g(promoted)`` whose primary body is a shallow
+    #     delegation/accessor/scalar-expr, emit ``g``'s extended overload
+    #     deterministically and remove it from what the LLM sees — the model no longer
+    #     has to (mis)generate it, and the bridge lint no longer needs to flag it.  A
+    #     call the recognizer refuses is left untouched: it stays on the LLM path.
+    if spec.emit_bridges:
+        synth = synthesize_shallow_wrappers(spec, region_src, promoted, sources)
+    else:
+        synth = None
 
     # 5. Generate the shim (LLM).
     user_msg = _build_user_message(spec, file, region_src, variables, writes,
@@ -488,6 +574,13 @@ def run_integrate_region(
     bad_complex = _lint_complex_antipattern(shim_body, spec.cpp_scalar)
     if bad_complex is not None:
         return RegionIntegrationResult.failed(bad_complex, llm_tokens=tokens)
+
+    # 5d. Inject the deterministically-synthesized Class-1 overloads (Subtask L1′).
+    #     Merged into the shim body via the same keep-first dedup the canonical shim
+    #     uses, so a synthesized overload never collides with (or double-defines
+    #     against) anything the LLM emitted for a call the recognizer did not claim.
+    if synth is not None and synth.overload_text.strip():
+        shim_body = shim_merge.merge_into_canonical(shim_body, synth.overload_text)
 
     # 6. Stamp the SOURCE_HASH and persist the per-region artifact (out_dir copy —
     #    the forensic/cache record of THIS region's generated shim), then merge it
