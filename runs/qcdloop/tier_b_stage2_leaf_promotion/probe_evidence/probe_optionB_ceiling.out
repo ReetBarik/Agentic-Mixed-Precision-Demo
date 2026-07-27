@@ -1,0 +1,16 @@
+  Y        double_sum          dd19_sum(hi)        |dd19-double| (roundoff dd removes)
+  0.02   0.019900879015136819   0.019900879015136798   2.082e-17
+  0.10   0.097605235229321685   0.097605235229321671   1.388e-17
+  0.25   0.2359002976862635   0.2359002976862635   0.000e+00
+  0.40   0.36583257751244969   0.36583257751244974   5.551e-17
+  0.55   0.48860548073950599   0.48860548073950605   5.551e-17
+  0.70   0.60515840233770535   0.60515840233770524   1.110e-16
+  0.85   0.71624185941058904   0.71624185941058904   0.000e+00
+  0.97   0.80158508303581   0.80158508303581   0.000e+00
+
+  dd recurrence residual |lo/hi| at Y=0.55 = 1.037e-18  (dd carries ~18.0 extra digits of the SUM)
+  max |dd19 - double| over battery = 1.110e-16  (= roundoff dd buys back)
+  19-term truncation floor ~ |C[18]| = 1.000e-16  (dd CANNOT reduce — needs 43-coeff table)
+
+  CEILING for Option B ddilog accuracy = max(roundoff_removed_floor, truncation_floor)
+  => Option B lifts ONLY the cancellation-roundoff component; series accuracy stays ~1e-16
