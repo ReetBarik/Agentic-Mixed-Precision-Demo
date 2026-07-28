@@ -11,17 +11,17 @@ The gate now scores each chain against ITS integral's own p100 floor (kernel-sco
 
 | I | kernel baseline | kernel final | kernel lift | predicted lift | app baseline | app final | outcome | chain | lines |
 |---|---|---|---|---|---|---|---|---|---|
-| B10 | 9.8781 | 9.8781 | +0.00 | +18.43 | 3.6906 | 3.6906 | rejected (chain_no_lift) | cascade_B10_612f1391_494252c4 | 10 |
+| B10 | — | — | — | +18.43 | — | — | apply_failed | cascade_B10_612f1391_494252c4 | 10 |
 | B13 | — | — | — | +17.10 | — | — | apply_failed | cascade_B13_79fc5b8f_f080f240 | 8 |
-| B14 | 13.1855 | 13.1855 | +0.00 | +16.66 | 3.6906 | 3.6906 | rejected (chain_no_lift) | cascade_B14_3429b1d4_01bf2ff3 | 3 |
+| B14 | — | — | — | +16.66 | — | — | apply_failed | cascade_B14_3429b1d4_01bf2ff3 | 3 |
 
 ## Predicted vs measured lift (kernel-scoped)
 
-- **B10** (cascade_B10_612f1391_494252c4): predicted +18.43, kernel-measured +0.00 (9.8781 -> 9.8781), whole-app lift +0.00, tightness 0.003331756565344427, patcher_status=ok, declared_dd=False
+- **B10** (cascade_B10_612f1391_494252c4): predicted +18.43, kernel-measured — (— -> —), whole-app lift —, tightness 0.003331756565344427, patcher_status=llm_gen_failed, declared_dd=False
     - lines: B1m.h:227, B1m.h:240, B1m.h:241, kokkosUtils.h:174, kokkosUtils.h:177, kokkosUtils.h:199, kokkosUtils.h:212, kokkosUtils.h:702, kokkosUtils.h:703, kokkosUtils.h:704
 - **B13** (cascade_B13_79fc5b8f_f080f240): predicted +17.10, kernel-measured — (— -> —), whole-app lift —, tightness 0.07080121254580928, patcher_status=write_truncation, declared_dd=False
     - lines: B2m.h:300, B2m.h:301, B2m.h:305, B2m.h:306, B2m.h:355, B2m.h:533, kokkosUtils.h:212, kokkosUtils.h:702
-- **B14** (cascade_B14_3429b1d4_01bf2ff3): predicted +16.66, kernel-measured +0.00 (13.1855 -> 13.1855), whole-app lift +0.00, tightness 0.19860180300800165, patcher_status=ok, declared_dd=False
+- **B14** (cascade_B14_3429b1d4_01bf2ff3): predicted +16.66, kernel-measured — (— -> —), whole-app lift —, tightness 0.19860180300800165, patcher_status=llm_gen_failed, declared_dd=False
     - lines: B2m.h:401, B2m.h:578, kokkosUtils.h:1208
 
 ## Notes
