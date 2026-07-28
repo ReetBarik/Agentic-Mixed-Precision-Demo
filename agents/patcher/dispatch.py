@@ -521,17 +521,42 @@ def _gen_chain(intent: RemediationIntent, deps: PatchDeps, attempt: int) -> Gen:
     manifest = cp.ChainManifest(
         chain_id=intent.rationale_id or "chain", integral=fanout.integral,
         entry_point=fanout.entry_point, lines=resolved_lines)
+    # L-measure: rule (d) leaf-callee promotion opt-in.  The factory is built over the
+    # working tree's call graph (``graph`` was resolved from ``deps.repo_root``, the
+    # per-run clone — never the pristine snapshot, so L3-resume §5 / STOP #Z holds); a
+    # ``None`` factory or a factory returning ``None`` keeps the chain byte-identical
+    # (STOP #B).  No app identifier here — the factory is the harness's.
+    leaf_ctx = None
+    leaf_factory = getattr(fanout, "leaf_promotion", None)
+    if leaf_factory is not None:
+        try:
+            leaf_ctx = leaf_factory(graph)
+        except Exception as exc:  # noqa: BLE001 — a factory crash is a wiring bug, fail loud
+            return Gen(False, R.LLM_GEN_FAILED, R.ERR_INTEGRATOR,
+                       f"leaf_promotion factory failed: {exc!r}")
     try:
         cr = cp.chain_promote(
             manifest=manifest, graph=graph, tree_root=str(deps.repo_root),
             scalar_type=scalar_cpp, two_limb=two_limb, shim_include=shim_include,
             caller_type="double", complex_type=complex_cpp,
-            max_paths=fanout.max_paths, app_source_roots=app_roots)
+            max_paths=fanout.max_paths, app_source_roots=app_roots,
+            leaf_ctx=leaf_ctx)
     except VariantNameError as exc:
         return Gen(False, R.PATCH_APPLY_FAILED, R.ERR_APPLY,
                    f"variant_name_collision: {exc}")
     except fo.FanoutError as exc:
         return Gen(False, R.PATCH_APPLY_FAILED, R.ERR_APPLY, f"chain_fanout_failed: {exc}")
+
+    # 3a′. Rule (d) §2.8 circuit breaker — leaf promotion would grow F past the
+    # frame/depth cap.  chain_promote sets this BEFORE mutating the tree and emits no
+    # variants, so surface it as a clean terminal rather than let it masquerade as an
+    # empty-chain promotion_no_op.  For Group A (B10/B12/B13) it never fires (depth-1,
+    # ≤4 frames < the default 8) — it is a graceful-degradation backstop.
+    if cr.chain_closure_oversized:
+        return Gen(False, R.PATCH_APPLY_FAILED, R.ERR_APPLY,
+                   f"chain_closure_oversized: rule (d) leaf promotion for chain "
+                   f"{manifest.chain_id} exceeds the §2.8 circuit breaker: "
+                   f"{cr.oversized_detail}")
 
     # 3a. Blocker A carrier terminals — a strict carrier whose decl v1 cannot widen
     # (a function parameter, or shared global/member/output state).  chain_promote sets

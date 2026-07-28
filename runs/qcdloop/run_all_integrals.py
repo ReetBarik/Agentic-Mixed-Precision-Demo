@@ -43,6 +43,65 @@ from runs.qcdloop.run_strategy_e2e import _build_headers_repo, _git  # noqa: E40
 
 APP_CMAKE_DIR = HERE / "app"
 
+# L-measure: rule (d) leaf-callee promotion.  qcdloop's dd support surface is TWO
+# classes (LEAF_CALLEE_PROMOTION_DESIGN.md §2): Class-1 shallow math wrappers the
+# pipeline synthesizes / the enriched source provides at dd, and Class-2 coefficient
+# tables + constants the source instantiates at dd.  ``source_instantiates_at_dd`` is
+# the qcdloop-specific Class-2 accessor set (the double primary at T=ddouble + the
+# enriched dd source's 43-coeff _C, dd _pi, dd tolerances — §2.3, probe P5).  It is a
+# structural leading-underscore accessor / known template-helper set, kept explicit
+# here (the harness is the qcdloop wiring layer) so no app identifier enters the
+# agents/ tree.  Mirrors tests/patcher/fanout/test_rule_d_leaf_promotion.py::_SOURCE_DD.
+_SOURCE_DD_ACCESSORS = frozenset(
+    "_ipio2 _half _pi2o6 _pi _one _two _zero _four _three _C _num_C _ieps _reps "
+    "_eps _neglig _qlonshellcutoff iszero kPow".split())
+
+# Integrals that opt IN to leaf promotion for the L-measure run (design §1.3): B10/B12/
+# B13 reach a clonable leaf (Lnrat) their dd cancellation needs; B14 is dd-sufficient
+# (no clonable leaf) and stays OFF so it is byte-identical to its baseline (STOP #B).
+_LEAF_PROMOTION_INTEGRALS = frozenset({"B10", "B12", "B13"})
+
+
+def _make_leaf_promotion_factory(integral: str, tree: Path):
+    """Build the ``graph -> LeafPromotionContext | None`` factory for one pass.
+
+    Returns ``None`` for an integral not in :data:`_LEAF_PROMOTION_INTEGRALS` (the
+    chain path then runs byte-identically to pre-L-measure — STOP #B).  For an opted-in
+    integral, returns a closure that, given the pass's call graph, builds the
+    :class:`~agents.patcher.chain_promote.LeafPromotionContext` from the CLONED tree's
+    headers (never the pristine snapshot), exactly as the L2/L3 tests do.
+    """
+    if integral not in _LEAF_PROMOTION_INTEGRALS:
+        return None
+
+    from agents.patcher.chain_promote import LeafPromotionContext
+    from agents.integrator_base.shallow_wrapper import (
+        _find_primary_defs, is_class1_synthesizable, source_provides_dd,
+        surface_from_spelling,
+    )
+
+    srcs = [p.read_text() for p in sorted(Path(tree).glob("**/*.h"))]
+    surface = surface_from_spelling("quad::ddfun::ddouble", "quad::ddfun::ddcomplex")
+
+    def resolve(name):
+        defs = _find_primary_defs(name, srcs)
+        return defs[0] if defs else None
+
+    def src_dd(name):
+        return name in _SOURCE_DD_ACCESSORS
+
+    def src_provides(name):
+        return source_provides_dd(name, srcs, surface)
+
+    def factory(graph):
+        return LeafPromotionContext(
+            graph=graph, surface=surface,
+            is_class1_synthesizable=is_class1_synthesizable,
+            source_instantiates_at_dd=src_dd, resolve_primary_body=resolve,
+            integral=integral, source_provides_dd=src_provides)
+
+    return factory
+
 
 # ---------------------------------------------------------------------------
 # Worker — runs in its own process (ProcessPoolExecutor) or inline (workers=1).
@@ -107,6 +166,13 @@ def _run_one(task: dict) -> dict:
             # cancellation-cascade / local-cancellation regions.
             _regions = (json.loads(Path(filtered_report).read_text())
                         .get("integrals", {}).get(integral, {}).get("regions", {}))
+            # L-measure: rule (d) leaf-callee promotion factory (opt-in per integral).
+            # Built over the CLONED ``tree`` (working copy), so emission never touches
+            # the pristine snapshot (STOP #Z).  None for a non-opted integral -> the
+            # chain path is byte-identical (STOP #B).
+            leaf_promotion = (
+                _make_leaf_promotion_factory(integral, tree)
+                if task.get("leaf_promotion") else None)
             fanout = FanoutSettings(
                 entry_point=task["entry_point"], integral=integral,
                 max_paths=task.get("fanout_max_paths", 1024),
@@ -115,7 +181,8 @@ def _run_one(task: dict) -> dict:
                 # TOutput→complex / TMass,TScale→double, so the boundary transform can
                 # promote complex operands to the extended complex container.
                 app_source_roots=[str(HERE / "src")],
-                signal_class_by_region=signal_class_map(_regions))
+                signal_class_by_region=signal_class_map(_regions),
+                leaf_promotion=leaf_promotion)
         patcher_fn = make_patcher_fn(build_config=build_config,
                                      config=PipelineConfig(), fanout=fanout)
         tail_samples = _tail.load_tail_samples(filtered_report)
@@ -242,6 +309,11 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--fanout-max-paths", type=int, default=1024,
                     help="Cap on caller-paths enumerated per intent (over-generation "
                          "bound; a hit is logged, not silent).")
+    ap.add_argument("--leaf-promotion", action="store_true",
+                    help="L-measure: enable rule (d) leaf-callee promotion (clone+"
+                         "promote Lnrat etc.) for the opted-in integrals "
+                         f"({sorted(_LEAF_PROMOTION_INTEGRALS)}).  Off -> byte-identical "
+                         "chain path (STOP #B).")
     ap.add_argument("--clean", action="store_true",
                     help="Remove --out-dir before running.")
     args = ap.parse_args(argv)
@@ -281,6 +353,8 @@ def main(argv: list[str] | None = None) -> int:
     print(f"  tolerance     : {args.tolerance}", flush=True)
     print(f"  fanout        : {args.fanout} (entry={args.entry_point}, "
           f"max_paths={args.fanout_max_paths})", flush=True)
+    print(f"  leaf_promotion: {args.leaf_promotion} "
+          f"(opt-in {sorted(_LEAF_PROMOTION_INTEGRALS)})", flush=True)
     print("===================================", flush=True)
 
     tasks = [{
@@ -304,6 +378,7 @@ def main(argv: list[str] | None = None) -> int:
         "fanout": args.fanout,
         "entry_point": args.entry_point,
         "fanout_max_paths": args.fanout_max_paths,
+        "leaf_promotion": args.leaf_promotion,
     } for integral in integrals]
 
     t0 = time.monotonic()

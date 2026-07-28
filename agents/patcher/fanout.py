@@ -168,6 +168,15 @@ class FanoutSettings:
     # Empty → the filter is inert (fail-open; pre-2e behavior for passes that don't
     # supply the map).
     signal_class_by_region: dict = field(default_factory=dict)
+    # L-measure: rule (d) leaf-callee promotion opt-in.  A ``graph ->
+    # LeafPromotionContext | None`` factory the chain path calls (after building the
+    # call graph over the working tree) to obtain the per-pass leaf-promotion context
+    # threaded into :func:`agents.patcher.chain_promote.chain_promote`.  ``None`` (the
+    # default) keeps the chain path byte-identical to the pre-L-measure behaviour
+    # (STOP #B); a factory that itself returns ``None`` for a given pass is the same
+    # (no opt-in for that integral).  The factory is qcdloop-specific and lives in the
+    # run harness — no app identifier enters this production dataclass.
+    leaf_promotion: object | None = None
 
 
 # One call graph per (tree, entry point) — built once and reused for the pass's
