@@ -55,6 +55,8 @@ from agents.validator import scorer as _scorer                        # noqa: E4
 from agents.validator import tail as _tail                            # noqa: E402
 from agents.validator.agent import make_validator_fn                  # noqa: E402
 from runs.qcdloop.run_strategy_e2e import _build_headers_repo, _git   # noqa: E402
+from runs.qcdloop.run_all_integrals import (                          # noqa: E402
+    _make_leaf_promotion_factory, _LEAF_PROMOTION_INTEGRALS)
 
 APP_CMAKE_DIR = HERE / "app"
 # Phase 2f: chain_dd positive-lift gate (Reet 2026-07-24) — accept iff the chain
@@ -148,9 +150,15 @@ def _run_one_integral(integral: str, args, out_root: Path, vanilla_headers: Path
     run_dir.mkdir(parents=True, exist_ok=True)
 
     clear_graph_cache()
+    # L-measure: rule (d) leaf-callee promotion factory (opt-in per integral, built over
+    # the CLONED ``tree`` so emission never touches the pristine snapshot — STOP #Z).
+    # None for a non-opted integral (B14) -> byte-identical chain path (STOP #B).
+    leaf_promotion = (
+        _make_leaf_promotion_factory(integral, tree) if args.leaf_promotion else None)
     fanout = FanoutSettings(entry_point=args.entry_point, integral=integral,
                             app_source_roots=[str(HERE / "src")],
-                            signal_class_by_region=signal_class_map(report_regions))
+                            signal_class_by_region=signal_class_map(report_regions),
+                            leaf_promotion=leaf_promotion)
     build_config = {"app_cmake_dir": str(APP_CMAKE_DIR), "kokkos_root": args.kokkos_root}
     patcher_fn = make_patcher_fn(build_config=build_config,
                                  config=PipelineConfig(), fanout=fanout)
@@ -356,6 +364,10 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--margin", type=float, default=LIFT_MARGIN,
                     help="chain_dd positive-lift threshold in digits (default 0.5).")
     ap.add_argument("--tolerance", type=float, default=VALIDATE_TOLERANCE)
+    ap.add_argument("--leaf-promotion", action="store_true",
+                    help="L-measure: enable rule (d) leaf-callee promotion for the "
+                         f"opted-in integrals ({sorted(_LEAF_PROMOTION_INTEGRALS)}); "
+                         "B14 stays off (dd-sufficient, STOP #B).")
     ap.add_argument("--clean", action="store_true")
     args = ap.parse_args(argv)
 
@@ -382,6 +394,8 @@ def main(argv: list[str] | None = None) -> int:
     print(f"  out         : {out_root}", flush=True)
     print(f"  starting_sha: {starting_sha}", flush=True)
     print(f"  gate        : chain lift >= {args.margin} digits vs accumulated", flush=True)
+    print(f"  leaf_promo  : {args.leaf_promotion} "
+          f"(opt-in {sorted(_LEAF_PROMOTION_INTEGRALS)})", flush=True)
     print("=============================", flush=True)
 
     results = []
