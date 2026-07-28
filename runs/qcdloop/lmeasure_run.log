@@ -1,0 +1,67 @@
+=== Tier-B Stage-1 config ===
+  integrals   : ['B10', 'B13', 'B14']
+  report      : runs/qcdloop/report_5k.json
+  out         : /home/rbarik/Agentic-Mixed-Precision-Demo/runs/qcdloop/tier_b_stage2_leaf_promotion/lmeasure_run
+  starting_sha: d57ff98e492d114f4ae3d28574ed66a58e3fbb48
+  gate        : chain lift >= 0.5 digits vs accumulated
+  leaf_promo  : True (opt-in ['B10', 'B12', 'B13'])
+=============================
+
+=== Tier-B Stage-1: B10 ===
+  chains total/computed : 2604 / 2596
+  dominant chain        : cascade_B10_612f1391_494252c4
+  tightness             : 3.332e-03
+  measured max_rel_err  : 1.964e+01
+  predicted dd lift     : +18.43 digits
+  chain_lines (10):
+      B1m.h:227
+      B1m.h:240
+      B1m.h:241
+      kokkosUtils.h:174
+      kokkosUtils.h:177
+      kokkosUtils.h:199
+      kokkosUtils.h:212
+      kokkosUtils.h:702
+      kokkosUtils.h:703
+      kokkosUtils.h:704
+  cascade_B10_612f1391_494252c4 -> rejected [chain_no_lift] min 9.8781->9.8781 ([kernel=B10] chain chain_no_lift: p100 9.8781 < accumulated 9.8781 + lift 0.5 = 10.3781) [217.1s]
+  -> whole-app baseline 3.6906 final 3.6906 (lift 0.0); kernel[B10] baseline 9.8781 final 9.8781 (lift 0.0) outcome rejected
+
+=== Tier-B Stage-1: B13 ===
+  chains total/computed : 9962 / 9962
+  dominant chain        : cascade_B13_79fc5b8f_f080f240
+  tightness             : 7.080e-02
+  measured max_rel_err  : 1.849e+02
+  predicted dd lift     : +17.10 digits
+  chain_lines (8):
+      B2m.h:300
+      B2m.h:301
+      B2m.h:305
+      B2m.h:306
+      B2m.h:355
+      B2m.h:533
+      kokkosUtils.h:212
+      kokkosUtils.h:702
+  cascade_B13_79fc5b8f_f080f240 -> apply_failed min None->None (patcher write_truncation (truncation): chain write_truncation: an INTERIOR region of chain cascade_B13_79fc5b8f_f080f240 truncates every landing back to double (no wider persistent sink) — an intra-chain write injects double roundoff betwe) [57.2s]
+  -> whole-app baseline None final None (lift None); kernel[B13] baseline None final None (lift None) outcome apply_failed
+
+=== Tier-B Stage-1: B14 ===
+  chains total/computed : 260 / 32
+  dominant chain        : cascade_B14_3429b1d4_01bf2ff3
+  tightness             : 1.986e-01
+  measured max_rel_err  : 3.269e+05
+  predicted dd lift     : +16.66 digits
+  chain_lines (3):
+      B2m.h:401
+      B2m.h:578
+      kokkosUtils.h:1208
+  cascade_B14_3429b1d4_01bf2ff3 -> rejected [chain_no_lift] min 13.1855->13.1855 ([kernel=B14] chain chain_no_lift: p100 13.1855 < accumulated 13.1855 + lift 0.5 = 13.6855) [32.9s]
+  -> whole-app baseline 3.6906 final 3.6906 (lift 0.0); kernel[B14] baseline 13.1855 final 13.1855 (lift 0.0) outcome rejected
+
+=== Tier-B Stage-1 summary (kernel-scoped) ===
+  B10   rejected                     kernel_lift=0.0 (pred +18.431916508005422) app_lift=0.0
+  B13   apply_failed                 kernel_lift=None (pred +17.10454907468422) app_lift=None
+  B14   rejected                     kernel_lift=0.0 (pred +16.656606583267937) app_lift=0.0
+  wrote /home/rbarik/Agentic-Mixed-Precision-Demo/runs/qcdloop/tier_b_stage2_leaf_promotion/lmeasure_run/TIER_B_STAGE1_2026-07-28.md
+  STOP after Stage-1 — Reet reviews before Group B / all 21.
+LMEASURE_DONE_EXIT_0
