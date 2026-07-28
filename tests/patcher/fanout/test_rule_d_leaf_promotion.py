@@ -214,3 +214,107 @@ def test_chain_promote_oversized_terminal(tmp_path, qcdloop_full_graph):
     assert res.declared_variants == []
     assert res.files_touched == []
     assert "§2.8 circuit breaker" in res.oversized_detail
+
+
+# --------------------------------------------------------------------------- #
+# L3 emission — _materialize_leaf_variants renders the clone + reroutes callers
+# --------------------------------------------------------------------------- #
+
+def _emit_over_tmp(tmp_path, integral, *, leaf_ctx_integral=None, complex_type=None):
+    """Run ``chain_promote`` over a COMPLETE working copy of the vendored tree.
+
+    The call graph must be built over the SAME tree the run mutates: ``chain_promote``
+    writes to the graph's ``FuncDef.file`` paths, so building over the pristine snapshot
+    while writing elsewhere would either corrupt the snapshot or miss the writes.  Copies
+    the whole tree (incl. ``box/``) into ``tmp_path`` and roots the graph there.  Returns
+    ``(res, tree)``; with ``leaf_ctx_integral=None`` no rule-(d) opt-in is passed (STOP
+    #B — the pass is byte-identical to the pre-L3 behavior).
+    """
+    import shutil
+    from agents.patcher import fanout
+    from agents.patcher.call_graph import build_call_graph
+    from agents.patcher.chain_promote import chain_promote
+
+    tree = tmp_path / "tree"
+    shutil.copytree(_QCDLOOP_FULL, tree)
+    fanout.clear_graph_cache()
+    graph = build_call_graph("BO", tree, tu_file=tree / "boxGPU.h")
+
+    leaf_ctx = None
+    if leaf_ctx_integral is not None:
+        srcs = [p.read_text() for p in sorted(tree.glob("**/*.h"))]
+
+        def resolve(name):
+            defs = _find_primary_defs(name, srcs)
+            return defs[0] if defs else None
+
+        surface = surface_from_spelling(
+            "quad::ddfun::ddouble", "quad::ddfun::ddcomplex")
+        leaf_ctx = LeafPromotionContext(
+            graph=graph, surface=surface,
+            is_class1_synthesizable=is_class1_synthesizable,
+            source_instantiates_at_dd=lambda n: n in _SOURCE_DD,
+            resolve_primary_body=resolve, integral=leaf_ctx_integral)
+
+    lines = [(c.split(":")[0], int(c.split(":")[1]), int(c.split(":")[1]))
+             for c in _REAL_CHAINS[integral]]
+    man = ChainManifest(chain_id=f"cascade_{integral}", integral=integral,
+                        entry_point="BO", lines=lines)
+    res = chain_promote(
+        manifest=man, graph=graph, tree_root=tree,
+        scalar_type="quad::ddfun::ddouble", two_limb=True, shim_include=None,
+        complex_type=complex_type, leaf_ctx=leaf_ctx)
+    return res, tree
+
+
+@requires_libclang
+@requires_qcdloop_full
+def test_l3_emits_lnrat_clone_and_reroutes_callers(tmp_path):
+    # The headline L3 deliverable: with the rule-(d) opt-in, chain_promote MATERIALISES
+    # the discovered leaf clone (Lnrat_B10) as its own variant and reroutes every chain
+    # caller's Lnrat call to it.
+    res, tree = _emit_over_tmp(tmp_path, "B10", leaf_ctx_integral="B10",
+                               complex_type="quad::ddfun::ddcomplex")
+    assert res.chain_closure_oversized is False
+    assert res.leaf_reroutes == {"Lnrat": "Lnrat_B10"}
+    assert "Lnrat_B10" in res.declared_variants
+
+    txt = (tree / "kokkosUtils.h").read_text()
+    # (1) the clone is emitted as the @138 SHALLOW overload (TScale,TScale params) —
+    #     never the @126 control-flow (TOutput,TOutput) one.
+    assert "Lnrat_B10(TScale const& x, TScale const& y)" in txt
+    # (2) the clone body is verbatim (still calls the source-provided dd boundaries) and
+    #     never names itself or ql::Lnrat (no self-recursion — STOP #K premise).
+    clone = txt[txt.index("variant Lnrat_B10"):]
+    clone = clone[:clone.index("// --- variant", 1)]
+    assert "ql::kLog(ql::kAbs(x / y))" in clone
+    assert "Lnrat_B10" not in clone.split("Lnrat_B10(", 1)[1]   # body has no self-call
+    # (3) every Li2omx2 chain call is rerouted to the clone; the ORIGINAL Lnrat and its
+    #     original callers are untouched (renames live only on the emitted variants).
+    assert "ql::Lnrat_B10<TOutput, TMass, TScale>(v, x)" in txt
+
+
+@requires_libclang
+@requires_qcdloop_full
+def test_l3_no_leaf_ctx_emits_no_clone(tmp_path):
+    # STOP #B at the emission layer: without the opt-in, _materialize_leaf_variants is
+    # inert — no Lnrat_B10 anywhere, and leaf_reroutes stays empty.
+    res, tree = _emit_over_tmp(tmp_path, "B10", leaf_ctx_integral=None,
+                               complex_type="quad::ddfun::ddcomplex")
+    assert res.leaf_reroutes == {}
+    assert "Lnrat_B10" not in res.declared_variants
+    assert "Lnrat_B10" not in (tree / "kokkosUtils.h").read_text()
+
+
+@requires_libclang
+@requires_qcdloop_full
+def test_l3_leaves_vendored_snapshot_pristine(tmp_path):
+    # The security invariant: all mutation is confined to the tmp working copy; the
+    # committed vendored snapshot is byte-for-byte unchanged by an emission run.
+    before = {p.name: p.read_bytes()
+              for p in sorted(_QCDLOOP_FULL.glob("**/*.h"))}
+    _emit_over_tmp(tmp_path, "B10", leaf_ctx_integral="B10",
+                   complex_type="quad::ddfun::ddcomplex")
+    after = {p.name: p.read_bytes()
+             for p in sorted(_QCDLOOP_FULL.glob("**/*.h"))}
+    assert before == after

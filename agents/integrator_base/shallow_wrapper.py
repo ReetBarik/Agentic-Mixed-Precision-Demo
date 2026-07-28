@@ -796,7 +796,8 @@ class SynthesisResult:
 
 
 def synthesize_for_region(region_text: str, promoted: frozenset[str],
-                          sources: list[str], surface: VendoredSurface) -> SynthesisResult:
+                          sources: list[str], surface: VendoredSurface,
+                          *, skip_source_provided: bool = False) -> SynthesisResult:
     """Recognize + emit Class-1 overloads for the region's app-wrapper calls.
 
     For each app-qualified call ``Ns::g(promoted)``, resolve ``g``'s primary
@@ -805,15 +806,32 @@ def synthesize_for_region(region_text: str, promoted: frozenset[str],
     names), and its call is recorded as ``recognized``.  A call whose primary is
     absent or not a shallow shape is left in ``remaining`` for the LLM path.  Pure,
     deterministic, idempotent (running twice yields byte-identical ``overload_text``).
+
+    ``skip_source_provided`` (Resolution A, leaf-promotion L3-resume): when the
+    analysed ``sources`` already provide a CONCRETE dd overload for a wrapper
+    (:func:`source_provides_dd`), synthesizing it too would emit a second definition
+    of the same overload — an ODR collision, and upstream the emitter's idempotence
+    guard would raise on the two distinct primaries the enriched source now yields for
+    one ``(ns, fn, type)`` key.  With this flag set, such a wrapper is a dd *boundary*:
+    it is recorded as ``recognized`` (so the LLM path never re-adds it) but NO overload
+    is emitted (the source's own definition resolves the call).  The default is
+    ``False`` — every pre-enrichment / non-opted-in caller keeps its byte-identical
+    behaviour (the flag never fires when the source has no concrete dd definition).
     """
     oset = OverloadSet(surface=surface)
     recognized: list[tuple[str, str]] = []
     remaining: list[tuple[str, str, str]] = []
 
+    def _source_dd(name: str) -> bool:
+        return skip_source_provided and source_provides_dd(name, sources, surface)
+
     # A transitive-dep predicate closed over ``sources``: is ``name`` itself a
     # Class-1 shallow wrapper?  (Used only to CLASSIFY the transitive form; the dep
-    # is separately emitted below so the inner call resolves.)
+    # is separately emitted below so the inner call resolves.)  A source-provided dd
+    # dep is a boundary, never a synth dep, so it is excluded here too.
     def _dep(name: str) -> bool:
+        if _source_dd(name):
+            return False
         for defsrc in _find_primary_defs(name, sources):
             r = recognize(defsrc, surface)
             if r is not None and r.fn == name:
@@ -821,6 +839,11 @@ def synthesize_for_region(region_text: str, promoted: frozenset[str],
         return False
 
     for root, fn, chain in find_qualified_app_calls(region_text, promoted):
+        # Resolution A: a wrapper the source already defines at dd is a boundary —
+        # recognized (kept off the LLM path) but NOT emitted (no ODR duplicate).
+        if _source_dd(fn):
+            recognized.append((root, fn))
+            continue
         defs = _find_primary_defs(fn, sources)
         emitted_any = False
         for defsrc in defs:
@@ -829,8 +852,10 @@ def synthesize_for_region(region_text: str, promoted: frozenset[str],
                 continue
             oset.add(r, qualifier=root)
             emitted_any = True
-            # transitive: also emit the dep's own overload(s).
-            if r.form == FORM_TRANSITIVE and r.transitive_dep:
+            # transitive: also emit the dep's own overload(s) — unless the source
+            # already provides that dep at dd (then it is a boundary, not emitted).
+            if r.form == FORM_TRANSITIVE and r.transitive_dep \
+                    and not _source_dd(r.transitive_dep):
                 _emit_dep(r.transitive_dep, root, sources, surface, oset, depth=1)
         if emitted_any:
             recognized.append((root, fn))
@@ -865,28 +890,99 @@ def _emit_dep(fn: str, qualifier: str, sources: list[str], surface: VendoredSurf
 
 
 # --------------------------------------------------------------------------- #
+# source-provided dd boundary (Resolution A — leaf-promotion L3-resume)
+# --------------------------------------------------------------------------- #
+
+# Outcome sentinel for :func:`is_class1_synthesizable`: the analysed source already
+# provides a CONCRETE dd definition for the queried wrapper, so it is a dd
+# *boundary* the pipeline must NOT synthesize.  A pipeline-synthesized overlay for
+# such a wrapper would be a second definition of the same overload — an ODR /
+# ambiguating-redeclaration collision (STOP #K).  This mirrors how a source that
+# defines its own dd constants dissolves the constant-synthesis obligation: a source
+# that defines its own dd wrappers dissolves the wrapper-synthesis obligation.
+# Truthy (a non-empty string) so every existing ``if is_class1_synthesizable(...)``
+# boundary test keeps treating a recognized wrapper as a boundary; callers that must
+# distinguish "synthesize" from "read from source" compare ``== SOURCE_PROVIDED``.
+SOURCE_PROVIDED = "source_provided"
+
+
+def source_provides_dd(fn: str, sources: list[str], surface: VendoredSurface) -> bool:
+    """True iff ``sources`` already provide a CONCRETE dd overload/specialization of
+    ``fn`` for the vendored surface's dd scalar or complex type.
+
+    Structural and framework-agnostic: a *definition* of ``fn`` whose single
+    parameter's CORE type token is the dd scalar/complex core (the last ``::``
+    segment of ``surface.scalar`` / ``surface.complex``), and which is NOT a template
+    *primary* over that parameter.  This recognizes BOTH an explicit
+    ``template<>`` specialization at dd and a plain concrete dd overload, and it keys
+    on the core type token only — so a source that spells the dd type through a
+    DIFFERENT namespace root than the vendored surface (the ``ql::ddfun`` /
+    ``quad::ddfun`` bridge) is still matched.
+
+    A template primary (``T fn(T const&)``) has a template-parameter core and is
+    NEVER a match, so under a source that provides only the primary (the pre-
+    enrichment world) this is uniformly ``False`` — the synthesis obligation stands
+    and every pre-enrichment behaviour is byte-identical.  Keys on the *signature*,
+    not the body shape, so a source dd definition with a multi-statement body is
+    recognized as a boundary exactly like a one-line one (the boundary is "the source
+    owns the dd definition", never "the dd body matches the double body").
+
+    Pure and side-effect-free.
+    """
+    dd_cores = {surface.scalar.rsplit("::", 1)[-1],
+                surface.complex.rsplit("::", 1)[-1]}
+    want = fn.rsplit("::", 1)[-1]
+    for defsrc in _find_primary_defs(want, sources):
+        sig = parse_signature(defsrc)
+        if sig is None:
+            continue
+        pfn, param_core, _pname, is_tmpl = sig
+        if pfn != want:
+            continue
+        if is_tmpl:
+            continue                       # a template PRIMARY, not a concrete dd def
+        if param_core.rsplit("::", 1)[-1] in dd_cores:
+            return True
+    return False
+
+
+# --------------------------------------------------------------------------- #
 # synthesis manifest API (Step 4 — consumed by L2's clonable_leaf predicate)
 # --------------------------------------------------------------------------- #
 
 def is_class1_synthesizable(qualified_name: str, primary_body_source: str,
                             surface: VendoredSurface,
-                            *, is_synth_dep=None) -> bool:
-    """True iff the extended Gap-A machinery can synthesize ``qualified_name``'s dd
-    overload from ``primary_body_source`` — WITHOUT emitting anything.
+                            *, is_synth_dep=None, source_provides_dd=None):
+    """Classify ``qualified_name`` for L2/L3: ``True`` (the pipeline can synthesize
+    its dd overload from ``primary_body_source``), :data:`SOURCE_PROVIDED` (the source
+    already defines it at dd — a boundary, do NOT synthesize), or ``False`` (neither).
 
     This is the manifest-query the L2 ``clonable_leaf`` predicate calls to decide
-    whether a leaf's promoted body names only synthesizable / vendored / source
+    whether a leaf's promoted body names only synthesizable / source / vendored
     symbols.  ``qualified_name`` may be bare (``kAbs``) or qualified (``ql::kAbs``);
     only the final component is matched against the parsed primary's own name.
     ``is_synth_dep`` enables transitive recognition (pass a predicate closed over the
     caller's source map, or ``None`` to disable transitive deps).
 
+    ``source_provides_dd`` (Resolution A) is an optional ``name -> bool`` predicate:
+    when supplied and it reports the source already defines a concrete dd overload for
+    this wrapper, the result is :data:`SOURCE_PROVIDED` — the wrapper is a dd boundary
+    the pipeline reads from source rather than synthesizing (a synthesized overlay
+    would ODR-collide with the source definition; STOP #K).  It is checked BEFORE
+    recognition, so a wrapper whose double primary is *also* a recognizable shallow
+    shape still defers to the source when the source provides dd.  When
+    ``source_provides_dd`` is ``None`` (every pre-enrichment / non-opted-in caller)
+    the result is the original ``bool`` and behaviour is byte-identical.
+
     Pure and side-effect-free — no emission, no shim mutation.  A ``False`` result is
     the conservative refusal L2 needs (the leaf falls to ``chain_closure_escapes``);
-    ``True`` promises :func:`emit_overload` produces a compiling overload.
+    ``True`` promises :func:`emit_overload` produces a compiling overload;
+    :data:`SOURCE_PROVIDED` promises the source already provides a compiling dd one.
     """
+    want = qualified_name.rsplit("::", 1)[-1]
+    if source_provides_dd is not None and source_provides_dd(want):
+        return SOURCE_PROVIDED
     recog = recognize(primary_body_source, surface, is_synth_dep=is_synth_dep)
     if recog is None:
         return False
-    want = qualified_name.rsplit("::", 1)[-1]
     return recog.fn == want

@@ -365,6 +365,11 @@ class LeafPromotionContext:
     * ``resolve_primary_body`` — ``name -> str | None`` primary-body lookup, for the
       predicate's clause-(2) classification and recursion.
     * ``integral`` — the per-integral clone suffix (``B10`` -> ``Lnrat_B10``).
+    * ``source_provides_dd`` — optional ``name -> bool`` (Resolution A, L3-resume):
+      does the analysed source ALREADY define a concrete dd overload for this Class-1
+      wrapper?  When it does, the wrapper is a dd *boundary* (clause 2(v)) read from
+      source, not a synth dep — the pipeline emits no ODR-colliding overlay (STOP #K).
+      ``None`` (the default) disables clause (v): pre-enrichment behaviour, byte-identical.
     * ``max_frames`` / ``max_depth`` — the §2.8 circuit-breaker thresholds.
     """
 
@@ -374,6 +379,7 @@ class LeafPromotionContext:
     source_instantiates_at_dd: object
     resolve_primary_body: object
     integral: str
+    source_provides_dd: object = None
     max_frames: int = 8
     max_depth: int = 3
 
@@ -1498,7 +1504,8 @@ def _discover_leaf_frames(out: CarrierClosure, *, leaf_ctx, frames, frame_names,
             qual, last, surface=leaf_ctx.surface,
             source_instantiates_at_dd=leaf_ctx.source_instantiates_at_dd,
             is_class1_synthesizable=leaf_ctx.is_class1_synthesizable,
-            resolve_primary_body=resolve)
+            resolve_primary_body=resolve,
+            source_provides_dd=leaf_ctx.source_provides_dd)
 
     # Candidate leaf callees: every call ON a chain line whose target is (1) not already
     # a chain frame, (2) not a functional cast, (3) not an indexed kernel-output store
@@ -1556,6 +1563,7 @@ def _discover_leaf_frames(out: CarrierClosure, *, leaf_ctx, frames, frame_names,
             is_class1_synthesizable=leaf_ctx.is_class1_synthesizable,
             source_instantiates_at_dd=leaf_ctx.source_instantiates_at_dd,
             resolve_primary_body=resolve, scalar_type=scalar_type,
+            source_provides_dd=leaf_ctx.source_provides_dd,
             frame_names=frame_names, type_tokens=type_tokens,
             binds_shared_param=None,
             depth=1, max_depth=leaf_ctx.max_depth)
@@ -1621,6 +1629,164 @@ def _attach_return_widens(return_widens: list,
         for spec in targets:
             spec.return_widen = _merge_return_widen(
                 spec.return_widen, rw, spec.variant_name)
+
+
+def _select_leaf_overload(graph: CallGraph, name: str, arg_cores: set[str]):
+    """Pick the overload of leaf ``name`` the chain actually CALLS (design §4a).
+
+    ``Lnrat`` has two overloads — ``(TOutput,TOutput)`` control-flow (:126) and
+    ``(TScale,TScale)`` shallow (:138) — and the B10 chain reaches only the LATTER:
+    both ``Li2omx2``'s ``Lnrat(v,x)`` (``v,x`` ``TScale``) and ``B10``'s own direct
+    ``Lnrat(si,mu2)`` etc. (``TScale`` / ``TMass`` locals) resolve to :138, because at
+    instantiation ``TScale == TMass == ddouble`` exact-matches ``(TScale,TScale)`` while
+    ``(TOutput,TOutput) == (ddcomplex,ddcomplex)`` would need a conversion.
+    ``resolve_primary_body`` / ``_pick_def`` both return ``defs[0]`` (the :126 one),
+    which is WRONG: cloning it and rerouting the ``TScale``-arg calls to it would corrupt
+    the leaf body.  ``_pick_def``'s ``must_call`` cannot disambiguate either (both
+    overloads bottom out in the same boundary set).
+
+    Select structurally by the call-site argument core types (unioned over every chain
+    call of ``name`` — one clone serves them all, so they must agree): the reachable
+    overload is the one whose parameter core types are all DRAWN FROM the argument cores
+    (``{TScale} ⊆ {TScale,TMass}`` for :138; ``{TOutput} ⊄`` for :126).  Ties break to the
+    most-specific (largest) parameter-core set.  A single-definition leaf skips matching
+    (the common case).  Raises :class:`FanoutError` when no overload's parameters are
+    covered, or the best match is ambiguous — e.g. two chain call sites that genuinely
+    need different overloads — refusing to guess a leaf body rather than emit a
+    wrong-typed clone (STOP).  Framework-agnostic: no identifier is hard-coded; the choice
+    is a pure function of the graph's overload signatures and the call-site arg types.
+    """
+    fds = graph.defs.get(name) or []
+    if not fds:
+        raise FanoutError(f"leaf {name!r} has no definition in the call graph")
+    if len(fds) == 1:
+        return fds[0]
+    scored: list[tuple[int, object]] = []
+    for fd in fds:
+        body = "\n".join(_original_text(fd.file, fd.line_start, fd.line_end))
+        pcores = set(region_scan._param_name_core_types(
+            region_scan._tokenize(body)).values())
+        if pcores and pcores <= arg_cores:
+            scored.append((len(pcores), fd))
+    if not scored:
+        raise FanoutError(
+            f"leaf {name!r}: no overload of {len(fds)} whose parameter core types are "
+            f"covered by the call-site argument cores {sorted(arg_cores)}; refusing to "
+            f"guess a leaf body (STOP)")
+    best = max(s for s, _ in scored)
+    winners = [fd for s, fd in scored if s == best]
+    if len(winners) != 1:
+        raise FanoutError(
+            f"leaf {name!r}: {len(winners)} overloads tie at the most-specific match for "
+            f"call-site argument cores {sorted(arg_cores)} — two call sites likely need "
+            f"different overloads; refusing to guess a leaf body (STOP)")
+    return winners[0]
+
+
+def _materialize_leaf_variants(
+        closure: CarrierClosure, *, manifest: ChainManifest, graph: CallGraph,
+        scalar_type: str, complex_type: str | None, complex_tokens,
+        shim_include: str | None, new_specs: dict[str, dict[str, VariantSpec]],
+        root_reroutes: dict[str, str]) -> list[str]:
+    """Rule (d) L3: emit each discovered leaf clone + wire its caller reroute (§4).
+
+    For every ``(g, g_clone)`` in ``closure.leaf_reroutes`` (``Lnrat`` -> ``Lnrat_B10``):
+
+    1. locate the chain frames that CALL ``g`` and their call-site argument core types,
+       and select the overload of ``g`` those calls resolve to
+       (:func:`_select_leaf_overload` — the ``TScale`` ``Lnrat``, not the ``TOutput`` one);
+    2. build a :class:`VariantSpec` that is a verbatim rename of that overload (``promotes=
+       []`` — the body is not retyped, §1.1; its dd-ness rides on the return widen + the
+       template instantiation), carrying a :class:`ReturnWiden` widening the return to the
+       chain-consistent dd type.  That dd type is derived by :func:`_carrier_dd_type` with
+       the SAME ``complex_tokens`` the closure used, so the clone returns EXACTLY the type
+       the caller's receiving local was widened to (``prod`` -> ``ddouble`` for B10) — the
+       identical derivation rule (c) uses for ``Li2omx2``/``ddilog`` (line ~1422);
+    3. add the caller-side reroute ``g -> g_clone`` to every variant of a calling frame
+       (and, if the entry point itself calls ``g``, to ``root_reroutes``), so
+       ``ql::Lnrat<…>(v,x)`` rewrites to ``ql::Lnrat_B10<…>(v,x)`` (design §4b).
+
+    A clone that itself calls another discovered leaf reroutes that call too; a
+    self-recursive leaf is handled by ``render_variant``'s ``orig_name -> variant_name``
+    rename (design §3.2 — vacuous for B10, ``Lnrat`` is a sink, §2.7).  Inert when
+    ``leaf_reroutes`` is empty (no ``leaf_ctx`` -> byte-identical, STOP #B).  Returns the
+    emitted clone names.
+    """
+    emitted: list[str] = []
+    if not closure.leaf_reroutes:
+        return emitted
+
+    # Chain frames = the enclosing functions of the chain lines (unique by extent).  A
+    # leaf's callers are a subset of these (a leaf is called ON a chain line, §2.6).
+    chain_fds: dict[tuple[str, int], object] = {}
+    for (file, ls, le) in manifest.lines:
+        fd = graph.enclosing_function(file, ls)
+        if fd is not None:
+            chain_fds[(fd.file, fd.line_start)] = fd
+
+    def _calls_in(body: str):
+        for ln in body.split("\n"):
+            for call in _scan_calls(ln):
+                yield call
+
+    for g, g_clone in sorted(closure.leaf_reroutes.items()):
+        # (1) callers of g among the chain frames + the call-site arg core types.
+        caller_names: set[str] = set()
+        arg_cores: set[str] = set()
+        for fd in chain_fds.values():
+            body = "\n".join(_original_text(fd.file, fd.line_start, fd.line_end))
+            nct = region_scan.name_core_types(body)
+            calls_g = False
+            for (_qual, last, args) in _calls_in(body):
+                if last == g:
+                    calls_g = True
+                    arg_cores |= {nct[a] for a in args if a in nct}
+            if calls_g:
+                caller_names.add(fd.name)
+
+        leaf_fd = _select_leaf_overload(graph, g, arg_cores)
+
+        # (2) the clone spec: verbatim body (promotes=[]) + return widen.
+        leaf_body = "\n".join(
+            _original_text(leaf_fd.file, leaf_fd.line_start, leaf_fd.line_end))
+        spec = VariantSpec(variant_name=g_clone, orig_name=g, file=leaf_fd.file,
+                           orig_start=leaf_fd.line_start, orig_end=leaf_fd.line_end)
+        sig = _return_type_signature(leaf_body, leaf_fd.line_start)
+        if sig is None:
+            raise FanoutError(
+                f"leaf {g!r}: return type unrecoverable (auto / SFINAE); cannot widen "
+                f"the clone's return — it would truncate dd back to caller precision (STOP)")
+        sig_line, orig_type = sig
+        dd_type = _carrier_dd_type(orig_type, scalar_type, complex_type, complex_tokens)
+        if orig_type != dd_type:
+            spec.return_widen = ReturnWiden(
+                return_line=sig_line, orig_type=orig_type, dd_type=dd_type,
+                function_name=g_clone)
+        # a clone that calls ANOTHER discovered leaf reroutes that call too (sink for B10).
+        for g2, g2_clone in closure.leaf_reroutes.items():
+            if g2 != g and any(last == g2 for (_q, last, _a) in _calls_in(leaf_body)):
+                spec.reroutes[g2] = g2_clone
+        if shim_include and shim_include not in spec.shim_includes:
+            spec.shim_includes.append(shim_include)
+
+        bucket = new_specs.setdefault(leaf_fd.file, {})
+        if g_clone in bucket:
+            raise FanoutError(
+                f"leaf clone {g_clone!r} already emitted for this chain — a duplicate "
+                f"leaf materialisation (wiring bug)")
+        bucket[g_clone] = spec
+        emitted.append(g_clone)
+
+        # (3) caller-side reroute: g -> g_clone in every variant of a calling frame; the
+        # in-place entry point is rerouted via root_reroutes when it is itself a caller.
+        for specs in new_specs.values():
+            for s in specs.values():
+                if s.orig_name in caller_names:
+                    s.reroutes[g] = g_clone
+        if graph.root in caller_names:
+            root_reroutes[g] = g_clone
+
+    return emitted
 
 
 def chain_promote(*, manifest: ChainManifest, graph: CallGraph,
@@ -1788,6 +1954,19 @@ def chain_promote(*, manifest: ChainManifest, graph: CallGraph,
     # types) are caught by VariantSpec.merge/_merge_return_widen; a record naming a
     # variant no emitted spec clones is a wiring bug (2b would create it) — fail loud.
     _attach_return_widens(closure.return_widens, new_specs)
+
+    # --- rule (d) L3: materialise the discovered leaf-callee clones ---------------
+    # ``closure.leaf_reroutes`` (rule (d), Subtask L2) names each leaf the chain reaches
+    # that the design promotes by clone-and-rename (``Lnrat -> Lnrat_B10``) rather than by
+    # in-place widen — a distinct symbol is what breaks the STOP #K forwarding-overload
+    # self-recursion.  Emit each clone as its own VariantSpec (verbatim body + a
+    # chain-consistent return widen) and wire the caller-side reroute onto every calling
+    # frame's variants (and the entry point).  Empty with ``leaf_ctx=None`` (STOP #B), so
+    # this is byte-identical to the pre-L3 pass unless rule (d) opted in.
+    _materialize_leaf_variants(
+        closure, manifest=manifest, graph=graph, scalar_type=scalar_type,
+        complex_type=complex_type, complex_tokens=complex_tokens,
+        shim_include=shim_include, new_specs=new_specs, root_reroutes=root_reroutes)
 
     # --- one merge per touched file (the whole chain's specs for that file) ----
     declared: list[str] = []

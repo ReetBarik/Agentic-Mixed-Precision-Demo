@@ -86,17 +86,32 @@ def _root_segment(qual: str) -> str:
 
 
 def is_dd_boundary(qual: str, last: str, *, surface, source_instantiates_at_dd,
-                   is_class1_synthesizable, resolve_primary_body) -> bool:
+                   is_class1_synthesizable, resolve_primary_body,
+                   source_provides_dd=None) -> bool:
     """True iff call target ``(qual, last)`` resolves at the dd termination boundary
     (§2.6) — a value/op the pipeline synthesizes or reads, NOT a frame to clone.
 
-    The four boundary kinds (§2.6):
+    The dd boundary kinds (§2.6):
 
     * (i)  a vendored ``quad::ddfun`` op (qualifier root is a vendored namespace), or a
       ``<cmath>`` op the Gap-A bridge redirects onto the vendored surface;
     * (iii) a Class-2 / source symbol the source instantiates at dd (a constant or
       coefficient-table accessor — ``_ipio2`` / ``_half`` / ``_pi2o6`` / ``_C``);
-    * (ii) a Class-1 synthesizable wrapper (L1′ ``is_class1_synthesizable``).
+    * (v)  a Class-1 wrapper the analysed source ALREADY defines at dd — a
+      source-provided dd definition (Resolution A, leaf-promotion L3-resume).  The
+      source enrichment that dissolved the Class-2 constant-synthesis obligation also
+      ships the dd Class-1 wrappers, so under it the pipeline must read the source's
+      own dd definition, NOT synthesize an ODR-colliding duplicate (STOP #K);
+    * (ii) a Class-1 SYNTHESIZABLE wrapper (L1′ ``is_class1_synthesizable``) — the
+      pre-enrichment path, where the source provides only the double primary and the
+      pipeline synthesizes the dd overload from it.
+
+    ``source_provides_dd`` is an optional ``name -> bool`` predicate; when ``None``
+    (every pre-enrichment / non-opted-in caller) kind (v) never fires and behaviour is
+    byte-identical.  Kind (v) is checked before (ii) so a wrapper the source provides
+    at dd is a boundary even when its double primary is not a recognizable shallow
+    shape (a source dd definition with a multi-statement body — the boundary is "the
+    source owns the dd definition", not "the double body is shallow").
 
     Shared by :func:`clonable_leaf`'s clause-(2) classifier and rule (d)'s
     frame-discovery candidate filter so the two never disagree on what is a leaf.
@@ -108,6 +123,8 @@ def is_dd_boundary(qual: str, last: str, *, surface, source_instantiates_at_dd,
         return last in (surface.scalar_ops | surface.complex_ops)
     if source_instantiates_at_dd(last):
         return True
+    if source_provides_dd is not None and source_provides_dd(last):
+        return True                        # (v) source-provided dd Class-1 wrapper
     body = resolve_primary_body(last)
     if body and is_class1_synthesizable(last, body, surface):
         return True
@@ -204,6 +221,7 @@ def clonable_leaf(
     source_instantiates_at_dd,
     resolve_primary_body,
     scalar_type: str,
+    source_provides_dd=None,
     frame_names=frozenset(),
     type_tokens=frozenset(),
     binds_shared_param=None,
@@ -238,6 +256,13 @@ def clonable_leaf(
         unavailable (the callee then classifies only if vendored / math / source).
     scalar_type:
         The dd scalar spelling (informational; the boundary is decided structurally).
+    source_provides_dd:
+        Optional ``name -> bool`` (Resolution A, leaf-promotion L3-resume) — does the
+        analysed source ALREADY define a concrete dd overload for this Class-1 wrapper?
+        When it does, the wrapper is a dd *boundary* (kind (v)) the clone reads from
+        source, NEVER a synth dep, so it is excluded from ``transitive_deps`` and the
+        pipeline emits no ODR-colliding overlay (STOP #K).  ``None`` (the default)
+        disables kind (v) — every pre-enrichment caller is byte-identical.
     frame_names:
         Names ALREADY in the chain frame set ``F`` — a call to one of these is a
         chain-internal edge (rule (c) territory), not a leaf to classify.
@@ -320,7 +345,13 @@ def clonable_leaf(
     transitive_deps: list[str] = []
 
     def _is_synth_dep(inner: str) -> bool:
-        """Transitive Class-1 dep query for :func:`is_class1_synthesizable`."""
+        """Transitive Class-1 dep query for :func:`is_class1_synthesizable`.
+
+        A source-provided dd wrapper (Resolution A) is a boundary, not a synth dep, so
+        it is excluded here — it never becomes an emitted transitive overload.
+        """
+        if source_provides_dd is not None and source_provides_dd(inner):
+            return False
         b = resolve_primary_body(inner)
         return bool(b) and is_class1_synthesizable(inner, b, surface)
 
@@ -347,6 +378,10 @@ def clonable_leaf(
         # coefficient-table accessors: _ipio2 / _half / _pi2o6 / _C / _num_C).
         if source_instantiates_at_dd(last):
             continue
+        # (v) Class-1 wrapper the source ALREADY defines at dd (Resolution A): a
+        # boundary the clone reads from source, NOT synthesized (no ODR duplicate).
+        if source_provides_dd is not None and source_provides_dd(last):
+            continue
         # (ii) Class-1 synthesizable wrapper (L1′): the pipeline emits its dd overload.
         body = resolve_primary_body(last)
         if body and is_class1_synthesizable(last, body, surface,
@@ -360,7 +395,8 @@ def clonable_leaf(
                 is_class1_synthesizable=is_class1_synthesizable,
                 source_instantiates_at_dd=source_instantiates_at_dd,
                 resolve_primary_body=resolve_primary_body,
-                scalar_type=scalar_type, frame_names=frame_names,
+                scalar_type=scalar_type, source_provides_dd=source_provides_dd,
+                frame_names=frame_names,
                 type_tokens=type_tokens,
                 binds_shared_param=binds_shared_param,
                 seen=inner_seen, depth=depth + 1, max_depth=max_depth)
