@@ -265,6 +265,126 @@ def region_complex_read_names(func_source: str, complex_tokens) -> set[str]:
             if core in complex_tokens}
 
 
+# Fixed-size aggregate core spellings whose *element* may be promoted (region-core
+# element promotion, 2026-07-28).  ``Kokkos::Array`` / ``std::array`` only — a
+# ``Kokkos::View`` / ``std::vector`` is a DYNAMIC container (design non-goal), so it is
+# intentionally NOT here and its subscript reads stay at caller precision.
+_FIXED_ARRAY_CORES = frozenset({"Array", "array"})
+
+
+def region_element_bases(func_source: str, complex_tokens) -> dict[str, str]:
+    """``{aggregate name: element-type spelling}`` for fixed-size **complex** aggregates.
+
+    Region-core element promotion (design ``REGION_CORE_ELEMENT_PROMOTION_DESIGN.md``).
+    The d1 guard in :func:`region_reads_from_function` (lines 155-170) deliberately
+    drops any array-subscript base ``cxs[k]`` from the promotable reads — promoting the
+    *whole array* yields ``ffloat[int]`` build failures.  That leaves a promoted dd
+    operand multiplied by an un-promoted ``cxs[k]`` (a ``Kokkos::complex<double>``),
+    forming an illegal ``Kokkos::complex<ddcomplex>`` (STOP #CC).
+
+    The fix promotes the element *occurrence* (never the array decl); this returns the
+    base names it may fire on — the fixed-size complex aggregates declared anywhere in
+    the enclosing function (params or locals) — mapped to their element-type spelling
+    (the store-demotion target).  :func:`agents.integrator_base.boundary.\
+promote_region_block` wraps each ``base[k]`` occurrence inside a promoted region and
+    leaves the array declaration untouched, so the d1 failure mode cannot recur (§3.2).
+
+    Dynamic containers (``Kokkos::View`` / ``std::vector`` / a ``()``-accessor) and
+    nested aggregates (``Kokkos::Array<Kokkos::Array<…>,M>``) are excluded (non-goals),
+    so B10's ``res(i,1)`` View stays at caller precision.  The detector keys on the decl
+    *shape*, never on an app-specific identifier (no ``cxs`` / ``x4`` baked in — honors
+    the no-placeholder-patterns constraint)."""
+    return _fixed_complex_array_decls(_tokenize(func_source), set(complex_tokens))
+
+
+def _fixed_complex_array_decls(toks: list["_Tok"],
+                               complex_tokens: set[str]) -> dict[str, str]:
+    """Base names of fixed-size complex aggregates → element-type spelling.
+
+    Two decl shapes (design §3.1): a template ``(Kokkos::|std::)?(Array|array)< ELEM,
+    …, N > NAME`` and a C-array ``ELEM NAME [ N ]``.  In both the element's core type
+    token must be complex (in ``complex_tokens`` — the complex-bound template params
+    ``TOutput`` plus the literal ``complex``) and the extent ``N`` an integer literal.
+    A non-literal extent, a dynamic container, or a nested aggregate element does not
+    match (stays at caller precision)."""
+    out: dict[str, str] = {}
+    n = len(toks)
+
+    # (1) template array: (Kokkos::|std::)? (Array|array) < ELEM , … , N > NAME
+    for i in range(n - 1):
+        if toks[i].text not in _FIXED_ARRAY_CORES or toks[i + 1].text != "<":
+            continue
+        close = _skip_template(toks, i + 1)          # index just past the matching '>'
+        if close is None:
+            continue
+        args = _angle_arg_groups(toks, i + 1, close - 1)
+        if len(args) < 2:
+            continue
+        extent = args[-1]
+        if not (len(extent) == 1 and extent[0].text.isdigit()):
+            continue
+        if _core_type_name([t.text for t in args[0]]) not in complex_tokens:
+            continue
+        nm = _declarator_name_at(toks, close)
+        if nm:
+            out.setdefault(nm, "".join(t.text for t in args[0]))
+
+    # (2) C-array: ELEM NAME [ N ]  (ELEM a single complex-core ident, stmt-leading)
+    for i in range(n - 3):
+        ty, nm, ob, ext = toks[i], toks[i + 1], toks[i + 2], toks[i + 3]
+        if not (_is_ident_tok(ty.text) and _is_ident_tok(nm.text)
+                and ob.text == "[" and ext.text.isdigit()):
+            continue
+        prev = toks[i - 1].text if i > 0 else ";"
+        if prev in (".", "::", "->", ">") or _is_ident_tok(prev):
+            continue                                 # member access / not stmt-leading
+        if _core_type_name([ty.text]) in complex_tokens:
+            out.setdefault(nm.text, ty.text)
+    return out
+
+
+def _angle_arg_groups(toks: list["_Tok"], open_idx: int,
+                      close_idx: int) -> list[list["_Tok"]]:
+    """Top-level comma-separated token groups between a ``<`` and its matching ``>``.
+
+    ``toks[open_idx]`` is the ``<``; ``close_idx`` the index of the closing ``>`` /
+    ``>>`` token (from :func:`_skip_template`).  Nested ``<…>`` / ``(…)`` / ``[…]`` are
+    tracked so only depth-0 commas split (``Array<complex<double>, 3>`` → two groups)."""
+    groups: list[list["_Tok"]] = []
+    cur: list["_Tok"] = []
+    depth = 0
+    for k in range(open_idx + 1, close_idx):
+        tx = toks[k].text
+        if tx in ("(", "[", "{", "<"):
+            depth += 1; cur.append(toks[k])
+        elif tx in (")", "]", "}", ">"):
+            depth -= 1; cur.append(toks[k])
+        elif tx == ">>":
+            depth -= 2; cur.append(toks[k])
+        elif tx == "," and depth == 0:
+            groups.append(cur); cur = []
+        else:
+            cur.append(toks[k])
+    if cur:
+        groups.append(cur)
+    return groups
+
+
+def _declarator_name_at(toks: list["_Tok"], k: int) -> str | None:
+    """Declarator name at/after token ``k`` (skipping ``&`` / ``*`` / cv-quals).
+
+    Returns the identifier only when it is followed by a declarator terminator
+    (``;`` / ``=`` / ``,`` / ``[`` / ``)``) — so a nested type use
+    ``Array<T,3>::value_type`` (next token ``::``) is not mistaken for a variable."""
+    n = len(toks)
+    while k < n and (toks[k].text in ("&", "*") or toks[k].text in _TYPE_QUALIFIERS):
+        k += 1
+    if k >= n or not _is_ident_tok(toks[k].text):
+        return None
+    nxt = toks[k + 1].text if k + 1 < n else ";"
+    return toks[k].text if nxt in (";", "=", ",", "[", ")") else None
+
+
 def name_core_types(func_source: str) -> dict[str, str]:
     """Map each param / body-local name to its *core* declared type token.
 

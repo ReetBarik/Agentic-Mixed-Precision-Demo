@@ -379,7 +379,8 @@ class _Promotion:
 
 
 def _compute_promotion(region_text: str, reads: list[str], writes: list[str],
-                       closure_names: frozenset[str] = frozenset()) -> _Promotion:
+                       closure_names: frozenset[str] = frozenset(),
+                       element_bases: frozenset[str] = frozenset()) -> _Promotion:
     """Partition a region's identifiers into the extended-scalar promotion sets.
 
     Reads promote unconditionally (Rule R1); a region-local decl promotes iff its
@@ -397,6 +398,15 @@ def _compute_promotion(region_text: str, reads: list[str], writes: list[str],
     boundary alias — the widened decl already carries the extended type end-to-end.
     Carrier names actually written in this region are recorded in ``carrier_writes``
     so the no-op guard treats a carrier write as a landing.
+
+    ``element_bases`` (region-core element promotion, 2026-07-28) are fixed-size
+    complex-aggregate names whose *element occurrences* ``base[k]`` are promoted at
+    the read site (never the array decl — the d1 whole-array failure mode is avoided
+    by construction).  A base is seeded into the dataflow **only** so a region-local
+    decl-init consuming an element (``TOutput xs = cxs[0];``) chains to promotion via
+    Rule R2; the base name itself is deliberately kept OUT of ``pure_reads`` /
+    ``promoted`` / ``names`` (it is never renamed or aliased, and must not trip the
+    Gap-A qualified-call lint that reads :func:`compute_promoted_names`).
     """
     toks = _tokenize(region_text)
     ident_texts = {t.text for t in toks if _is_ident(t.text)}
@@ -425,15 +435,20 @@ def _compute_promotion(region_text: str, reads: list[str], writes: list[str],
     # carrier chains to promotion (Rule R2), even though the carrier itself is never
     # renamed/aliased.
     promoted: set[str] = set(pure_reads) | set(caseB) | set(closure_names)
+    # ``seed`` drives the dataflow reachability check; ``element_bases`` participate in
+    # it (a decl-init consuming ``base[k]`` chains) but are kept OUT of ``promoted`` so
+    # the base name is never renamed/aliased/lint-flagged (region-core element promo).
+    seed: set[str] = set(promoted) | set(element_bases)
     decl_writes: list[_Decl] = []
     changed = True
     while changed:
         changed = False
         for d in all_decls:
-            if d.name in promoted or d.type_text in _INT_TYPES \
+            if d.name in seed or d.type_text in _INT_TYPES \
                     or d.name in closure_names:
                 continue
-            if d.rhs_idents & promoted:
+            if d.rhs_idents & seed:
+                seed.add(d.name)
                 promoted.add(d.name)
                 decl_writes.append(d)
                 changed = True
@@ -561,6 +576,264 @@ def _complex_cast_indices(toks: list["_Tok"], complex_tokens: frozenset[str],
     return idx
 
 
+def _match_bracket(toks: list["_Tok"], open_idx: int) -> int | None:
+    """Index of the ``]`` matching the ``[`` at ``open_idx`` (nested brackets ok)."""
+    depth = 0
+    for k in range(open_idx, len(toks)):
+        tx = toks[k].text
+        if tx == "[":
+            depth += 1
+        elif tx == "]":
+            depth -= 1
+            if depth == 0:
+                return k
+    return None
+
+
+def _match_paren(toks: list["_Tok"], open_idx: int) -> int | None:
+    """Index of the ``)`` matching the ``(`` at ``open_idx`` (nested parens ok)."""
+    depth = 0
+    for k in range(open_idx, len(toks)):
+        tx = toks[k].text
+        if tx == "(":
+            depth += 1
+        elif tx == ")":
+            depth -= 1
+            if depth == 0:
+                return k
+    return None
+
+
+def _within_any(start: int, end: int, spans: list[tuple[int, int]]) -> bool:
+    """True if ``[start, end)`` lies within any span in ``spans``."""
+    return any(s <= start and end <= e for s, e in spans)
+
+
+def widen_carrier_assign_line(line: str, carriers: frozenset[str],
+                              complex_type: str, scalar_type: str) -> str | None:
+    """Widen a plain assignment ``C = RHS;`` to a widened complex *carrier* ``C``.
+
+    Region-core element promotion (2026-07-28), deliverable (c) — *receiving-local
+    widen*.  A closure carrier's decl is widened to the chain's dd complex type by the
+    ``ClosureDecl`` path, but a carrier written on a NON-region line (a sibling branch
+    the pipeline did not select as a landing region — e.g. B14 ``fac = TOutput(-xs /
+    (m2*m4*ta));`` at B2m.h:398) keeps its caller-precision RHS, which no longer assigns
+    to the now-dd carrier.  Widen the RHS so it matches the carrier decl.
+
+    Two RHS shapes, both build-exercised by the region transform:
+
+    * a functional complex cast ``T( … )`` (``T`` a complex spelling) whose ``(…)`` is
+      the whole RHS → rewrite the leading cast token to ``complex_type`` (``ddcomplex(-xs
+      / …)``, which binds ``ddcomplex(double)``);
+    * any other complex value ``v`` → component reconstruction
+      ``complex_type(scalar_type((v).real()), scalar_type((v).imag()))``.
+
+    Returns the rewritten line, or ``None`` when the line is not such an assignment
+    (a decl, a compound assign, a multi-line statement, an already-dd RHS, or an RHS that
+    already references a carrier — i.e. already dd-producing).  Never fires when
+    ``carriers`` is empty, so a variant with no widened complex carrier is untouched.
+    """
+    if not carriers:
+        return None
+    toks = _tokenize(line)
+    if len(toks) < 4:
+        return None
+    if toks[0].text not in carriers:
+        return None
+    # plain assignment: ``C = …`` (not ``==``/``+=`` and not a decl ``T C = …``).
+    if toks[1].text != "=" or toks[2].text == "=":
+        return None
+    semi = _stmt_end(toks, 2)
+    if semi is None:                        # multi-line statement — out of scope
+        return None
+    rhs_start = toks[2].start
+    rhs_end = toks[semi].start
+    rhs = line[rhs_start:rhs_end].strip()
+    if not rhs:
+        return None
+    if _looks_dd(rhs, scalar_type, complex_type):
+        return None                         # RHS already produces a dd value
+    if any(t.text in carriers for t in toks[2:semi]):
+        return None                         # RHS reads another carrier → already dd
+    # Shape 1: the RHS is exactly a functional complex cast ``T( … )``.
+    if (_is_ident(toks[2].text) and toks[2].text != complex_type
+            and toks[3].text == "("):
+        close = _match_paren(toks, 3)
+        if close is not None and close == semi - 1:
+            return line[:toks[2].start] + complex_type + line[toks[2].end:]
+    # Shape 2: reconstruct the caller complex value into the dd container.
+    wrapped = (f"{complex_type}({scalar_type}(({rhs}).real()), "
+               f"{scalar_type}(({rhs}).imag()))")
+    return line[:rhs_start] + wrapped + line[rhs_end:]
+
+
+def demote_exit_carriers_line(line: str, carriers: frozenset[str],
+                              caller_complex: str, caller_type: str,
+                              two_limb: bool) -> str | None:
+    """Demote widened-carrier *reads* on a designed-exit store line to caller precision.
+
+    Region-core element promotion (2026-07-28), deliverable (b) — *Shape-1 designed-exit
+    narrowing*.  A designed exit (``res(i,k) = fac`` kernel-output store, an out-param
+    store, a benign extract) is a carried dd value's intended projection back to caller
+    precision; the closure already exempts these lines from the write-truncation gate but
+    the store itself is still emitted verbatim, so a now-dd carrier no longer assigns to
+    the caller-precision sink (B14 ``res(i,1) = fac`` / ``res(i,0) = fac * wlogtmu``).
+    Reconstruct the caller complex value at each carrier read so the projection lands.
+
+    Only READ occurrences of a name in ``carriers`` are demoted (a store *to* the carrier,
+    or a member/scope-qualified use, is skipped); a caller-precision co-operand
+    (``wlogtmu``) is left untouched, so ``fac * wlogtmu`` becomes ``<demote(fac)> *
+    wlogtmu`` — a caller-precision product assignable to the caller sink.  Returns the
+    rewritten line, or ``None`` when no carrier read occurs (no-op).
+    """
+    if not carriers:
+        return None
+    toks = _tokenize(line)
+    n = len(toks)
+    edits: list[tuple[int, int, str]] = []
+    for i, t in enumerate(toks):
+        if t.text not in carriers:
+            continue
+        prev = toks[i - 1].text if i > 0 else ";"
+        if prev in (".", ">", ":"):          # ``.c`` / ``->c`` / ``::c`` member/scope
+            continue
+        nxt = toks[i + 1].text if i + 1 < n else ";"
+        nxt2 = toks[i + 2].text if i + 2 < n else ";"
+        if nxt == "=" and nxt2 != "=":       # store target, not a read
+            continue
+        demoted = _demote_complex_value(t.text, caller_complex, caller_type, two_limb)
+        edits.append((t.start, t.end, demoted))
+    if not edits:
+        return None
+    return _apply_spans(line, edits)
+
+
+def _element_read_edits(toks: list["_Tok"], region_text: str,
+                        element_bases: frozenset[str], complex_type: str,
+                        scalar_type: str) -> tuple[list[tuple[int, int, str]],
+                                                   list[tuple[int, int]]]:
+    """Span edits wrapping each ``base[...]`` READ of a fixed-size complex aggregate.
+
+    An occurrence ``base[k]`` (``base`` in ``element_bases``) that is not the LHS of a
+    bare store ``base[k] = …`` (nor a compound assign ``base[k] += …``) is a read: it
+    is wrapped in :func:`_promote_complex_entry` so the element enters the promoted
+    arithmetic at ``complex_type`` (full caller precision preserved component-wise).
+    Returns ``(edits, spans)`` — ``spans`` are the wrapped ``base[...]`` char ranges so
+    the caller can suppress overlapping inner edits.
+    """
+    edits: list[tuple[int, int, str]] = []
+    spans: list[tuple[int, int]] = []
+    n = len(toks)
+    for i in range(n - 1):
+        if toks[i].text not in element_bases or toks[i + 1].text != "[":
+            continue
+        # A member/qualified access ``x.base`` / ``x::base`` / ``x->base`` is a
+        # different entity than the aggregate decl — skip it.
+        prev = toks[i - 1].text if i > 0 else ";"
+        if prev in (".", "::", "->"):
+            continue
+        close = _match_bracket(toks, i + 1)
+        if close is None:
+            continue
+        after = toks[close + 1].text if close + 1 < n else ";"
+        after2 = toks[close + 2].text if close + 2 < n else ";"
+        # LHS of a store: bare ``=`` (not ``==``) or a compound assign ``+=``/``*=``/…
+        if after == "=" and after2 != "=":
+            continue
+        if after in ("+", "-", "*", "/") and after2 == "=":
+            continue
+        start, end = toks[i].start, toks[close].end
+        src = region_text[start:end]
+        edits.append((start, end,
+                      _promote_complex_entry(toks[i].text, src, complex_type,
+                                             scalar_type)))
+        spans.append((start, end))
+    return edits, spans
+
+
+def _looks_dd(rhs: str, scalar_type: str, complex_type: str | None) -> bool:
+    """Heuristic: does ``rhs`` carry a promoted (extended) value?
+
+    True when it names the extended scalar/container spelling or a boundary read/write
+    alias — the only ways a promoted value reaches an element store in this transform.
+    Keeps store demotion from firing on a plain caller-precision assignment.
+    """
+    return (scalar_type in rhs
+            or (complex_type is not None and complex_type in rhs)
+            or _READ_SUFFIX in rhs or _WRITE_SUFFIX in rhs)
+
+
+def _stmt_end(toks: list["_Tok"], k: int) -> int | None:
+    """Index of the depth-0 ``;`` at or after token ``k`` (statement terminator)."""
+    depth = 0
+    for j in range(k, len(toks)):
+        tx = toks[j].text
+        if tx in ("(", "[", "{"):
+            depth += 1
+        elif tx in (")", "]", "}"):
+            depth -= 1
+        elif tx == ";" and depth == 0:
+            return j
+    return None
+
+
+def _demote_complex_value(expr: str, target_type: str, caller_type: str,
+                          two_limb: bool) -> str:
+    """Demote an arbitrary promoted-complex ``expr`` to ``target_type`` (caller precision).
+
+    The store analogue of :func:`_demote_complex_expr`, but operating on a raw sub-
+    expression (an element-store RHS) rather than a ``name+suffix`` alias.
+    """
+    e = f"({expr})"
+    if not two_limb:
+        return (f"{target_type}(static_cast<{caller_type}>({e}.real()), "
+                f"static_cast<{caller_type}>({e}.imag()))")
+    re_ = (f"static_cast<{caller_type}>({e}.re.hi) + "
+           f"static_cast<{caller_type}>({e}.re.lo)")
+    im_ = (f"static_cast<{caller_type}>({e}.im.hi) + "
+           f"static_cast<{caller_type}>({e}.im.lo)")
+    return f"{target_type}({re_}, {im_})"
+
+
+def _demote_element_stores(text: str, ebases: dict, caller_type: str,
+                           two_limb: bool, scalar_type: str,
+                           complex_type: str | None) -> str:
+    """Demote ``base[k] = <dd expr>;`` element stores back to the caller complex type.
+
+    Re-tokenizes the already-promoted region text, finds each bare store into a
+    fixed-size complex aggregate element, and — only when the RHS :func:`_looks_dd` —
+    reconstructs the caller complex value so the aggregate stays at caller precision
+    (its declaration is never retyped).  Compound assigns and reads are left alone.
+    """
+    toks = _tokenize(text)
+    n = len(toks)
+    edits: list[tuple[int, int, str]] = []
+    for i in range(n - 1):
+        if toks[i].text not in ebases or toks[i + 1].text != "[":
+            continue
+        prev = toks[i - 1].text if i > 0 else ";"
+        if prev in (".", "::", "->"):
+            continue
+        close = _match_bracket(toks, i + 1)
+        if close is None:
+            continue
+        after = toks[close + 1].text if close + 1 < n else ";"
+        after2 = toks[close + 2].text if close + 2 < n else ";"
+        if not (after == "=" and after2 != "="):
+            continue                       # only a bare store is an element write
+        eq = close + 1
+        semi = _stmt_end(toks, eq + 1)
+        if semi is None:
+            continue
+        rhs = text[toks[eq + 1].start:toks[semi].start].strip()
+        if not _looks_dd(rhs, scalar_type, complex_type):
+            continue
+        target = ebases[toks[i].text]
+        new_rhs = _demote_complex_value(rhs, target, caller_type, two_limb)
+        edits.append((toks[eq + 1].start, toks[semi].start, new_rhs))
+    return _apply_spans(text, edits)
+
+
 def promote_region_block(
     region_text: str,
     reads: list[str],
@@ -574,6 +847,7 @@ def promote_region_block(
     complex_names=frozenset(),
     caller_complex: str | None = None,
     closure_names=frozenset(),
+    element_bases=frozenset(),
 ) -> tuple[list[str], bool]:
     """Promote a region's source to ``scalar_type``; return ``(block_lines, promoted)``.
 
@@ -607,7 +881,15 @@ def promote_region_block(
     of "promote this region" stay bit-identical.
     """
     closure_names = frozenset(closure_names)
-    prom = _compute_promotion(region_text, reads, writes, closure_names)
+    # Normalize element bases to ``{base name: element-type spelling}`` (region-core
+    # element promotion).  A plain iterable of names maps each to the caller complex
+    # spelling (the store-demotion target).  Only used when complex promotion is on.
+    if isinstance(element_bases, dict):
+        ebases = dict(element_bases)
+    else:
+        ebases = {b: (caller_complex or caller_type) for b in element_bases}
+    prom = _compute_promotion(region_text, reads, writes, closure_names,
+                              frozenset(ebases))
     toks = prom.toks
     pure_reads = prom.pure_reads
     caseB = prom.caseB
@@ -676,7 +958,30 @@ def promote_region_block(
             edits.append((t.start, t.end, complex_type))
         elif t.text in rename_map:
             edits.append((t.start, t.end, rename_map[t.text]))
+
+    # Region-core element promotion: wrap each ``base[k]`` READ occurrence of a
+    # fixed-size complex aggregate in an entry cast to ``complex_type`` so a promoted
+    # dd operand no longer multiplies a caller-precision ``Kokkos::complex<double>``
+    # element (the STOP #CC ``complex<ddcomplex>`` form).  The array declaration is
+    # left untouched — no whole-array retype, so the d1 failure mode cannot recur.
+    if use_complex and ebases:
+        elem_edits, elem_spans = _element_read_edits(
+            toks, region_text, frozenset(ebases), complex_type, scalar_type)
+        # A whole-``base[k]``-span replacement subsumes any inner-token edit; drop
+        # main edits that fall inside a wrapped element span (defensive — inner index
+        # tokens are not promoted names in practice).
+        edits = [e for e in edits if not _within_any(e[0], e[1], elem_spans)]
+        edits += elem_edits
     new_region_text = _apply_spans(region_text, edits)
+
+    # Demote element STORES on exit: a bare ``base[k] = <dd expr>;`` into a caller-
+    # precision aggregate must reconstruct the caller complex value (design row 3).
+    # Guarded by ``_looks_dd`` so only genuine dd RHSs are rewritten (no in-scope
+    # integral exercises this today; correctness is proven by unit test, not the
+    # sweep — avoids a dead-code false positive).
+    if use_complex and ebases:
+        new_region_text = _demote_element_stores(
+            new_region_text, ebases, caller_type, two_limb, scalar_type, complex_type)
 
     region_lines = region_text.split("\n")
     indent = _leading_ws(region_lines[0]) if region_lines else ""

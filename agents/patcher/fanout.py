@@ -234,6 +234,11 @@ class Promote:
     # must not seed / alias / demote it — the widened decl carries the extended value
     # end-to-end.  Defaults empty so a pre-Blocker-A manifest re-renders identically.
     closure_names: list[str] = field(default_factory=list)
+    # Region-core element promotion (2026-07-28): fixed-size complex-aggregate names
+    # ({base: element-type spelling}) whose element occurrences ``base[k]`` are promoted
+    # at the read site (never the array decl).  Empty so a pre-existing manifest
+    # re-renders identically.
+    element_bases: dict = field(default_factory=dict)
 
 
 @dataclass
@@ -319,6 +324,16 @@ class VariantSpec:
     # construction site keeps its byte-identical behaviour.  Populated by Subtask 2b's
     # closure algorithm.
     return_widen: "ReturnWiden | None" = None
+    # Region-core element promotion (2026-07-28) carrier body reconciliation:
+    #   ``closure_complex_names`` — widened *complex* carriers (dd_type == complex_type)
+    #     declared in this variant's extent, so ``render_variant`` can widen a sibling
+    #     assignment to them (deliverable c) and demote their reads at designed exits.
+    #   ``designed_exits`` — ``(orig_line, kind)`` truncating designed exits (kernel_output
+    #     / out_param / benign extract) in this variant's extent whose carried dd value
+    #     must be projected to caller precision at the store (deliverable b).
+    # Both default empty so a pre-element-promotion manifest re-renders byte-identically.
+    closure_complex_names: list[str] = field(default_factory=list)
+    designed_exits: list[tuple[int, str]] = field(default_factory=list)
 
     def to_json(self) -> dict:
         d = asdict(self)
@@ -335,7 +350,9 @@ class VariantSpec:
             file=d["file"], orig_start=d["orig_start"], orig_end=d["orig_end"],
             promotes=promotes, reroutes=dict(d.get("reroutes", {})),
             shim_includes=list(d.get("shim_includes", [])),
-            closure_decls=closure_decls, return_widen=return_widen)
+            closure_decls=closure_decls, return_widen=return_widen,
+            closure_complex_names=list(d.get("closure_complex_names", [])),
+            designed_exits=[tuple(e) for e in d.get("designed_exits", [])])
 
     def merge(self, other: "VariantSpec") -> None:
         """Fold ``other`` (same variant) into this spec: union reroutes / shim
@@ -364,6 +381,14 @@ class VariantSpec:
                 have_cd.add((c.decl_line, c.orig_type, c.dd_type))
         self.return_widen = _merge_return_widen(self.return_widen, other.return_widen,
                                                 self.variant_name)
+        for nm in other.closure_complex_names:
+            if nm not in self.closure_complex_names:
+                self.closure_complex_names.append(nm)
+        have_de = set(self.designed_exits)
+        for e in other.designed_exits:
+            if e not in have_de:
+                self.designed_exits.append(e)
+                have_de.add(e)
 
 
 def _merge_return_widen(a: "ReturnWiden | None", b: "ReturnWiden | None",
@@ -470,8 +495,13 @@ def fan_out_region(
     complex_tokens, caller_complex = _resolve_complex_binding(
         app_source_roots, caller_type, complex_type)
     complex_names = _complex_reads(func_src, reads, complex_tokens) if complex_type else []
+    # Region-core element promotion: fixed-size complex-aggregate bases whose element
+    # reads must be wrapped (d1 leaves them at caller precision → STOP #CC otherwise).
+    element_bases = (region_scan.region_element_bases(func_src, complex_tokens)
+                     if complex_type else {})
     ckw = dict(complex_type=complex_type, complex_tokens=list(complex_tokens),
-               complex_names=complex_names, caller_complex=caller_complex)
+               complex_names=complex_names, caller_complex=caller_complex,
+               element_bases=element_bases)
 
     # Compute the promotion payload up front (independent of the variant/in-place
     # rendering path): ``promoted`` is False when the region retypes nothing — an
@@ -480,7 +510,8 @@ def fan_out_region(
     _, promotion_applied = boundary.promote_region_block(
         region_text, reads, writes, scalar_type, caller_type, two_limb,
         complex_type=complex_type, complex_tokens=frozenset(complex_tokens),
-        complex_names=frozenset(complex_names), caller_complex=caller_complex)
+        complex_names=frozenset(complex_names), caller_complex=caller_complex,
+        element_bases=element_bases)
 
     # Phase 2d-B: an upcast whose promotion lands only in caller-precision stores is
     # numerically inert (truncated at the boundary).  Detect it here, upstream of the
@@ -569,6 +600,7 @@ def _accumulate_region_specs(
     complex_tokens = ckw.get("complex_tokens", [])
     complex_names = ckw.get("complex_names", [])
     caller_complex = ckw.get("caller_complex")
+    element_bases = ckw.get("element_bases", {})
     for path in paths:
         names = variant_names_for_path(path, integral)
         name_maps.append(names)
@@ -594,7 +626,8 @@ def _accumulate_region_specs(
                     scalar_type=scalar_type, two_limb=two_limb, caller_type=caller_type,
                     complex_type=complex_type, complex_tokens=list(complex_tokens),
                     complex_names=list(complex_names), caller_complex=caller_complex,
-                    closure_names=list(closure_names)))
+                    closure_names=list(closure_names),
+                    element_bases=dict(element_bases)))
                 if shim_include and shim_include not in spec.shim_includes:
                     spec.shim_includes.append(shim_include)
 
@@ -612,6 +645,60 @@ def _original_text(fd_file: str, start: int, end: int) -> list[str]:
     """
     lines = Path(fd_file).read_text(encoding="utf-8", errors="replace").split("\n")
     return lines[start - 1:end]
+
+
+def _carrier_reconcile_edits(spec: VariantSpec,
+                             orig_lines: list[str]) -> list[tuple[int, int, tuple]]:
+    """Compute the carrier body-reconciliation edits for a variant (tag 3).
+
+    Region-core element promotion (2026-07-28), deliverables (b) designed-exit narrow +
+    (c) receiving-local widen.  Once element promotion clears a region's interior
+    ``complex<ddcomplex>``, a widened complex carrier still breaks at two non-region body
+    sites the region transform does not touch: a sibling assignment to the carrier
+    (widen its caller-precision RHS) and a designed-exit store reading the carrier
+    (demote the read to caller precision).  Each is a single-line rewrite keyed by the
+    ORIGINAL line number.
+
+    A strict no-op unless the variant has BOTH a complex region promotion (which supplies
+    the dd/​caller type spellings and ``two_limb`` flag) AND ≥1 widened complex carrier —
+    so every variant without region-core element promotion re-renders byte-identically.
+    """
+    carriers = frozenset(spec.closure_complex_names)
+    if not carriers:
+        return []
+    cp = next((p for p in spec.promotes if p.complex_type), None)
+    if cp is None:
+        return []
+    complex_type = cp.complex_type
+    scalar_type = cp.scalar_type
+    caller_complex = cp.caller_complex or "Kokkos::complex<double>"
+    caller_type = cp.caller_type
+    two_limb = cp.two_limb
+    region_ranges = [(p.region_start, p.region_end) for p in spec.promotes]
+    decl_lines = {c.decl_line for c in spec.closure_decls}
+    # Truncating designed exits (the carried dd value physically lands in a caller-
+    # precision container): kernel_output / out_param / benign extract.  A plain
+    # ``return`` in a non-widened frame is deliberately NOT demoted — that truncation is a
+    # genuine severance the gate must still reject (CLOSURE §3.3), not a designed landing.
+    exit_lines = {ln for (ln, kind) in spec.designed_exits
+                  if kind in ("kernel_output", "out_param", "extract")}
+    out: list[tuple[int, int, tuple]] = []
+    for abs_line in range(spec.orig_start, spec.orig_end + 1):
+        if abs_line in decl_lines:
+            continue
+        if any(s <= abs_line <= e for s, e in region_ranges):
+            continue
+        line = orig_lines[abs_line - spec.orig_start]
+        if abs_line in exit_lines:
+            nw = boundary.demote_exit_carriers_line(
+                line, carriers, caller_complex, caller_type, two_limb)
+            if nw is not None:
+                out.append((abs_line, 3, (abs_line, nw)))
+                continue
+        nw = boundary.widen_carrier_assign_line(line, carriers, complex_type, scalar_type)
+        if nw is not None:
+            out.append((abs_line, 3, (abs_line, nw)))
+    return out
 
 
 def render_variant(spec: VariantSpec) -> str:
@@ -646,6 +733,12 @@ def render_variant(spec: VariantSpec) -> str:
              + [(c.decl_line, 1, c) for c in spec.closure_decls]
              + ([(spec.return_widen.return_line, 2, spec.return_widen)]
                 if spec.return_widen is not None else []))
+    # Carrier body reconciliation (region-core element promotion, deliverables b + c):
+    # single-line rewrites (tag 3) keyed by ORIGINAL line so they ride the same
+    # descending-order pass as ClosureDecl — each target is a non-region body line, so its
+    # coordinate is never shifted by a lower-line region replace.  Computed from a snapshot
+    # of the untouched source (before any edit mutates ``lines``).
+    edits += _carrier_reconcile_edits(spec, list(lines))
     for start, kind, e in sorted(edits, key=lambda t: (t[0], t[1]), reverse=True):
         if kind == 0:
             p = e
@@ -662,7 +755,8 @@ def render_variant(spec: VariantSpec) -> str:
                 complex_tokens=frozenset(p.complex_tokens),
                 complex_names=frozenset(p.complex_names),
                 caller_complex=p.caller_complex,
-                closure_names=frozenset(p.closure_names))
+                closure_names=frozenset(p.closure_names),
+                element_bases=p.element_bases)
             lines = lines[:local_s] + block + lines[local_e + 1:]
         elif kind == 1:
             c = e
@@ -675,6 +769,17 @@ def render_variant(spec: VariantSpec) -> str:
                                                     c.dd_type)
             if widened is not None:
                 lines[local] = widened
+        elif kind == 3:
+            # Carrier body reconciliation: a precomputed single-line replacement.  ``e``
+            # is ``(abs_line, new_text)``; the target is a non-region body line whose
+            # coordinate is valid under the descending pass (see edit-list comment).
+            abs_line, new_text = e
+            local = abs_line - spec.orig_start
+            if local < 0 or local >= len(lines):
+                raise FanoutError(
+                    f"carrier reconcile line {abs_line} out of range for "
+                    f"{spec.orig_name} [{spec.orig_start}-{spec.orig_end}]")
+            lines[local] = new_text
         else:
             rw = e
             local = rw.return_line - spec.orig_start
@@ -844,7 +949,8 @@ def _promote_in_place(tree: Path, fd: FuncDef, line_start: int, line_end: int,
         complex_tokens=frozenset(ckw.get("complex_tokens", [])),
         complex_names=frozenset(ckw.get("complex_names", [])),
         caller_complex=ckw.get("caller_complex"),
-        closure_names=frozenset(ckw.get("closure_names", [])))
+        closure_names=frozenset(ckw.get("closure_names", [])),
+        element_bases=ckw.get("element_bases", {}))
     if promoted:
         lines = lines[:line_start - 1] + block + lines[line_end:]
     if shim_include:

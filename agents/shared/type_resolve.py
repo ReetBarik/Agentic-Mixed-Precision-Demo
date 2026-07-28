@@ -82,6 +82,39 @@ def classify_concrete_type(spelling: str) -> str:
     return "scalar"
 
 
+def array_element_type(spelling: str) -> str | None:
+    """Element type of a **fixed-size** array spelling, else ``None``.
+
+    Region-core element promotion (2026-07-28, design §3.1) fires only on a
+    *fixed-size* aggregate — ``Kokkos::Array<T, N>`` / ``std::array<T, N>`` where the
+    extent ``N`` is an **integer literal**.  For such a spelling this returns the
+    element type spelling ``T``; for anything else (a dynamic ``Kokkos::View`` /
+    ``std::vector``, a non-literal extent ``Array<T, kN>``, a non-array, or a nested
+    ``Array<Array<…>,M>`` whose first arg is itself an aggregate) it returns
+    ``None`` — those stay at caller precision (design non-goals).
+
+    Pure spelling parse (no binding needed): the complex-ness of ``T`` is decided by
+    the caller against its template-parameter binding (``T`` may be an alias
+    ``TOutput`` that only the binding resolves to complex), so this classifies
+    *shape* only.
+    """
+    s = spelling.strip()
+    if "<" not in s:
+        return None
+    core = s.split("<", 1)[0].replace("&", " ").rsplit("::", 1)[-1].split()[-1]
+    if core not in ("Array", "array"):          # Kokkos::Array / std::array only
+        return None
+    args = _split_angle_args(s, s.find("<"))
+    if len(args) < 2:
+        return None
+    if not args[-1].strip().isdigit():          # extent must be an integer literal
+        return None
+    elem = args[0].strip()
+    if classify_concrete_type(elem) == "aggregate":   # nested aggregate → deferred
+        return None
+    return elem
+
+
 def resolve_bindings(app_roots, caller_type: str = "double") -> dict[str, str]:
     """Map each entry-template parameter name to its concrete instantiation type.
 

@@ -38,6 +38,8 @@ sys.path.insert(0, str(REPO))
 
 from agents.config import PipelineConfig                              # noqa: E402
 from agents.patcher.agent import make_patcher_fn                      # noqa: E402
+from agents.patcher import instantiation_gate as _instgate           # noqa: E402
+from agents.patcher import result as _R                              # noqa: E402
 from agents.patcher.fanout import (FanoutSettings, clear_graph_cache,  # noqa: E402
                                    signal_class_map)
 from agents.per_integral_orchestrator.filter_report import filter_report  # noqa: E402
@@ -66,6 +68,56 @@ LIFT_MARGIN = 0.5
 # lift-relative and reads min_precise_digits directly, which is tolerance-independent).
 VALIDATE_TOLERANCE = 6.0
 STAGE1_INTEGRALS = ["B10", "B12", "B13", "B14"]
+
+
+class InstantiationStopBB(RuntimeError):
+    """STOP #BB — the instantiation gate hit a g++ error it cannot classify.
+
+    Raised (and allowed to abort the run) rather than papered over with a generic
+    fallback: an unknown error shape signals the emission model has a hole bigger
+    than the four known shapes, and per the dispatch that is a hand-back, not a
+    degrade.
+    """
+
+
+def _instantiation_gate(build_log_path, out_dir, iter_id: int):
+    """Pre-measurement instantiation gate over a Patcher ``build_failed`` log.
+
+    The Patcher's build gate already compiles the vanilla driver, which instantiates
+    ``ql::BO`` at the REAL box binding (``TOutput = Kokkos::complex<double>``) — so an
+    emission-binding defect surfaces there as g++ errors *before* any measurement
+    pass runs.  This classifies that log into the four known emission-binding shapes,
+    writes a per-shape report next to the run, and:
+
+      * returns ``(reason_tag, report)`` = ``("instantiation_binding", report)`` when
+        every error is a known shape — the candidate is a binding failure, distinct
+        from a generic ``build_failed``;
+      * raises :class:`InstantiationStopBB` when ANY error is unclassifiable (STOP
+        #BB — never a silent fallback);
+      * returns ``(None, report)`` when the log has no errors at all (not a binding
+        failure — some other build problem, left as plain ``build_failed``).
+    """
+    report = _instgate.classify_build_log_file(build_log_path) if build_log_path else \
+        _instgate.InstantiationReport()
+    if report.ok:
+        return None, report
+    # Persist the per-shape classification alongside the run for the report.
+    try:
+        rep_path = Path(out_dir) / f"instantiation_gate_iter_{iter_id}.json"
+        rep_path.write_text(json.dumps({
+            "total": report.total,
+            "counts": report.counts(),
+            "unknown": report.unknown,
+            "summary": report.summary(),
+        }, indent=2))
+    except OSError:
+        pass
+    if report.has_unknown:
+        raise InstantiationStopBB(
+            f"STOP #BB — instantiation gate hit {len(report.unknown)} unclassifiable "
+            f"g++ error(s) (not one of the four known emission-binding shapes): "
+            f"{report.unknown[:5]}")
+    return _instgate.INSTANTIATION_BINDING, report
 
 
 def _is_computed(chain) -> bool:
@@ -191,13 +243,29 @@ def _run_one_integral(integral: str, args, out_root: Path, vanilla_headers: Path
         t0 = time.monotonic()
         resp = patcher_fn(intent.to_patcher(), ctx)
         arts = resp.get("artifacts") or {}
+        status = resp.get("status")
+        error = resp.get("error")
+        # Pre-measurement instantiation gate: a build_failed from the Patcher means the
+        # emitted dd variant tree did not compile once instantiated at the real box
+        # binding.  Classify that log into the four known emission-binding shapes so the
+        # failure is tagged distinctly (instantiation_binding) and an unknown shape
+        # STOPs (#BB) instead of masquerading as a generic build_failed.  Measurement
+        # never runs for a non-ok apply, so this is the gate before the measurement pass.
+        if status == _R.BUILD_FAILED:
+            tag, ig_report = _instantiation_gate(
+                arts.get("build_log_path"), out_dir, i)
+            if tag == _instgate.INSTANTIATION_BINDING:
+                error = dict(error or {})
+                error["kind"] = _instgate.INSTANTIATION_BINDING
+                error["detail"] = ig_report.summary()
+                error["instantiation_shapes"] = ig_report.counts()
         return ApplyResult(
-            ok=(resp.get("status") == "ok"),
+            ok=(status == "ok"),
             candidate_sha=resp.get("candidate_sha"),
-            patcher_status=resp.get("status"),
+            patcher_status=status,
             gate_binary=arts.get("gate_binary"),
             gate_tree_hash=arts.get("gate_tree_hash"),
-            error=resp.get("error"),
+            error=error,
             wall_sec=round(time.monotonic() - t0, 1))
 
     def validate_fn(candidate_sha, gate_binary, gate_tree_hash):
@@ -403,6 +471,13 @@ def main(argv: list[str] | None = None) -> int:
         try:
             results.append(_run_one_integral(integral, args, out_root, vanilla_headers,
                                              base_repo, starting_sha))
+        except InstantiationStopBB as exc:
+            # STOP #BB — an unclassifiable emission-binding error.  Catalogued as a
+            # distinct outcome (not a generic crash) and handed back; the batch keeps
+            # going so the other integrals still report.
+            print(f"  {integral}: STOP #BB — {exc}", flush=True)
+            results.append({"integral": integral, "outcome": "stopped_instantiation_bb",
+                            "error": str(exc)})
         except Exception as exc:   # noqa: BLE001 - one integral's crash must not kill the batch
             import traceback
             traceback.print_exc()

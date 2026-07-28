@@ -573,11 +573,39 @@ def _region_depth(graph: CallGraph, fd, chain_id: str, max_paths: int) -> int:
     return min(len(p) for p in paths) - 1
 
 
+def _is_already_dd(core_type: str, scalar_type: str,
+                   complex_type: str | None) -> bool:
+    """True when ``core_type`` already denotes a dd type — so widening it is a no-op.
+
+    Guards the double-widen (Shape 3, ``Kokkos::complex<quad::ddfun::ddcomplex>``):
+    a carrier whose source token is *already* the dd scalar/complex spelling (or any
+    ``quad::ddfun::`` type, or a complex container wrapping one) must NOT be widened
+    again.  Matched on the core token AND its last ``::`` segment so an
+    already-qualified ``quad::ddfun::ddcomplex`` and a bare ``ddcomplex`` both hit.
+    """
+    if not core_type:
+        return False
+    last = core_type.split("::")[-1]
+    dd_spellings = {scalar_type, scalar_type.split("::")[-1]}
+    if complex_type:
+        dd_spellings |= {complex_type, complex_type.split("::")[-1]}
+    if core_type in dd_spellings or last in dd_spellings:
+        return True
+    # Any vendored dd type (quad::ddfun::*) is already extended precision.
+    return core_type.startswith("quad::ddfun::") or "quad::ddfun::" in core_type
+
+
 def _carrier_dd_type(core_type: str, scalar_type: str,
                      complex_type: str | None, complex_tokens) -> str:
     """The chain-internal dd type a carrier decl widens to: the complex container
     when the carrier's core type is a complex-bound token, else the scalar dd type
-    (§7 — ``quad::ddfun::ddouble`` / ``ddcomplex``)."""
+    (§7 — ``quad::ddfun::ddouble`` / ``ddcomplex``).
+
+    Idempotence guard (Shape 3): if the core type is ALREADY a dd type, return it
+    unchanged — re-wrapping an already-``ddcomplex`` operand in the complex container
+    is what produces the nonsensical ``Kokkos::complex<quad::ddfun::ddcomplex>``."""
+    if _is_already_dd(core_type, scalar_type, complex_type):
+        return core_type
     if complex_type and core_type in complex_tokens:
         return complex_type
     return scalar_type
@@ -1885,15 +1913,19 @@ def chain_promote(*, manifest: ChainManifest, graph: CallGraph,
         reads_used[rkey] = list(reads)
 
         complex_names = _complex_reads(func_src, reads, complex_tokens) if complex_type else []
+        # Region-core element promotion: fixed-size complex-aggregate bases whose element
+        # reads must be wrapped (d1 leaves them at caller precision → STOP #CC otherwise).
+        element_bases = (region_scan.region_element_bases(func_src, complex_tokens)
+                         if complex_type else {})
         ckw = dict(complex_type=complex_type, complex_tokens=list(complex_tokens),
                    complex_names=complex_names, caller_complex=caller_complex,
-                   closure_names=list(closure_names))
+                   closure_names=list(closure_names), element_bases=element_bases)
 
         _, promoted = boundary.promote_region_block(
             region_text, reads, writes, scalar_type, caller_type, two_limb,
             complex_type=complex_type, complex_tokens=frozenset(complex_tokens),
             complex_names=frozenset(complex_names), caller_complex=caller_complex,
-            closure_names=frozenset(closure_names))
+            closure_names=frozenset(closure_names), element_bases=element_bases)
         per_region_promoted.append(promoted)
 
         if fd.name == graph.root:
@@ -1943,6 +1975,29 @@ def chain_promote(*, manifest: ChainManifest, graph: CallGraph,
                 if key not in {(c.decl_line, c.orig_type, c.dd_type)
                                for c in spec.closure_decls}:
                     spec.closure_decls.append(cd)
+
+    # --- element promotion: attach complex-carrier names + designed exits ---------
+    # Region-core element promotion (2026-07-28) carrier body reconciliation (deliverables
+    # b + c).  A widened *complex* carrier (``closure_widenable`` whose ``dd_type`` is the
+    # complex container) rides every variant whose extent holds its decl line; a
+    # truncating designed exit (kernel_output / out_param / benign extract) rides every
+    # variant whose extent holds its store line.  render_variant then widens a sibling
+    # assignment to the carrier and demotes the carrier reads at those exits.  Gated on
+    # ``complex_type`` so a scalar-only chain attaches nothing and stays byte-identical.
+    if complex_type:
+        for (dfile, dline, nm, dd_type) in closure.closure_widenable:
+            if dd_type != complex_type:
+                continue
+            for spec in new_specs.get(dfile, {}).values():
+                if spec.orig_start <= dline <= spec.orig_end:
+                    if nm not in spec.closure_complex_names:
+                        spec.closure_complex_names.append(nm)
+        for (efile, eline, kind, _carried, _detail) in closure.designed_exits:
+            for spec in new_specs.get(efile, {}).values():
+                if spec.orig_start <= eline <= spec.orig_end:
+                    rec = (eline, kind)
+                    if rec not in spec.designed_exits:
+                        spec.designed_exits.append(rec)
 
     # --- closure: attach return-type widens to the variants that own them --------
     # Rule (c) (Subtask 2b) records, per callee frame whose return the closure widens,
