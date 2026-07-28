@@ -99,6 +99,14 @@ class CallGraph:
     template signatures share a name); ``edges`` / ``reverse`` are name→name
     adjacency (forward: caller→callees; reverse: callee→callers) for downward
     enumeration and upward rename cascade.
+
+    ``active_lines`` maps each file (absolute path) reachable in the TU's include
+    closure to the set of its *preprocessor-active* line numbers under the app's build
+    defines (see :mod:`agents.patcher.preprocessor`).  It lets the fan-out select the
+    definition that survives preprocessing when a name has several (qcdloop's pruned
+    ``#ifndef``-guarded ``BO`` copies vs the live full-dispatch ``BO``).  Empty for a
+    hand-built graph (tests) — the selection then degrades to no preprocessor
+    filtering, byte-identical to the pre-fix behaviour.
     """
 
     root: str
@@ -106,6 +114,7 @@ class CallGraph:
     defs: dict[str, list[FuncDef]] = field(default_factory=dict)
     edges: dict[str, set[str]] = field(default_factory=dict)
     reverse: dict[str, set[str]] = field(default_factory=dict)
+    active_lines: dict[str, set[int]] = field(default_factory=dict)
 
     # -- lookups ------------------------------------------------------------
 
@@ -134,6 +143,28 @@ class CallGraph:
                     if best is None or fd.span < best.span:
                         best = fd
         return best
+
+    def def_is_active(self, fd: FuncDef) -> bool:
+        """Whether ``fd`` survives preprocessing under the app's build defines.
+
+        A definition is active iff its opening line is in the file's active-line set
+        (see :attr:`active_lines`).  Using the definition's *start* line is sufficient
+        and robust: a ``#ifndef`` guard wraps the whole definition, so its head line is
+        active exactly when its body is.  When ``active_lines`` is empty (a hand-built
+        graph with no preprocessor walk), every definition is reported active — the
+        selection then falls back to the unfiltered behaviour.
+        """
+        if not self.active_lines:
+            return True
+        return fd.line_start in self.active_lines.get(str(Path(fd.file).resolve()), set())
+
+    def active_defs(self, name: str) -> list[FuncDef]:
+        """Definitions of ``name`` that survive preprocessing (see :meth:`def_is_active`).
+
+        Returns every definition when no preprocessor walk ran (empty ``active_lines``);
+        otherwise filters to the live ones.  Order is preserved from ``defs``.
+        """
+        return [fd for fd in self.defs.get(name, ()) if self.def_is_active(fd)]
 
     # -- traversal ----------------------------------------------------------
 
@@ -307,7 +338,22 @@ def build_call_graph(
             f"({len(defs)} defs found); check the entry-point name / tu_file")
 
     edges, reverse = _extract_edges(defs)
-    return CallGraph(root=root, tu_file=str(tu), defs=defs, edges=edges, reverse=reverse)
+
+    # Preprocessor-active line map: which definitions survive the app's build defines.
+    # A source-text include-chain walk over the same TU + include dirs (libclang's
+    # Python bindings expose no per-cursor branch-active flag, and its branch info is
+    # unreliable on these broken-include parses — same hybrid split as the edge/extent
+    # recovery above).  ``-D`` macros from ``extra_args`` seed the walk so a caller's
+    # build defines are honoured.
+    from agents.patcher.preprocessor import compute_active_lines, defines_from_args
+    try:
+        active_lines = compute_active_lines(
+            tu, inc_dirs, defines=defines_from_args(extra_args))
+    except OSError:
+        active_lines = {}  # fail-open: no walk -> unfiltered selection (pre-fix behaviour)
+
+    return CallGraph(root=root, tu_file=str(tu), defs=defs, edges=edges,
+                     reverse=reverse, active_lines=active_lines)
 
 
 # --------------------------------------------------------------------------- #

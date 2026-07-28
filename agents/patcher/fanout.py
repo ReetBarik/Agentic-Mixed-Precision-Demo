@@ -954,21 +954,68 @@ def _rewrite_calls(text: str, rename_map: dict[str, str]) -> str:
 def _pick_def(graph: CallGraph, name: str, must_call: str | None = None) -> FuncDef:
     """Pick the definition of ``name`` (the one calling ``must_call`` when given).
 
-    qcdloop's path functions are single-definition; ``must_call`` disambiguates the
-    rare overload case by choosing the definition whose body actually invokes the
-    child on the path (so a variant reroutes the right call).
+    Selection is a two-stage filter, fail-loud on residual ambiguity (STOP #A fix):
+
+    1. **Preprocessor-active filter.** When a name has several definitions but only
+       some survive the app's build defines (qcdloop's pruned ``#ifndef``-guarded
+       ``BO`` copies vs the live full-dispatch ``BO``), keep only the active ones (see
+       :meth:`CallGraph.def_is_active`).  If the filter leaves exactly one candidate,
+       it is returned — no need to consult ``must_call``.  If it leaves NONE (every
+       candidate looks preprocessor-dead — a walk gap), fall back to the full set
+       rather than fail, so the walk can only *narrow*, never lose the only candidate.
+
+    2. **Overload disambiguation (``must_call``).** Among the surviving candidates,
+       when more than one remains, ``must_call`` selects the definition whose body
+       actually invokes the child on the path (so a variant reroutes the right call).
+
+    If after both stages ≥2 candidates remain indistinguishable, raise
+    :class:`FanoutError` listing them — never silently return ``fds[0]`` (that blind
+    pick is exactly what landed the root reroute on a dead ``BO`` and caused STOP #A).
+    A genuinely single-definition name skips all of this (the common case).
     """
     fds = graph.defs.get(name)
     if not fds:
         raise FanoutError(f"no definition for {name!r} in the call graph")
-    if must_call is None or len(fds) == 1:
+    if len(fds) == 1:
         return fds[0]
-    for fd in fds:
-        body = "\n".join(_original_text(fd.file, fd.line_start, fd.line_end))
-        for ident, follow in _idents_with_follow(body):
-            if ident == must_call and follow in ("(", "<"):
-                return fd
-    return fds[0]
+
+    # (1) preprocessor-active filter — narrow to live definitions (fall back to the
+    # full set if the walk flags them all dead, so we never lose the only candidate).
+    candidates = graph.active_defs(name) or list(fds)
+    if len(candidates) == 1:
+        return candidates[0]
+
+    # (2) overload disambiguation by the child the path needs called.
+    if must_call is not None:
+        matching = [fd for fd in candidates
+                    if _body_calls(fd, must_call)]
+        if len(matching) == 1:
+            return matching[0]
+        if matching:
+            candidates = matching
+
+    raise FanoutError(_ambiguous_def_message(name, candidates, must_call))
+
+
+def _body_calls(fd: FuncDef, callee: str) -> bool:
+    """Whether ``fd``'s body invokes ``callee`` (call or explicit template-id call)."""
+    body = "\n".join(_original_text(fd.file, fd.line_start, fd.line_end))
+    for ident, follow in _idents_with_follow(body):
+        if ident == callee and follow in ("(", "<"):
+            return True
+    return False
+
+
+def _ambiguous_def_message(name: str, candidates: list[FuncDef],
+                           must_call: str | None) -> str:
+    """Diagnostic for a definition pick that stayed ambiguous after every filter."""
+    where = ", ".join(f"{Path(fd.file).name}:{fd.line_start}-{fd.line_end}"
+                      for fd in candidates)
+    tail = (f" (even after disambiguating by must_call={must_call!r})"
+            if must_call is not None else "")
+    return (f"ambiguous definition for {name!r}: {len(candidates)} candidates survive "
+            f"the preprocessor-active + overload filters{tail}: [{where}]; refusing to "
+            f"guess (STOP #A: a blind defs[0] pick lands the reroute on dead code)")
 
 
 def _idents_with_follow(text: str):
@@ -1056,8 +1103,14 @@ def _complex_reads(func_src: str, reads: list[str], complex_tokens) -> list[str]
 
 
 def _resolve_root_file(graph: CallGraph) -> str:
-    """File that defines the entry point (for the in-place body reroute)."""
-    fds = graph.defs.get(graph.root)
-    if not fds:
-        raise FanoutError(f"entry point {graph.root!r} has no definition")
-    return fds[0].file
+    """File that defines the *live* entry point (for the in-place body reroute).
+
+    Delegates to :func:`_pick_def` so the entry point's file is resolved through the
+    same preprocessor-active + fail-loud selection every other frame uses.  This is
+    the STOP #A fix's crux: the root reroute must land on the definition that survives
+    the app's build defines (qcdloop's ``boxGPU.h`` full-dispatch ``BO``), not the
+    first pruned ``#ifndef``-dead copy libclang happened to enumerate first.  The pick
+    stays consistent with :func:`_pick_def`'s root pick a few lines later, so the body
+    reroute and the file it is written to always refer to the same definition.
+    """
+    return _pick_def(graph, graph.root).file
