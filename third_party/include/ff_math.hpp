@@ -63,6 +63,9 @@ struct ffloat {
 
     KOKKOS_INLINE_FUNCTION ffloat operator-() const { return ffneg(*this); }
     KOKKOS_INLINE_FUNCTION ffloat operator+() const { return *this; }
+    // ffloat -> int conversion: mirrors dd_math.hpp:56. Route via the two-limb sum so
+    // values near float's 2^24 exact-int boundary don't lose the lo contribution.
+    KOKKOS_INLINE_FUNCTION operator int() const { return (int)((double)hi + (double)lo); }
     KOKKOS_INLINE_FUNCTION ffloat operator+(ffloat b) const { return ffadd(*this, b); }
     KOKKOS_INLINE_FUNCTION ffloat operator-(ffloat b) const { return ffsub(*this, b); }
     KOKKOS_INLINE_FUNCTION ffloat operator*(ffloat b) const { return ffmul(*this, b); }

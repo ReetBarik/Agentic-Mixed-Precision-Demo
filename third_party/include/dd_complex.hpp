@@ -107,8 +107,30 @@ KOKKOS_INLINE_FUNCTION ddcomplex operator/(double b, ddcomplex z) { return ddoub
 // Basic complex operations
 // ============================================================
 
+// Hypot-style scaled magnitude: overflow-safe complex abs.
+//
+// The naive form sqrt(re*re + im*im) squares each limb, overflowing whenever
+// |component| > sqrt(DBL_MAX) ~ 1.34e154. dd survives this in practice on the box
+// workloads (magnitudes stay far below the double range), but the ff sibling
+// (ff_complex.hpp) has the same algorithm and does overflow at sqrt(FLT_MAX) ~ 1.84e19,
+// producing nans on ~half of BIN inputs (PHASE_2_FF_BIN_DIAGNOSIS_2026-07-29.md).
+// Applied here too for symmetry — same bug class, closed in both.
+//
+// Algorithm: factor out the larger component before squaring.
+//   mx = max(|re|, |im|)
+//   if mx == 0: return 0
+//   |z| = mx * sqrt((re/mx)^2 + (im/mx)^2)
+// Cost: 2 abs + 2 div + 2 mul + 1 add + 1 sqrt + 1 mul (vs. naive 2 mul + 1 add + 1 sqrt).
+// Correctness: rx, ry in [-1, 1] so rx^2 + ry^2 in [1, 2] — no exponent overflow.
+// Bonus: cures naive-form underflow when both components are tiny.
 KOKKOS_INLINE_FUNCTION ddouble abs(ddcomplex z) {
-    return sqrt(ddadd(ddmul(z.re, z.re), ddmul(z.im, z.im)));
+    ddouble ax = abs(z.re);
+    ddouble ay = abs(z.im);
+    ddouble mx = (ax.hi >= ay.hi) ? ax : ay;
+    if (mx.hi == 0.0) return ddouble(0.0);
+    ddouble rx = dddiv(ax, mx);
+    ddouble ry = dddiv(ay, mx);
+    return ddmul(mx, sqrt(ddadd(ddmul(rx, rx), ddmul(ry, ry))));
 }
 KOKKOS_INLINE_FUNCTION ddcomplex conj(ddcomplex z) {
     return ddcomplex(z.re, ddneg(z.im));
@@ -120,7 +142,9 @@ KOKKOS_INLINE_FUNCTION ddcomplex conj(ddcomplex z) {
 KOKKOS_INLINE_FUNCTION ddcomplex sqrt(ddcomplex z) {
     if (z.re.hi == 0.0 && z.im.hi == 0.0) return ddcomplex();
     // B = sqrt((R+A1)/2) + i*sign(A2)*sqrt((R-A1)/2)  where R = |z|
-    ddouble r  = sqrt(ddadd(ddmul(z.re, z.re), ddmul(z.im, z.im)));
+    // Use the overflow-safe complex abs above rather than recomputing re^2 + im^2
+    // inline (same overflow class, same fix, one implementation).
+    ddouble r  = abs(z);
     ddouble a1 = abs(z.re);
     ddouble s2 = ddmuld(ddadd(r, a1), 0.5);
     ddouble s0 = sqrt(s2);

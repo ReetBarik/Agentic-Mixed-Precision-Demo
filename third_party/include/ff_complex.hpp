@@ -103,8 +103,30 @@ KOKKOS_INLINE_FUNCTION ffcomplex operator/(float b, ffcomplex z) { return ffloat
 // Basic complex operations
 // ============================================================
 
+// Hypot-style scaled magnitude: overflow-safe complex abs.
+//
+// The naive form sqrt(re*re + im*im) squares each limb as float, so any component
+// with |x| > sqrt(FLT_MAX) ~ 1.844e19 overflows to +Inf, producing nan through the
+// subsequent sqrt. dd shares the same algorithm and only escapes because
+// sqrt(DBL_MAX) ~ 1.34e154 sits far above workloads seen in practice; the fix is
+// applied there too (dd_complex.hpp) for symmetry and to close the same latent bug.
+//
+// Algorithm: factor out the larger component before squaring.
+//   mx = max(|re|, |im|)
+//   if mx == 0: return 0
+//   |z| = mx * sqrt((re/mx)^2 + (im/mx)^2)
+// Cost: 2 abs + 2 div + 2 mul + 1 add + 1 sqrt + 1 mul (vs. naive 2 mul + 1 add + 1 sqrt).
+// Correctness: rx, ry in [-1, 1] so rx^2 + ry^2 in [1, 2] — no exponent overflow.
+// Bonus: also cures naive-form underflow when both components are tiny (rx, ry
+// normalize to O(1) instead of underflowing to zero on the square).
 KOKKOS_INLINE_FUNCTION ffloat abs(ffcomplex z) {
-    return sqrt(ffadd(ffmul(z.re, z.re), ffmul(z.im, z.im)));
+    ffloat ax = abs(z.re);
+    ffloat ay = abs(z.im);
+    ffloat mx = (ax.hi >= ay.hi) ? ax : ay;
+    if (mx.hi == 0.0f) return ffloat(0.0f);
+    ffloat rx = ffdiv(ax, mx);
+    ffloat ry = ffdiv(ay, mx);
+    return ffmul(mx, sqrt(ffadd(ffmul(rx, rx), ffmul(ry, ry))));
 }
 KOKKOS_INLINE_FUNCTION ffcomplex conj(ffcomplex z) {
     return ffcomplex(z.re, ffneg(z.im));
@@ -115,7 +137,9 @@ KOKKOS_INLINE_FUNCTION ffcomplex conj(ffcomplex z) {
 // ============================================================
 KOKKOS_INLINE_FUNCTION ffcomplex sqrt(ffcomplex z) {
     if (z.re.hi == 0.0f && z.im.hi == 0.0f) return ffcomplex();
-    ffloat r  = sqrt(ffadd(ffmul(z.re, z.re), ffmul(z.im, z.im)));
+    // Use the overflow-safe complex abs above rather than recomputing re^2 + im^2
+    // inline (same overflow class, same fix, one implementation).
+    ffloat r  = abs(z);
     ffloat a1 = abs(z.re);
     ffloat s2 = ffmulf(ffadd(r, a1), 0.5f);
     ffloat s0 = sqrt(s2);
