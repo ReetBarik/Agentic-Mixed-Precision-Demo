@@ -8,6 +8,7 @@ depends on (fork-shape wrapper arm, pruned-group include, profile-driven templat
 
 from __future__ import annotations
 
+from dataclasses import replace
 from pathlib import Path
 
 import pytest
@@ -39,6 +40,18 @@ def test_wrapper_ladder_is_wellformed():
     assert w.index("#if defined(USE_DD_COMPLEX)") < w.index("#elif defined(USE_QUAD_COMPLEX)")
     # Balanced #if/#endif (2 opens: dd-ladder head + inner CUDA guard -> matches design).
     assert w.count("#endif") == 2
+
+
+def test_wrapper_has_ff_arm_after_enrichment():
+    # The ff enrichment (kokkosMaths_ff.h) makes ff a static-header ladder arm, table-driven
+    # alongside dd (STOP #SS: selected by the profile's maths_header, not a precision name).
+    w = render_wrapper(TargetPrecision.DD)
+    assert "#elif defined(USE_FF_COMPLEX)" in w
+    assert '#include "kokkosMaths_ff.h"' in w
+    # ff arm sits in the ladder between the dd arm and the quad arm.
+    assert (w.index("#if defined(USE_DD_COMPLEX)")
+            < w.index("#elif defined(USE_FF_COMPLEX)")
+            < w.index("#elif defined(USE_QUAD_COMPLEX)"))
 
 
 # --------------------------------------------------------------------------- #
@@ -102,14 +115,44 @@ def test_dd_profile_available():
     assert profile_for(TargetPrecision.DD).precision is TargetPrecision.DD
 
 
-def test_unavailable_precision_fails_loud_not_dd_fallback():
-    # ff profile exists (parameterization) but has no library-native container/leaves
-    # (STOP #EEE): selecting it must fail, never silently degrade to dd (reverse-STOP #SS).
-    assert not PROFILES[TargetPrecision.FF].available
+def test_unavailable_precision_fails_loud_not_dd_fallback(monkeypatch):
+    # An unavailable precision must fail loud, never silently degrade to dd (reverse-STOP
+    # #SS).  All three shipped precisions are now available (dd/quad static, float shim, ff
+    # enrichment), so we assert the fail-loud path on a profile forced unavailable — the
+    # mechanism, not any one precision.
+    forced = PROFILES[TargetPrecision.FF]
+    monkeypatch.setitem(
+        PROFILES, TargetPrecision.FF,
+        replace(forced, available=False))
     with pytest.raises(TUEmitError):
         profile_for(TargetPrecision.FF)
     with pytest.raises(TUEmitError):
         render_group_driver("box/B1m.h", TargetPrecision.FF)
+
+
+def test_ff_profile_available_via_enrichment():
+    # Phase-2: FF is served by its static enrichment header kokkosMaths_ff.h (commit
+    # d0f5b35) — a static-header profile like dd (NOT shim synthesis), with the custom
+    # ql::ffun::ffcomplex container that clears STOP #EEE.
+    prof = PROFILES[TargetPrecision.FF]
+    assert prof.available
+    assert not prof.shim_synthesis
+    assert prof.maths_header == "kokkosMaths_ff.h"
+    assert prof.cpp_output == "ql::ffun::ffcomplex"
+    assert prof.cpp_scalar == "ql::ffun::ffloat"
+    assert prof.two_limb
+    assert prof.define_macro == "USE_FF_COMPLEX"
+    assert profile_for(TargetPrecision.FF).precision is TargetPrecision.FF
+
+
+def test_ff_group_driver_shape():
+    d = render_group_driver("box/B1m.h", TargetPrecision.FF)
+    assert '#include "box/B1m.h"' in d
+    assert "#define USE_FF_COMPLEX" in d
+    assert "ql::ffun::ffcomplex" in d
+    assert "ql::ffun::ffloat" in d
+    assert "FFPrinter" in d
+    assert "run_app<" in d
 
 
 def test_float_profile_available_via_shim_synthesis():

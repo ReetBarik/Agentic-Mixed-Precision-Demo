@@ -1,24 +1,32 @@
 #!/usr/bin/env python3
-"""Phase-2 float downshift — L-measure (deliverable 7).
+"""Phase-2 downshift — L-measure (deliverable 7), FLOAT then FF fallback.
 
-End-to-end honest measurement of the per-integral double->float **downshift** on the 10
+End-to-end honest measurement of the per-integral double->narrower **downshift** on the 10
 raw-double integrals (B1-B9, B11 — the Phase-1 non-candidates).  The mechanism is the same
-per-group whole-TU flip as Phase-1, but:
+per-group whole-TU flip as Phase-1, walking the downshift preference order
+(:data:`agents.patcher.precision_flip.DOWNSHIFT_PREFERENCE` = ``FLOAT`` then ``FF``):
 
-  * the target precision is FLOAT, served by **pipeline-authored shim synthesis** (no static
-    maths header, no source enrichment): ``emit_flip_tu`` generates
-    ``kokkosMaths_<precision>_shim.hpp`` into the clone alongside the double reference header
-    (agents.patcher.shim_synth), and the wrapper includes reference + shim;
+  * **FLOAT** is served by **pipeline-authored shim synthesis** (no static maths header, no
+    source enrichment): ``emit_flip_tu`` generates ``kokkosMaths_float_shim.hpp`` into the
+    clone alongside the double reference header, and the wrapper includes reference + shim.
+  * **FF** is served by its **static enrichment header** ``kokkosMaths_ff.h`` (commit
+    d0f5b35, custom ``ql::ffun::ffcomplex`` container — clears STOP #EEE): ``emit_flip_tu``
+    at ``TargetPrecision.FF`` emits the dd-style static-header wrapper + driver, no shim.
   * the acceptance gate runs in the DOWNSHIFT direction (``flip_gate`` with
     ``LiftDirection.DOWNSHIFT``): a downshift is accepted iff it **preserves** precision
-    (lift >= -margin) — it buys speed, not accuracy — and rejected (back to raw double) iff
-    float genuinely loses digits vs the raw-double baseline.
+    (lift >= -margin) — it buys speed, not accuracy — and rejected iff it genuinely loses
+    digits vs the raw-double baseline.
+
+Per integral the walk is: try FLOAT (accept iff precision-preserving); if FLOAT rejects,
+try FF; the final routing is the first accepted precision, else raw double.  Both attempts
+are measured and reported for every integral (FLOAT is expected to reject all 10 — float is
+too narrow for the box family; FF, at ~14 digits, is expected to accept most/all).
 
 Everything else is identical to phase1_lmeasure.py: clone the pristine snapshot (STOP #Z),
 build the vanilla baseline, build the dd oracle reference from ddfun_enabled via git archive
-(reference only — never a build input), build the per-group float flip TUs from the clone
-alone, measure per-integral min precise-digits (baseline vs candidate, both vs dd-ref), and
-apply the gate.
+(reference only — never a build input), build the per-group flip TUs from the clone alone,
+measure per-integral min precise-digits (baseline vs candidate, both vs dd-ref), and apply
+the gate.
 
 The 11 Phase-1 dd candidates are NOT measured here and NOT touched (STOP #ZZ) — this run's
 target list is exactly the raw-double set.  Group discovery is structural.  Run under the
@@ -41,8 +49,9 @@ REPO = HERE.parent.parent
 sys.path.insert(0, str(REPO))
 
 from agents.patcher.flip_gate import GateInputs, LiftDirection, evaluate     # noqa: E402
-from agents.patcher.precision_flip import TargetPrecision                    # noqa: E402
-from agents.patcher.tu_emit import emit_flip_tu                              # noqa: E402
+from agents.patcher.precision_flip import (                                  # noqa: E402
+    DOWNSHIFT_PREFERENCE, TargetPrecision)
+from agents.patcher.tu_emit import PROFILES, emit_flip_tu                    # noqa: E402
 from agents.validator.coeffs import N_COMPONENTS, parse_component            # noqa: E402
 from agents.validator.precise_digits import precise_digits_fast             # noqa: E402
 from agents.validator import runner as _runner                              # noqa: E402
@@ -59,6 +68,11 @@ VEND = REPO / "third_party" / "include"
 def _bash(cmd: str) -> subprocess.CompletedProcess:
     return subprocess.run(["bash", "-lc", f"{MODULE} && {cmd}"],
                           capture_output=True, text=True)
+
+
+def _fmt(x) -> str:
+    """Compact console formatter: '-' for None, else 3-dp round."""
+    return "-" if x is None else str(round(x, 3))
 
 
 def _git_archive(repo: Path, ref: str, subpath: str, dest: Path) -> None:
@@ -85,16 +99,18 @@ def _group_of(integral: str, tree: Path) -> str:
 
 
 def _build_flip(clone: Path, group_header: str, drv_dir: Path, build_dir: Path,
-                kokkos: Path) -> tuple[Path | None, str]:
-    """Emit + compile a per-group FLOAT downshift flip TU. Returns (binary|None, log_tail).
+                kokkos: Path, target: TargetPrecision) -> tuple[Path | None, str]:
+    """Emit + compile a per-group downshift flip TU at ``target``. Returns (binary|None, log).
 
-    ``emit_flip_tu`` at TargetPrecision.FLOAT generates the leaf shim into the clone and the
-    two-line wrapper (double reference + shim); the driver is the same per-group shape as dd
-    but at ``Kokkos::complex<float>``.  The instantiation gate = does this float TU compile?
+    ``emit_flip_tu`` selects the emission shape from the profile table: FLOAT synthesizes the
+    leaf shim + two-line wrapper (double reference + shim) at ``Kokkos::complex<float>``; FF
+    emits the dd-style static-header wrapper (``kokkosMaths_ff.h``) + driver at
+    ``ql::ffun::ffcomplex`` (no shim).  Either way the driver is the same per-group shape.
+    The instantiation gate = does this target's TU compile?
     """
-    tu = emit_flip_tu(clone, group_header, drv_dir, TargetPrecision.FLOAT)
+    tu = emit_flip_tu(clone, group_header, drv_dir, target)
     build_dir.mkdir(parents=True, exist_ok=True)
-    binary = build_dir / f"flip_{Path(group_header).stem}"
+    binary = build_dir / f"flip_{Path(group_header).stem}_{target.value}"
     inc = (f"-I{clone} -I{clone}/box -I{RECIPES} -I{VEND} -I{kokkos}/include")
     lib = f"-L{kokkos}/lib -L{kokkos}/lib64 -lkokkoscore -lkokkoscontainers -ldl"
     r = _bash(f"g++ -std=c++20 -O2 -w {inc} {tu.driver_path} -o {binary} {lib}")
@@ -189,52 +205,81 @@ def main(argv=None) -> int:
     dd_bin = _runner.build_driver(oracle_headers, "dd", out / "dd_build", kokkos)
     ref = _coeffs(dd_bin, total)
 
-    # 3. per-group FLOAT downshift flip TUs (one build per distinct group).
+    # 3. per-group downshift flip TUs, one build per (group, precision) in the walk order.
+    #    WALK = the downshift preference (FLOAT then FF), filtered to the emission stack's
+    #    available targets — never hard-coded here (STOP #SS).
+    available = {t for t in DOWNSHIFT_PREFERENCE if PROFILES[t].available}
+    walk = [t for t in DOWNSHIFT_PREFERENCE if t in available]
     group_by_integral = {i: _group_of(i, clone) for i in TARGETS}
     distinct_groups = sorted(set(group_by_integral.values()))
     print(f"  candidate groups: {distinct_groups}", flush=True)
-    flip_bin: dict[str, Path] = {}
-    flip_fail: dict[str, str] = {}
-    flip_coeffs: dict[str, dict] = {}
-    for grp in distinct_groups:
-        print(f"  building float flip TU {grp} ...", flush=True)
-        binary, log = _build_flip(clone, grp, out / "flip_drv",
-                                  out / f"flip_build_{Path(grp).stem}", kokkos)
-        if binary is None:
-            flip_fail[grp] = log
-            (out / f"flip_build_{Path(grp).stem}.log").write_text(log)
-            print(f"    BUILD FAILED (instantiation gate) — see log", flush=True)
-            continue
-        flip_bin[grp] = binary
-        flip_coeffs[grp] = _coeffs(binary, total)
+    print(f"  downshift walk  : {[t.value for t in walk]}", flush=True)
 
-    # 5 + 6. measure per-integral lift + apply the DOWNSHIFT gate.
+    # flip_bin[(grp, precision)] -> binary ; flip_coeffs[(grp, precision)] -> coeff dict
+    flip_bin: dict[tuple[str, TargetPrecision], Path] = {}
+    flip_fail: dict[str, str] = {}
+    flip_coeffs: dict[tuple[str, TargetPrecision], dict] = {}
+    for grp in distinct_groups:
+        for target in walk:
+            tag = f"{Path(grp).stem}_{target.value}"
+            print(f"  building {target.value} flip TU {grp} ...", flush=True)
+            binary, log = _build_flip(clone, grp, out / "flip_drv",
+                                      out / f"flip_build_{tag}", kokkos, target)
+            if binary is None:
+                flip_fail[tag] = log
+                (out / f"flip_build_{tag}.log").write_text(log)
+                print(f"    BUILD FAILED (instantiation gate) — see log", flush=True)
+                continue
+            flip_bin[(grp, target)] = binary
+            flip_coeffs[(grp, target)] = _coeffs(binary, total)
+
+    # 5 + 6. measure per-integral lift for each precision + apply the DOWNSHIFT gate,
+    #        walking FLOAT then FF: the final routing is the first ACCEPTED precision,
+    #        else raw double.  Every attempt is recorded (per_precision) for the report.
     rows = []
     for integ in TARGETS:
         grp = group_by_integral[integ]
-        built = grp in flip_bin
         base_d = _min_digits(van, ref, integ, total)
-        cand_d = _min_digits(flip_coeffs[grp], ref, integ, total) if built else None
-        gd = evaluate(GateInputs(integ, built=built, baseline_digits=base_d,
-                                 candidate_digits=cand_d), margin=args.margin,
-                      direction=LiftDirection.DOWNSHIFT)
-        rows.append(dict(integral=integ, group=grp, built=built,
-                         baseline_digits=base_d, candidate_digits=cand_d,
-                         lift=gd.lift, accept=gd.accept, reason=gd.reason))
-        print(f"  {integ:5s} [{Path(grp).stem}] built={built} "
+        attempts: dict[str, dict] = {}
+        final_target = None
+        final_accept = False
+        for target in walk:
+            built = (grp, target) in flip_bin
+            cand_d = (_min_digits(flip_coeffs[(grp, target)], ref, integ, total)
+                      if built else None)
+            gd = evaluate(GateInputs(integ, built=built, baseline_digits=base_d,
+                                     candidate_digits=cand_d), margin=args.margin,
+                          direction=LiftDirection.DOWNSHIFT)
+            attempts[target.value] = dict(built=built, candidate_digits=cand_d,
+                                          lift=gd.lift, accept=gd.accept,
+                                          reason=gd.reason)
+            if gd.accept and final_target is None:
+                final_target, final_accept = target.value, True
+        final_route = final_target if final_accept else "double"
+        rows.append(dict(integral=integ, group=grp, baseline_digits=base_d,
+                         per_precision=attempts,
+                         final_route=final_route, final_accept=final_accept))
+        fa = attempts.get("float", {})
+        ff = attempts.get("ff", {})
+        print(f"  {integ:5s} [{Path(grp).stem}] "
               f"base={base_d if base_d is None else round(base_d,3)} "
-              f"cand={cand_d if cand_d is None else round(cand_d,3)} "
-              f"lift={gd.lift if gd.lift is None else round(gd.lift,3)} "
-              f"-> {'ACCEPT' if gd.accept else 'reject'}", flush=True)
+              f"float={_fmt(fa.get('candidate_digits'))}/"
+              f"{_fmt(fa.get('lift'))}{'A' if fa.get('accept') else 'r'} "
+              f"ff={_fmt(ff.get('candidate_digits'))}/"
+              f"{_fmt(ff.get('lift'))}{'A' if ff.get('accept') else 'r'} "
+              f"-> {final_route}", flush=True)
 
     result = dict(sample_count=total, margin=args.margin, direction="downshift",
-                  distinct_groups=distinct_groups,
+                  walk=[t.value for t in walk], distinct_groups=distinct_groups,
                   flip_build_failed=sorted(flip_fail), rows=rows)
     (out / "phase2_lmeasure.json").write_text(json.dumps(result, indent=2))
     print(f"\n  wrote {out / 'phase2_lmeasure.json'}", flush=True)
 
-    n_accept = sum(1 for r in rows if r["accept"])
-    print(f"  accepted (downshift-to-float) {n_accept}/{len(rows)}", flush=True)
+    for target in walk:
+        n = sum(1 for r in rows if r["per_precision"].get(target.value, {}).get("accept"))
+        print(f"  accepted at {target.value}: {n}/{len(rows)}", flush=True)
+    n_final = sum(1 for r in rows if r["final_accept"])
+    print(f"  final downshifted (any precision): {n_final}/{len(rows)}", flush=True)
     return 0
 
 

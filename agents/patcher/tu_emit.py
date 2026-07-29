@@ -67,9 +67,13 @@ class PrecisionProfile:
       top of ``maths_reference_header`` (the double reference).  This is the Phase-2 float
       path; see :mod:`agents.patcher.shim_synth`.
 
-    A precision with neither (``ff`` — no library-native ``Kokkos::abs<ffcomplex>`` and no
-    ``Kokkos::complex<ffloat>`` container, STOP #EEE) stays ``available=False`` and fails
-    loud rather than degrading to dd (reverse-STOP #SS).
+    A precision served by a static header uses ``shim_synthesis=False`` + its own
+    ``maths_header``.  ``ff`` is such a precision as of the ``kokkosMaths_ff.h`` enrichment
+    (commit d0f5b35): its header layers the ``ql::`` leaves on the custom
+    ``ql::ffun::ffcomplex`` container (not ``Kokkos::complex<ffloat>``, which fails the
+    ``is_floating_point`` static_assert — the original STOP #EEE), so it joins the dd/quad
+    static-header ladder.  A precision with neither a static header nor a shim path stays
+    ``available=False`` and fails loud rather than degrading to dd (reverse-STOP #SS).
     """
 
     precision: TargetPrecision
@@ -87,10 +91,12 @@ class PrecisionProfile:
 
 
 # Precision profile table.  DD is wired for Phase-1 (static header); FLOAT is wired for
-# Phase-2 (shim synthesis — no static header, library-native leaves).  FF stays unavailable
-# (STOP #EEE: Kokkos::complex<ffloat> fails the is_floating_point static_assert AND there is
-# no library-native ff leaf to bind a shim to) — declared so the stack is parameterized
-# (STOP #SS), but selecting it fails loud rather than degrading.
+# Phase-2 (shim synthesis — no static header, library-native leaves); FF is wired for
+# Phase-2 via its own **static enrichment header** ``kokkosMaths_ff.h`` (commit d0f5b35),
+# which layers the ``ql::`` leaves on the custom ``ql::ffun::ffcomplex`` container instead
+# of ``Kokkos::complex<ffloat>`` — sidestepping STOP #EEE at the container level.  FF joins
+# the same static-header ladder as dd/quad (STOP #SS: the ladder branches on the profile's
+# ``maths_header`` value, never on a hard-coded precision name).
 PROFILES: dict[TargetPrecision, PrecisionProfile] = {
     TargetPrecision.DD: PrecisionProfile(
         precision=TargetPrecision.DD,
@@ -109,7 +115,8 @@ PROFILES: dict[TargetPrecision, PrecisionProfile] = {
         cpp_scalar="ql::ffun::ffloat",
         printer_name="FFPrinter",
         two_limb=True,
-        available=False),          # STOP #EEE: no library-native ff container / leaves
+        available=True),           # enabled via kokkosMaths_ff.h enrichment (commit d0f5b35);
+                                   # static wrapper + custom ffcomplex container clears STOP #EEE
     TargetPrecision.FLOAT: PrecisionProfile(
         precision=TargetPrecision.FLOAT,
         define_macro=None,                 # default arm (double reference) + generated shim
@@ -254,6 +261,7 @@ def render_wrapper(target: TargetPrecision = TargetPrecision.DD) -> str:
         "//\n"
         "// Selects the precision maths header from the driver's build define:\n"
         "//   USE_DD_COMPLEX   -> ql::ddfun double-double (all backends)\n"
+        "//   USE_FF_COMPLEX   -> ql::ffun float-float   (all backends, enrichment header)\n"
         "//   USE_QUAD_COMPLEX -> CUDA __nv_fp128 quad (CUDA only)\n"
         "//   neither          -> Kokkos::complex<double> (kokkosMaths.h)\n"
         "//\n"

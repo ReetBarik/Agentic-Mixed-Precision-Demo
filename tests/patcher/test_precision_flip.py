@@ -190,14 +190,28 @@ def test_downshift_non_parametric_stays_double():
     assert "not fully template-parametric" in d.reason
 
 
-def test_downshift_ff_unavailable_falls_to_float():
-    # Preference is (FLOAT, FF); with only FLOAT available FF is filtered out (STOP #EEE).
+def test_downshift_only_float_available_selects_float():
+    # Preference is (FLOAT, FF); with only FLOAT in the available set, FLOAT is selected.
     assert DOWNSHIFT_PREFERENCE[0] is TargetPrecision.FLOAT
     defs = {"ENTRY": [_fd("ENTRY")], "MID": [_fd("MID")]}
     g = _graph(defs, {"ENTRY": {"MID"}})
     d = route_downshift("B2", dd_candidate=False, graph=g, target_frames=["MID"],
                         available_targets={TargetPrecision.FLOAT})
     assert d.target is TargetPrecision.FLOAT
+
+
+def test_downshift_fallback_selects_ff_when_float_absent():
+    # The (FLOAT, FF) walk means FF is the fallback target: once FLOAT is out of the
+    # available set (exhausted/rejected upstream), the router selects FF — the enrichment
+    # (kokkosMaths_ff.h) makes FF a genuine reachable downshift target, not just a
+    # parameterization placeholder.
+    assert DOWNSHIFT_PREFERENCE == (TargetPrecision.FLOAT, TargetPrecision.FF)
+    defs = {"ENTRY": [_fd("ENTRY")], "MID": [_fd("MID")]}
+    g = _graph(defs, {"ENTRY": {"MID"}})
+    d = route_downshift("B2", dd_candidate=False, graph=g, target_frames=["MID"],
+                        available_targets={TargetPrecision.FF})
+    assert d.route is Route.PRECISION_FLIP
+    assert d.target is TargetPrecision.FF
 
 
 def test_downshift_no_available_target_stays_double():
