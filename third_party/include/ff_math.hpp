@@ -90,6 +90,18 @@ struct ffloat {
     KOKKOS_INLINE_FUNCTION bool operator>(ffloat b)  const { return hi>b.hi || (hi==b.hi && lo>b.lo); }
     KOKKOS_INLINE_FUNCTION bool operator<=(ffloat b) const { return !(b < *this); }
     KOKKOS_INLINE_FUNCTION bool operator>=(ffloat b) const { return !(*this < b); }
+
+    // Scalar-float comparisons: mirror dd_math.hpp:82-87 (ddouble vs double).
+    // Once operator int() exists (ffloat -> int), a bare `ffloat == 0` is ambiguous
+    // between operator==(ffloat) (promote the literal via ffloat(int)) and built-in
+    // int==int (demote *this via operator int()). These exact-match overloads on float
+    // resolve the literal directly and win, exactly as dd's double overloads do.
+    KOKKOS_INLINE_FUNCTION bool operator==(float b) const { return *this == ffloat(b); }
+    KOKKOS_INLINE_FUNCTION bool operator!=(float b) const { return *this != ffloat(b); }
+    KOKKOS_INLINE_FUNCTION bool operator<(float b)  const { return *this <  ffloat(b); }
+    KOKKOS_INLINE_FUNCTION bool operator>(float b)  const { return *this >  ffloat(b); }
+    KOKKOS_INLINE_FUNCTION bool operator<=(float b) const { return *this <= ffloat(b); }
+    KOKKOS_INLINE_FUNCTION bool operator>=(float b) const { return *this >= ffloat(b); }
 };
 
 KOKKOS_INLINE_FUNCTION ffloat operator+(float a, ffloat b) { return ffadd(ffloat(a), b); }
