@@ -56,6 +56,7 @@ struct ffloat {
     KOKKOS_INLINE_FUNCTION ffloat& operator=(const ffloat& o) { hi=o.hi; lo=o.lo; return *this; }
 
     KOKKOS_INLINE_FUNCTION ffloat operator-() const { return ffneg(*this); }
+    KOKKOS_INLINE_FUNCTION ffloat operator+() const { return *this; }
     KOKKOS_INLINE_FUNCTION ffloat operator+(ffloat b) const { return ffadd(*this, b); }
     KOKKOS_INLINE_FUNCTION ffloat operator-(ffloat b) const { return ffsub(*this, b); }
     KOKKOS_INLINE_FUNCTION ffloat operator*(ffloat b) const { return ffmul(*this, b); }
