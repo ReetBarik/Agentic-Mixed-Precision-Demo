@@ -13,14 +13,16 @@ per-group whole-TU flip as Phase-1, walking the downshift preference order
     d0f5b35, custom ``ql::ffun::ffcomplex`` container — clears STOP #EEE): ``emit_flip_tu``
     at ``TargetPrecision.FF`` emits the dd-style static-header wrapper + driver, no shim.
   * the acceptance gate runs in the DOWNSHIFT direction (``flip_gate`` with
-    ``LiftDirection.DOWNSHIFT``): a downshift is accepted iff it **preserves** precision
-    (lift >= -margin) — it buys speed, not accuracy — and rejected iff it genuinely loses
-    digits vs the raw-double baseline.
+    ``LiftDirection.DOWNSHIFT``): a downshift is accepted iff its p100 candidate digits still
+    **clear the tolerance bar** (``candidate_digits >= tolerance + margin``) — precision above
+    the bar was headroom, so a negative lift is fine — and rejected iff it drops below the bar.
+    The bar is ``--tolerance`` (required; the user's ``StrategyConfig.tolerance``), not the
+    raw-double baseline.
 
-Per integral the walk is: try FLOAT (accept iff precision-preserving); if FLOAT rejects,
+Per integral the walk is: try FLOAT (accept iff it clears the bar); if FLOAT rejects,
 try FF; the final routing is the first accepted precision, else raw double.  Both attempts
-are measured and reported for every integral (FLOAT is expected to reject all 10 — float is
-too narrow for the box family; FF, at ~14 digits, is expected to accept most/all).
+are measured and reported for every integral (FLOAT is expected to reject most/all — float is
+too narrow for the box family; FF, at ~10 delivered digits, clears a moderate bar for many).
 
 Everything else is identical to phase1_lmeasure.py: clone the pristine snapshot (STOP #Z),
 build the vanilla baseline, build the dd oracle reference from ddfun_enabled via git archive
@@ -170,6 +172,15 @@ def main(argv=None) -> int:
     ap.add_argument("--dd-repo", default=str(Path.home() / "qcdloop"))
     ap.add_argument("--dd-ref", default="ddfun_enabled")
     ap.add_argument("--margin", type=float, default=0.0)
+    # Required, no silent default: the tolerance bar is the user's acceptance criterion
+    # (StrategyConfig.tolerance).  Omitting it fails loud rather than assuming a value.
+    ap.add_argument("--tolerance", type=float, required=True,
+                    help="minimum precise-digit bar (StrategyConfig.tolerance)")
+    # Override the target list.  Default = the 10 raw-double integrals.  Under a tolerance
+    # gate, dd candidates that came back no_flip_needed (double already clears the bar) are
+    # also legitimate downshift/speedup candidates and can be passed here explicitly.
+    ap.add_argument("--targets", default=None,
+                    help="comma-separated integral list (default: the raw-double set)")
     args = ap.parse_args(argv)
 
     kokkos = Path(args.kokkos_root)
@@ -210,7 +221,9 @@ def main(argv=None) -> int:
     #    available targets — never hard-coded here (STOP #SS).
     available = {t for t in DOWNSHIFT_PREFERENCE if PROFILES[t].available}
     walk = [t for t in DOWNSHIFT_PREFERENCE if t in available]
-    group_by_integral = {i: _group_of(i, clone) for i in TARGETS}
+    targets = ([t.strip() for t in args.targets.split(",") if t.strip()]
+               if args.targets else TARGETS)
+    group_by_integral = {i: _group_of(i, clone) for i in targets}
     distinct_groups = sorted(set(group_by_integral.values()))
     print(f"  candidate groups: {distinct_groups}", flush=True)
     print(f"  downshift walk  : {[t.value for t in walk]}", flush=True)
@@ -237,7 +250,7 @@ def main(argv=None) -> int:
     #        walking FLOAT then FF: the final routing is the first ACCEPTED precision,
     #        else raw double.  Every attempt is recorded (per_precision) for the report.
     rows = []
-    for integ in TARGETS:
+    for integ in targets:
         grp = group_by_integral[integ]
         base_d = _min_digits(van, ref, integ, total)
         attempts: dict[str, dict] = {}
@@ -248,8 +261,8 @@ def main(argv=None) -> int:
             cand_d = (_min_digits(flip_coeffs[(grp, target)], ref, integ, total)
                       if built else None)
             gd = evaluate(GateInputs(integ, built=built, baseline_digits=base_d,
-                                     candidate_digits=cand_d), margin=args.margin,
-                          direction=LiftDirection.DOWNSHIFT)
+                                     candidate_digits=cand_d, tolerance=args.tolerance),
+                          margin=args.margin, direction=LiftDirection.DOWNSHIFT)
             attempts[target.value] = dict(built=built, candidate_digits=cand_d,
                                           lift=gd.lift, accept=gd.accept,
                                           reason=gd.reason)
@@ -269,7 +282,8 @@ def main(argv=None) -> int:
               f"{_fmt(ff.get('lift'))}{'A' if ff.get('accept') else 'r'} "
               f"-> {final_route}", flush=True)
 
-    result = dict(sample_count=total, margin=args.margin, direction="downshift",
+    result = dict(sample_count=total, margin=args.margin, tolerance=args.tolerance,
+                  direction="downshift",
                   walk=[t.value for t in walk], distinct_groups=distinct_groups,
                   flip_build_failed=sorted(flip_fail), rows=rows)
     (out / "phase2_lmeasure.json").write_text(json.dumps(result, indent=2))

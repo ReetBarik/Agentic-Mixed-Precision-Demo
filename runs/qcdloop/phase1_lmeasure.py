@@ -150,6 +150,10 @@ def main(argv=None) -> int:
     ap.add_argument("--dd-repo", default=str(Path.home() / "qcdloop"))
     ap.add_argument("--dd-ref", default="ddfun_enabled")
     ap.add_argument("--margin", type=float, default=0.0)
+    # Required, no silent default: the tolerance bar is the user's acceptance criterion
+    # (StrategyConfig.tolerance).  Omitting it fails loud rather than assuming a value.
+    ap.add_argument("--tolerance", type=float, required=True,
+                    help="minimum precise-digit bar (StrategyConfig.tolerance)")
     args = ap.parse_args(argv)
 
     kokkos = Path(args.kokkos_root)
@@ -213,24 +217,30 @@ def main(argv=None) -> int:
         base_d = _min_digits(van, ref, integ, total)
         cand_d = _min_digits(flip_coeffs[grp], ref, integ, total) if built else None
         gd = evaluate(GateInputs(integ, built=built, baseline_digits=base_d,
-                                 candidate_digits=cand_d), margin=args.margin)
+                                 candidate_digits=cand_d, tolerance=args.tolerance),
+                      margin=args.margin)
         rows.append(dict(integral=integ, group=grp, built=built,
                          baseline_digits=base_d, candidate_digits=cand_d,
-                         lift=gd.lift, accept=gd.accept, reason=gd.reason))
+                         lift=gd.lift, accept=gd.accept,
+                         no_flip_needed=gd.no_flip_needed, reason=gd.reason))
+        verdict = ("ACCEPT" if gd.accept else
+                   "no_flip_needed" if gd.no_flip_needed else "reject")
         print(f"  {integ:5s} [{Path(grp).stem}] built={built} "
               f"base={base_d if base_d is None else round(base_d,3)} "
               f"cand={cand_d if cand_d is None else round(cand_d,3)} "
               f"lift={gd.lift if gd.lift is None else round(gd.lift,3)} "
-              f"-> {'ACCEPT' if gd.accept else 'reject'}", flush=True)
+              f"-> {verdict}", flush=True)
 
-    result = dict(sample_count=total, margin=args.margin,
+    result = dict(sample_count=total, margin=args.margin, tolerance=args.tolerance,
                   distinct_groups=distinct_groups,
                   flip_build_failed=sorted(flip_fail), rows=rows)
     (out / "phase1_lmeasure.json").write_text(json.dumps(result, indent=2))
     print(f"\n  wrote {out / 'phase1_lmeasure.json'}", flush=True)
 
     n_accept = sum(1 for r in rows if r["accept"])
-    print(f"  accepted {n_accept}/{len(rows)}", flush=True)
+    n_noflip = sum(1 for r in rows if r.get("no_flip_needed"))
+    print(f"  accepted {n_accept}/{len(rows)} "
+          f"(no_flip_needed {n_noflip}/{len(rows)})", flush=True)
     return 0
 
 

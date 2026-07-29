@@ -1,0 +1,183 @@
+{
+  "sample_count": 2000,
+  "margin": 0.0,
+  "tolerance": 7.0,
+  "direction": "downshift",
+  "walk": [
+    "float",
+    "ff"
+  ],
+  "distinct_groups": [
+    "box/B1m.h",
+    "box/B2m.h",
+    "box/B3m.h",
+    "box/B4m.h"
+  ],
+  "flip_build_failed": [
+    "B3m_ff",
+    "B4m_ff"
+  ],
+  "rows": [
+    {
+      "integral": "B10",
+      "group": "box/B1m.h",
+      "baseline_digits": 12.187345483246553,
+      "per_precision": {
+        "float": {
+          "built": true,
+          "candidate_digits": 3.151661357671098,
+          "lift": -9.035684125575454,
+          "accept": false,
+          "reason": "below_tolerance: built but downshift candidate 3.1517 < tolerance 7.0 \u2014 falls back to raw double (target too narrow / ill-conditioned)"
+        },
+        "ff": {
+          "built": true,
+          "candidate_digits": 9.761062533116048,
+          "lift": -2.4262829501305045,
+          "accept": true,
+          "reason": "accept: built + downshift clears tolerance (9.7611 >= 7.0) \u2014 precision above bar is headroom"
+        }
+      },
+      "final_route": "ff",
+      "final_accept": true
+    },
+    {
+      "integral": "B12",
+      "group": "box/B2m.h",
+      "baseline_digits": 9.324794433005733,
+      "per_precision": {
+        "float": {
+          "built": true,
+          "candidate_digits": 0.6964166605285655,
+          "lift": -8.628377772477167,
+          "accept": false,
+          "reason": "below_tolerance: built but downshift candidate 0.6964 < tolerance 7.0 \u2014 falls back to raw double (target too narrow / ill-conditioned)"
+        },
+        "ff": {
+          "built": true,
+          "candidate_digits": 7.943523226391218,
+          "lift": -1.3812712066145156,
+          "accept": true,
+          "reason": "accept: built + downshift clears tolerance (7.9435 >= 7.0) \u2014 precision above bar is headroom"
+        }
+      },
+      "final_route": "ff",
+      "final_accept": true
+    },
+    {
+      "integral": "B13",
+      "group": "box/B2m.h",
+      "baseline_digits": 8.691621311258668,
+      "per_precision": {
+        "float": {
+          "built": true,
+          "candidate_digits": 0.6074954567361027,
+          "lift": -8.084125854522565,
+          "accept": false,
+          "reason": "below_tolerance: built but downshift candidate 0.6075 < tolerance 7.0 \u2014 falls back to raw double (target too narrow / ill-conditioned)"
+        },
+        "ff": {
+          "built": true,
+          "candidate_digits": 7.494505072182107,
+          "lift": -1.1971162390765615,
+          "accept": true,
+          "reason": "accept: built + downshift clears tolerance (7.4945 >= 7.0) \u2014 precision above bar is headroom"
+        }
+      },
+      "final_route": "ff",
+      "final_accept": true
+    },
+    {
+      "integral": "BIN1",
+      "group": "box/B1m.h",
+      "baseline_digits": 8.839897498192235,
+      "per_precision": {
+        "float": {
+          "built": true,
+          "candidate_digits": 0.0,
+          "lift": -8.839897498192235,
+          "accept": false,
+          "reason": "below_tolerance: built but downshift candidate 0.0000 < tolerance 7.0 \u2014 falls back to raw double (target too narrow / ill-conditioned)"
+        },
+        "ff": {
+          "built": true,
+          "candidate_digits": NaN,
+          "lift": NaN,
+          "accept": false,
+          "reason": "below_tolerance: built but downshift candidate nan < tolerance 7.0 \u2014 falls back to raw double (target too narrow / ill-conditioned)"
+        }
+      },
+      "final_route": "double",
+      "final_accept": false
+    },
+    {
+      "integral": "BIN2",
+      "group": "box/B2m.h",
+      "baseline_digits": 9.121957800425305,
+      "per_precision": {
+        "float": {
+          "built": true,
+          "candidate_digits": 0.0,
+          "lift": -9.121957800425305,
+          "accept": false,
+          "reason": "below_tolerance: built but downshift candidate 0.0000 < tolerance 7.0 \u2014 falls back to raw double (target too narrow / ill-conditioned)"
+        },
+        "ff": {
+          "built": true,
+          "candidate_digits": NaN,
+          "lift": NaN,
+          "accept": false,
+          "reason": "below_tolerance: built but downshift candidate nan < tolerance 7.0 \u2014 falls back to raw double (target too narrow / ill-conditioned)"
+        }
+      },
+      "final_route": "double",
+      "final_accept": false
+    },
+    {
+      "integral": "BIN3",
+      "group": "box/B3m.h",
+      "baseline_digits": 9.37988215259131,
+      "per_precision": {
+        "float": {
+          "built": true,
+          "candidate_digits": 0.5267104253117385,
+          "lift": -8.853171727279571,
+          "accept": false,
+          "reason": "below_tolerance: built but downshift candidate 0.5267 < tolerance 7.0 \u2014 falls back to raw double (target too narrow / ill-conditioned)"
+        },
+        "ff": {
+          "built": false,
+          "candidate_digits": null,
+          "lift": null,
+          "accept": false,
+          "reason": "build_failed: per-integral flip TU did not compile"
+        }
+      },
+      "final_route": "double",
+      "final_accept": false
+    },
+    {
+      "integral": "BIN4",
+      "group": "box/B4m.h",
+      "baseline_digits": 9.598659779429953,
+      "per_precision": {
+        "float": {
+          "built": true,
+          "candidate_digits": 0.0,
+          "lift": -9.598659779429953,
+          "accept": false,
+          "reason": "below_tolerance: built but downshift candidate 0.0000 < tolerance 7.0 \u2014 falls back to raw double (target too narrow / ill-conditioned)"
+        },
+        "ff": {
+          "built": false,
+          "candidate_digits": null,
+          "lift": null,
+          "accept": false,
+          "reason": "build_failed: per-integral flip TU did not compile"
+        }
+      },
+      "final_route": "double",
+      "final_accept": false
+    }
+  ]
+}

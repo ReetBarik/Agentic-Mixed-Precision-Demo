@@ -1,0 +1,248 @@
+{
+  "sample_count": 2000,
+  "margin": 0.0,
+  "tolerance": 7.0,
+  "direction": "downshift",
+  "walk": [
+    "float",
+    "ff"
+  ],
+  "distinct_groups": [
+    "box/B0m.h",
+    "box/B1m.h",
+    "box/B2m.h"
+  ],
+  "flip_build_failed": [],
+  "rows": [
+    {
+      "integral": "B1",
+      "group": "box/B0m.h",
+      "baseline_digits": 12.490841981891506,
+      "per_precision": {
+        "float": {
+          "built": true,
+          "candidate_digits": 2.658347149167547,
+          "lift": -9.83249483272396,
+          "accept": false,
+          "reason": "below_tolerance: built but downshift candidate 2.6583 < tolerance 7.0 \u2014 falls back to raw double (target too narrow / ill-conditioned)"
+        },
+        "ff": {
+          "built": true,
+          "candidate_digits": 9.264180751024146,
+          "lift": -3.226661230867361,
+          "accept": true,
+          "reason": "accept: built + downshift clears tolerance (9.2642 >= 7.0) \u2014 precision above bar is headroom"
+        }
+      },
+      "final_route": "ff",
+      "final_accept": true
+    },
+    {
+      "integral": "B2",
+      "group": "box/B0m.h",
+      "baseline_digits": 12.9208555204749,
+      "per_precision": {
+        "float": {
+          "built": true,
+          "candidate_digits": 4.055138455191166,
+          "lift": -8.865717065283734,
+          "accept": false,
+          "reason": "below_tolerance: built but downshift candidate 4.0551 < tolerance 7.0 \u2014 falls back to raw double (target too narrow / ill-conditioned)"
+        },
+        "ff": {
+          "built": true,
+          "candidate_digits": 10.507324819299741,
+          "lift": -2.4135307011751586,
+          "accept": true,
+          "reason": "accept: built + downshift clears tolerance (10.5073 >= 7.0) \u2014 precision above bar is headroom"
+        }
+      },
+      "final_route": "ff",
+      "final_accept": true
+    },
+    {
+      "integral": "B3",
+      "group": "box/B0m.h",
+      "baseline_digits": 11.98526474140445,
+      "per_precision": {
+        "float": {
+          "built": true,
+          "candidate_digits": 3.5325912045678547,
+          "lift": -8.452673536836596,
+          "accept": false,
+          "reason": "below_tolerance: built but downshift candidate 3.5326 < tolerance 7.0 \u2014 falls back to raw double (target too narrow / ill-conditioned)"
+        },
+        "ff": {
+          "built": true,
+          "candidate_digits": 9.682042470795464,
+          "lift": -2.3032222706089858,
+          "accept": true,
+          "reason": "accept: built + downshift clears tolerance (9.6820 >= 7.0) \u2014 precision above bar is headroom"
+        }
+      },
+      "final_route": "ff",
+      "final_accept": true
+    },
+    {
+      "integral": "B4",
+      "group": "box/B0m.h",
+      "baseline_digits": 11.37176815720791,
+      "per_precision": {
+        "float": {
+          "built": true,
+          "candidate_digits": 3.7888891080937412,
+          "lift": -7.582879049114169,
+          "accept": false,
+          "reason": "below_tolerance: built but downshift candidate 3.7889 < tolerance 7.0 \u2014 falls back to raw double (target too narrow / ill-conditioned)"
+        },
+        "ff": {
+          "built": true,
+          "candidate_digits": 10.158380541017863,
+          "lift": -1.2133876161900474,
+          "accept": true,
+          "reason": "accept: built + downshift clears tolerance (10.1584 >= 7.0) \u2014 precision above bar is headroom"
+        }
+      },
+      "final_route": "ff",
+      "final_accept": true
+    },
+    {
+      "integral": "B5",
+      "group": "box/B0m.h",
+      "baseline_digits": 12.714019669578448,
+      "per_precision": {
+        "float": {
+          "built": true,
+          "candidate_digits": 4.230776087419235,
+          "lift": -8.483243582159213,
+          "accept": false,
+          "reason": "below_tolerance: built but downshift candidate 4.2308 < tolerance 7.0 \u2014 falls back to raw double (target too narrow / ill-conditioned)"
+        },
+        "ff": {
+          "built": true,
+          "candidate_digits": 10.12963543277381,
+          "lift": -2.584384236804638,
+          "accept": true,
+          "reason": "accept: built + downshift clears tolerance (10.1296 >= 7.0) \u2014 precision above bar is headroom"
+        }
+      },
+      "final_route": "ff",
+      "final_accept": true
+    },
+    {
+      "integral": "B6",
+      "group": "box/B1m.h",
+      "baseline_digits": 12.26927663748177,
+      "per_precision": {
+        "float": {
+          "built": true,
+          "candidate_digits": 3.325240463280809,
+          "lift": -8.944036174200962,
+          "accept": false,
+          "reason": "below_tolerance: built but downshift candidate 3.3252 < tolerance 7.0 \u2014 falls back to raw double (target too narrow / ill-conditioned)"
+        },
+        "ff": {
+          "built": true,
+          "candidate_digits": 10.773171523331944,
+          "lift": -1.4961051141498256,
+          "accept": true,
+          "reason": "accept: built + downshift clears tolerance (10.7732 >= 7.0) \u2014 precision above bar is headroom"
+        }
+      },
+      "final_route": "ff",
+      "final_accept": true
+    },
+    {
+      "integral": "B7",
+      "group": "box/B1m.h",
+      "baseline_digits": 11.624688947264312,
+      "per_precision": {
+        "float": {
+          "built": true,
+          "candidate_digits": 3.615851095825628,
+          "lift": -8.008837851438685,
+          "accept": false,
+          "reason": "below_tolerance: built but downshift candidate 3.6159 < tolerance 7.0 \u2014 falls back to raw double (target too narrow / ill-conditioned)"
+        },
+        "ff": {
+          "built": true,
+          "candidate_digits": 10.793970647594529,
+          "lift": -0.8307182996697833,
+          "accept": true,
+          "reason": "accept: built + downshift clears tolerance (10.7940 >= 7.0) \u2014 precision above bar is headroom"
+        }
+      },
+      "final_route": "ff",
+      "final_accept": true
+    },
+    {
+      "integral": "B8",
+      "group": "box/B1m.h",
+      "baseline_digits": 10.765315101016306,
+      "per_precision": {
+        "float": {
+          "built": true,
+          "candidate_digits": 2.6396445199801097,
+          "lift": -8.125670581036196,
+          "accept": false,
+          "reason": "below_tolerance: built but downshift candidate 2.6396 < tolerance 7.0 \u2014 falls back to raw double (target too narrow / ill-conditioned)"
+        },
+        "ff": {
+          "built": true,
+          "candidate_digits": 8.965765635850891,
+          "lift": -1.7995494651654145,
+          "accept": true,
+          "reason": "accept: built + downshift clears tolerance (8.9658 >= 7.0) \u2014 precision above bar is headroom"
+        }
+      },
+      "final_route": "ff",
+      "final_accept": true
+    },
+    {
+      "integral": "B9",
+      "group": "box/B1m.h",
+      "baseline_digits": 11.672968089087988,
+      "per_precision": {
+        "float": {
+          "built": true,
+          "candidate_digits": 2.667708125449153,
+          "lift": -9.005259963638835,
+          "accept": false,
+          "reason": "below_tolerance: built but downshift candidate 2.6677 < tolerance 7.0 \u2014 falls back to raw double (target too narrow / ill-conditioned)"
+        },
+        "ff": {
+          "built": true,
+          "candidate_digits": 8.641536136119258,
+          "lift": -3.0314319529687292,
+          "accept": true,
+          "reason": "accept: built + downshift clears tolerance (8.6415 >= 7.0) \u2014 precision above bar is headroom"
+        }
+      },
+      "final_route": "ff",
+      "final_accept": true
+    },
+    {
+      "integral": "B11",
+      "group": "box/B2m.h",
+      "baseline_digits": 9.46013861345338,
+      "per_precision": {
+        "float": {
+          "built": true,
+          "candidate_digits": 0.4780711247000979,
+          "lift": -8.982067488753282,
+          "accept": false,
+          "reason": "below_tolerance: built but downshift candidate 0.4781 < tolerance 7.0 \u2014 falls back to raw double (target too narrow / ill-conditioned)"
+        },
+        "ff": {
+          "built": true,
+          "candidate_digits": 7.804980466162271,
+          "lift": -1.6551581472911083,
+          "accept": true,
+          "reason": "accept: built + downshift clears tolerance (7.8050 >= 7.0) \u2014 precision above bar is headroom"
+        }
+      },
+      "final_route": "ff",
+      "final_accept": true
+    }
+  ]
+}
