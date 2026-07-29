@@ -58,6 +58,7 @@ struct ddcomplex {
     KOKKOS_INLINE_FUNCTION ddcomplex operator-() const {
         return ddcomplex(ddneg(re), ddneg(im));
     }
+    KOKKOS_INLINE_FUNCTION ddcomplex operator+() const { return *this; }
 
     KOKKOS_INLINE_FUNCTION ddcomplex& operator+=(ddcomplex b) { *this = *this + b; return *this; }
     KOKKOS_INLINE_FUNCTION ddcomplex& operator-=(ddcomplex b) { *this = *this - b; return *this; }

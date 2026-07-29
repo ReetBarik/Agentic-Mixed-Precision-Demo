@@ -52,6 +52,8 @@ struct ddouble {
     KOKKOS_INLINE_FUNCTION ddouble& operator=(const ddouble& o) { hi=o.hi; lo=o.lo; return *this; }
 
     KOKKOS_INLINE_FUNCTION ddouble operator-() const { return ddneg(*this); }
+    KOKKOS_INLINE_FUNCTION ddouble operator+() const { return *this; }
+    KOKKOS_INLINE_FUNCTION operator int() const { return (int)hi; }
     KOKKOS_INLINE_FUNCTION ddouble operator+(ddouble b) const { return ddadd(*this, b); }
     KOKKOS_INLINE_FUNCTION ddouble operator-(ddouble b) const { return ddsub(*this, b); }
     KOKKOS_INLINE_FUNCTION ddouble operator*(ddouble b) const { return ddmul(*this, b); }
@@ -76,6 +78,13 @@ struct ddouble {
     KOKKOS_INLINE_FUNCTION bool operator>(ddouble b)  const { return hi>b.hi || (hi==b.hi && lo>b.lo); }
     KOKKOS_INLINE_FUNCTION bool operator<=(ddouble b) const { return !(b < *this); }
     KOKKOS_INLINE_FUNCTION bool operator>=(ddouble b) const { return !(*this < b); }
+
+    KOKKOS_INLINE_FUNCTION bool operator==(double b) const { return *this == ddouble(b); }
+    KOKKOS_INLINE_FUNCTION bool operator!=(double b) const { return *this != ddouble(b); }
+    KOKKOS_INLINE_FUNCTION bool operator<(double b)  const { return *this <  ddouble(b); }
+    KOKKOS_INLINE_FUNCTION bool operator>(double b)  const { return *this >  ddouble(b); }
+    KOKKOS_INLINE_FUNCTION bool operator<=(double b) const { return *this <= ddouble(b); }
+    KOKKOS_INLINE_FUNCTION bool operator>=(double b) const { return *this >= ddouble(b); }
 };
 
 KOKKOS_INLINE_FUNCTION ddouble operator+(double a, ddouble b) { return ddadd(ddouble(a), b); }

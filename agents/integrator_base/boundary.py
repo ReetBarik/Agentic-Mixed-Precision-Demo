@@ -478,6 +478,26 @@ def _apply_spans(text: str, edits: list[tuple[int, int, str]]) -> str:
     return "".join(out)
 
 
+def narrow_two_limb_scalar(expr: str, caller_type: str, two_limb: bool = True) -> str:
+    """Reconstruct a caller-precision scalar from an extended (two-limb) scalar ``expr``.
+
+    THE single source of truth for the dd/ff → caller two-limb reconstruction idiom
+    (``static_cast<T>(e.hi) + static_cast<T>(e.lo)``) — the extended scalar types have no
+    ``operator double``, so the boundary rebuilds the value from its two limbs.  A native
+    single-limb scalar (plain ``float``) has no ``.hi``/``.lo`` and is a plain cast.
+
+    Exposed so every dd→caller narrowing — the element-promotion designed-exit
+    (:func:`_demote_expr` / :func:`_demote_complex_value`) AND the Phase-1 template-arg
+    flip's app-output boundary (the per-integral dd TU's narrowing printer) — shares ONE
+    reconstruction primitive rather than re-deriving the idiom per site (STOP #TT: no
+    one-off boundary narrowing).  ``expr`` is any well-formed sub-expression naming the
+    extended value (a name, a ``name.real()``, a driver printer's ``v``)."""
+    if not two_limb:
+        return f"static_cast<{caller_type}>({expr})"
+    return (f"static_cast<{caller_type}>({expr}.hi) + "
+            f"static_cast<{caller_type}>({expr}.lo)")
+
+
 def _demote_expr(name: str, caller_type: str, two_limb: bool = True) -> str:
     """Demote a promoted *scalar* region write back to the caller precision.
 
@@ -485,13 +505,11 @@ def _demote_expr(name: str, caller_type: str, two_limb: bool = True) -> str:
     reconstruction — ``static_cast<T>(w.hi) + static_cast<T>(w.lo)`` — the extended
     types' own conversion-out idiom (no ``operator double`` exists).  For a *native*
     single-limb scalar (plain ``float``, which has no ``.hi``/``.lo`` members) it is
-    a plain cast — ``static_cast<T>(w)`` — so a float demotion compiles.
+    a plain cast — ``static_cast<T>(w)`` — so a float demotion compiles.  Delegates the
+    reconstruction to :func:`narrow_two_limb_scalar` (shared with the Phase-1 flip
+    boundary — STOP #TT).
     """
-    ext = name + _WRITE_SUFFIX
-    if not two_limb:
-        return f"static_cast<{caller_type}>({ext})"
-    return (f"static_cast<{caller_type}>({ext}.hi) + "
-            f"static_cast<{caller_type}>({ext}.lo)")
+    return narrow_two_limb_scalar(name + _WRITE_SUFFIX, caller_type, two_limb)
 
 
 def _demote_complex_expr(name: str, target_type: str, caller_type: str,
@@ -517,10 +535,8 @@ def _demote_complex_expr(name: str, target_type: str, caller_type: str,
     if not two_limb:
         return (f"{target_type}(static_cast<{caller_type}>({ext}.real()), "
                 f"static_cast<{caller_type}>({ext}.imag()))")
-    re_ = (f"static_cast<{caller_type}>({ext}.re.hi) + "
-           f"static_cast<{caller_type}>({ext}.re.lo)")
-    im_ = (f"static_cast<{caller_type}>({ext}.im.hi) + "
-           f"static_cast<{caller_type}>({ext}.im.lo)")
+    re_ = narrow_two_limb_scalar(f"{ext}.re", caller_type, two_limb)
+    im_ = narrow_two_limb_scalar(f"{ext}.im", caller_type, two_limb)
     return f"{target_type}({re_}, {im_})"
 
 
@@ -788,10 +804,8 @@ def _demote_complex_value(expr: str, target_type: str, caller_type: str,
     if not two_limb:
         return (f"{target_type}(static_cast<{caller_type}>({e}.real()), "
                 f"static_cast<{caller_type}>({e}.imag()))")
-    re_ = (f"static_cast<{caller_type}>({e}.re.hi) + "
-           f"static_cast<{caller_type}>({e}.re.lo)")
-    im_ = (f"static_cast<{caller_type}>({e}.im.hi) + "
-           f"static_cast<{caller_type}>({e}.im.lo)")
+    re_ = narrow_two_limb_scalar(f"{e}.re", caller_type, two_limb)
+    im_ = narrow_two_limb_scalar(f"{e}.im", caller_type, two_limb)
     return f"{target_type}({re_}, {im_})"
 
 
