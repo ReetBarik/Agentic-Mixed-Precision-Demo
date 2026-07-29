@@ -41,6 +41,7 @@ from pathlib import Path
 
 from agents.integrator_base.boundary import narrow_two_limb_scalar
 from agents.patcher.precision_flip import TargetPrecision
+from agents.patcher.shim_synth import read_embedded_sha, render_shim
 
 # The master snapshot header tree — must stay pristine (STOP #Z).  Any emit target that
 # resolves to a path under here is refused.
@@ -56,10 +57,19 @@ class TUEmitError(RuntimeError):
 class PrecisionProfile:
     """Everything precision-specific the wrapper + driver generators need for one target.
 
-    A profile is *available* iff its ``maths_header`` is a header the snapshot vendors
-    (dd is; ff/float are not yet — their profiles are declared so the generator branches
-    on a table, never on a hard-coded ``dd``, but selecting an unavailable one fails
-    loud rather than inventing a header).
+    A profile is *available* iff it can be served without enrichment.  Two mechanisms make
+    a profile available:
+
+    * a **static maths header** the snapshot vendors (``dd`` — ``kokkosMaths_dd.h``), or
+    * **shim synthesis** (``shim_synthesis=True``): the target precision has no static
+      wrapper but its leaf overloads have library-native instantiations, so the pipeline
+      generates the missing non-template siblings as ``kokkosMaths_<precision>_shim.hpp`` on
+      top of ``maths_reference_header`` (the double reference).  This is the Phase-2 float
+      path; see :mod:`agents.patcher.shim_synth`.
+
+    A precision with neither (``ff`` — no library-native ``Kokkos::abs<ffcomplex>`` and no
+    ``Kokkos::complex<ffloat>`` container, STOP #EEE) stays ``available=False`` and fails
+    loud rather than degrading to dd (reverse-STOP #SS).
     """
 
     precision: TargetPrecision
@@ -69,13 +79,18 @@ class PrecisionProfile:
     cpp_scalar: str               # TMass / TScale template arg (the real scalar)
     printer_name: str             # ql_app Printer struct name emitted into the driver
     two_limb: bool                # component printer emits hi|lo (dd/ff) vs one token
-    available: bool               # the maths_header is vendored in the snapshot
+    available: bool               # servable without enrichment (static header OR shim)
     caller_type: str = "double"   # the app-boundary caller precision the flip narrows to
+    shim_synthesis: bool = False  # serve via a generated leaf shim (Phase-2 float downshift)
+    maths_reference_header: str = "kokkosMaths.h"  # double reference the shim layers on
+    reference_scalar: str = "double"               # scalar token the shim rewrites FROM
 
 
-# Precision profile table.  DD is fully wired for Phase-1; FF/FLOAT are declared (so the
-# stack is parameterized — STOP #SS) but marked unavailable until their maths headers are
-# vendored (a Phase-2/3 prerequisite, not a Phase-1 emission).
+# Precision profile table.  DD is wired for Phase-1 (static header); FLOAT is wired for
+# Phase-2 (shim synthesis — no static header, library-native leaves).  FF stays unavailable
+# (STOP #EEE: Kokkos::complex<ffloat> fails the is_floating_point static_assert AND there is
+# no library-native ff leaf to bind a shim to) — declared so the stack is parameterized
+# (STOP #SS), but selecting it fails loud rather than degrading.
 PROFILES: dict[TargetPrecision, PrecisionProfile] = {
     TargetPrecision.DD: PrecisionProfile(
         precision=TargetPrecision.DD,
@@ -94,17 +109,24 @@ PROFILES: dict[TargetPrecision, PrecisionProfile] = {
         cpp_scalar="ql::ffun::ffloat",
         printer_name="FFPrinter",
         two_limb=True,
-        available=False),
+        available=False),          # STOP #EEE: no library-native ff container / leaves
     TargetPrecision.FLOAT: PrecisionProfile(
         precision=TargetPrecision.FLOAT,
-        define_macro=None,                 # default arm (kokkosMaths.h), Kokkos::complex
-        maths_header="kokkosMaths.h",
+        define_macro=None,                 # default arm (double reference) + generated shim
+        maths_header="kokkosMaths.h",      # unused when shim_synthesis (kept for the table)
         cpp_output="Kokkos::complex<float>",
         cpp_scalar="float",
         printer_name="FloatPrinter",
         two_limb=False,
-        available=False),
+        available=True,                    # Phase-2: served by shim synthesis (no enrichment)
+        shim_synthesis=True,
+        maths_reference_header="kokkosMaths.h",
+        reference_scalar="double"),
 }
+
+# The file name of the generated leaf shim, per precision (in the cloned TU only).
+def _shim_filename(prof: PrecisionProfile) -> str:
+    return f"kokkosMaths_{prof.precision.value}_shim.hpp"
 
 
 def profile_for(target: TargetPrecision) -> PrecisionProfile:
@@ -166,14 +188,42 @@ def group_header_for_files(region_files) -> str:
 def render_wrapper(target: TargetPrecision = TargetPrecision.DD) -> str:
     """Render the precision-parameterized ``kokkosMaths_wrapper.h``.
 
-    Emits one ``#if defined(<macro>) -> #include <header>`` arm per *available* precision
-    profile (so adding a vendored ff/float header automatically adds its arm), then the
-    ``USE_QUAD_COMPLEX`` CUDA-quad arm (preserved from the snapshot), then the default
-    double ``kokkosMaths.h``.  ``target`` is validated (its arm must be emittable) but the
-    wrapper itself carries every arm — the *driver's* ``#define`` selects one.  This is the
-    shape the fork's wrapper has and the snapshot's lacks (design §5.5).
+    Two shapes, selected by the ``target`` profile:
+
+    * **shim-synthesis** (Phase-2 float): a two-line wrapper — the double *reference*
+      header followed by the generated leaf shim — because the target has no static maths
+      header of its own; the shim supplies its missing non-template leaves on top of the
+      reference (design §3.2).  The driver needs no ``#define`` for this arm.
+    * **static header** (Phase-1 dd + quad + double default): the fork-shape ladder — one
+      ``#if defined(<macro>) -> #include <header>`` arm per *available macro* profile, then
+      the ``USE_QUAD_COMPLEX`` CUDA-quad arm (preserved from the snapshot), then the default
+      double ``kokkosMaths.h``.  The wrapper carries every static arm; the *driver's*
+      ``#define`` selects one.  This is the shape the fork's wrapper has and the snapshot's
+      lacks (design §5.5).
     """
-    profile_for(target)   # validate the requested target is emittable
+    prof = profile_for(target)   # validate the requested target is emittable
+    if prof.shim_synthesis:
+        return (
+            "//\n"
+            "// QCDLoop + Kokkos 2025 — precision wrapper (pipeline-generated, Phase-2 "
+            "shim synthesis)\n"
+            "//\n"
+            f"// Target precision {prof.precision.value!r} has no static maths header: the\n"
+            f"// double reference {prof.maths_reference_header!r} supplies every template "
+            "leaf,\n"
+            "// and the pipeline-synthesized shim below supplies the non-template leaf\n"
+            "// siblings at the target precision (library-native bindings).\n"
+            "//\n"
+            "// Generated into the CLONED working tree only; the snapshot is pristine "
+            "(STOP #Z).\n"
+            "// Do not hand-edit — regenerate via agents.patcher.tu_emit.\n"
+            "\n"
+            "#pragma once\n"
+            "\n"
+            f'#include "{prof.maths_reference_header}"   // double REFERENCE header '
+            "(unchanged)\n"
+            f'#include "{_shim_filename(prof)}"   // pipeline-synthesized target-precision '
+            "leaves\n")
     arms: list[str] = []
     for prof in PROFILES.values():
         if prof.available and prof.define_macro is not None:
@@ -309,6 +359,7 @@ class FlipTU:
     driver_path: Path
     group_header: str
     target: TargetPrecision
+    shim_path: Path | None = None   # generated leaf shim (shim-synthesis profiles only)
 
 
 def _refuse_snapshot(path: Path) -> None:
@@ -320,14 +371,48 @@ def _refuse_snapshot(path: Path) -> None:
             f"(STOP #Z); emit into a cloned tree instead")
 
 
+def _emit_shim(clone_tree: Path, prof: PrecisionProfile) -> Path:
+    """Generate the leaf shim for a shim-synthesis profile into the clone (STOP #Z guarded).
+
+    Reads the double *reference* header from the clone, extracts its non-template leaf
+    inventory, and (re)writes ``kokkosMaths_<precision>_shim.hpp`` when absent or when the
+    inventory sha differs from the existing shim's stamp — a cheap no-op when the reference
+    header is unchanged (§3.4).  Never touches the reference header; refuses any write that
+    resolves under the snapshot.
+    """
+    ref_path = clone_tree / prof.maths_reference_header
+    if not ref_path.is_file():
+        raise TUEmitError(
+            f"shim reference header {prof.maths_reference_header!r} not found under "
+            f"{clone_tree} — cannot synthesize the {prof.precision.value} leaf shim")
+    shim_path = clone_tree / _shim_filename(prof)
+    _refuse_snapshot(shim_path)
+    reference_text = ref_path.read_text()
+    shim_text = render_shim(reference_text,
+                            reference_scalar=prof.reference_scalar,
+                            target_scalar=prof.cpp_scalar,
+                            reference_name=prof.maths_reference_header,
+                            precision_label=prof.precision.value)
+    # sha-keyed regeneration: reuse the cached shim iff its stamp matches the fresh one.
+    if shim_path.is_file():
+        want = read_embedded_sha(shim_text)
+        have = read_embedded_sha(shim_path.read_text())
+        if want is not None and want == have:
+            return shim_path
+    shim_path.write_text(shim_text)
+    return shim_path
+
+
 def emit_flip_tu(clone_tree: Path, group_header: str, driver_dir: Path,
                  target: TargetPrecision = TargetPrecision.DD) -> FlipTU:
     """Emit the precision-flip build artifacts for one group into a cloned tree.
 
     Writes the precision-parameterized wrapper into ``clone_tree`` (overwriting the
     clone's copy, never the snapshot — guarded) and the per-group driver ``.cpp`` into
-    ``driver_dir``.  Returns the paths.  ``clone_tree`` must be a real clone (contains
-    ``boxGPU.h`` + ``box/``) and must NOT be the snapshot.
+    ``driver_dir``.  For a **shim-synthesis** profile (Phase-2 float) it additionally
+    generates the target-precision leaf shim into the clone (:func:`_emit_shim`).  Returns
+    the paths.  ``clone_tree`` must be a real clone (contains ``boxGPU.h`` + ``box/``) and
+    must NOT be the snapshot.
     """
     prof = profile_for(target)   # fail loud before any write if target unavailable
     clone_tree = Path(clone_tree).resolve()
@@ -339,10 +424,11 @@ def emit_flip_tu(clone_tree: Path, group_header: str, driver_dir: Path,
     if not (clone_tree / group_header).is_file():
         raise TUEmitError(f"group header {group_header} not found under {clone_tree}")
 
+    shim_path = _emit_shim(clone_tree, prof) if prof.shim_synthesis else None
     wrapper_path.write_text(render_wrapper(target))
     driver_dir.mkdir(parents=True, exist_ok=True)
     grp_stem = Path(group_header).stem
     driver_path = driver_dir / f"boxGPU_flip_{grp_stem}_{prof.precision.value}.cpp"
     driver_path.write_text(render_group_driver(group_header, target))
     return FlipTU(wrapper_path=wrapper_path, driver_path=driver_path,
-                  group_header=group_header, target=target)
+                  group_header=group_header, target=target, shim_path=shim_path)

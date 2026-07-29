@@ -1,8 +1,13 @@
-"""Deliverable 5 — acceptance gate (build AND lift > 0.0), uniform (Decision 3)."""
+"""Deliverable 5/6 — acceptance gate (build AND lift), uniform (Decision 3).
+
+Upshift (Phase-1, double->dd) must GAIN digits; downshift (Phase-2, double->float) must
+PRESERVE them (lift >= 0).  Same predicate shape, direction-selected threshold.
+"""
 
 from __future__ import annotations
 
-from agents.patcher.flip_gate import GateInputs, evaluate, evaluate_all
+from agents.patcher.flip_gate import (
+    GateInputs, LiftDirection, evaluate, evaluate_all)
 
 
 def test_built_and_positive_lift_accepts():
@@ -62,3 +67,60 @@ def test_evaluate_all():
     assert res["B10"].accept is True
     assert res["B14"].accept is False
     assert res["B12"].accept is False
+
+
+# --------------------------------------------------------------------------- #
+# deliverable 6 (Phase-2) — downshift direction
+# --------------------------------------------------------------------------- #
+
+def test_downshift_accepts_precision_preserving_flip():
+    # A well-conditioned integral holds its digits at float (lift 0.0) -> accepted.
+    d = evaluate(GateInputs("B1", True, 15.9, 15.9), direction=LiftDirection.DOWNSHIFT)
+    assert d.accept is True
+    assert d.lift == 0.0
+    assert "downshift preserves precision" in d.reason
+
+
+def test_downshift_accepts_incidental_gain():
+    d = evaluate(GateInputs("B2", True, 15.0, 15.2), direction=LiftDirection.DOWNSHIFT)
+    assert d.accept is True
+
+
+def test_downshift_rejects_precision_loss():
+    # An ill-conditioned integral loses digits at float -> rejected back to raw double.
+    d = evaluate(GateInputs("B3", True, 15.9, 12.0), direction=LiftDirection.DOWNSHIFT)
+    assert d.accept is False
+    assert "precision_loss" in d.reason
+    assert d.lift == 12.0 - 15.9
+
+
+def test_downshift_margin_tightens_tolerance():
+    # margin 0.5 tolerates a 0.3-digit loss but not a 0.8-digit one.
+    ok = evaluate(GateInputs("B", True, 15.9, 15.6), margin=0.5,
+                  direction=LiftDirection.DOWNSHIFT)
+    bad = evaluate(GateInputs("B", True, 15.9, 15.1), margin=0.5,
+                   direction=LiftDirection.DOWNSHIFT)
+    assert ok.accept is True
+    assert bad.accept is False
+
+
+def test_downshift_build_failed_still_rejects():
+    d = evaluate(GateInputs("B4", False, None, None), direction=LiftDirection.DOWNSHIFT)
+    assert d.accept is False
+    assert "build_failed" in d.reason
+
+
+def test_same_numbers_opposite_verdict_by_direction():
+    # lift 0.0: UPSHIFT rejects (no gain), DOWNSHIFT accepts (preserved).
+    up = evaluate(GateInputs("B", True, 15.9, 15.9), direction=LiftDirection.UPSHIFT)
+    down = evaluate(GateInputs("B", True, 15.9, 15.9), direction=LiftDirection.DOWNSHIFT)
+    assert up.accept is False
+    assert down.accept is True
+
+
+def test_upshift_is_the_default_direction():
+    # Back-compat: no direction arg == UPSHIFT (Phase-1 behavior unchanged).
+    d = evaluate(GateInputs("B10", True, 1.5, 15.9))
+    assert d.accept is True
+    same = evaluate(GateInputs("B10", True, 1.5, 15.9), direction=LiftDirection.UPSHIFT)
+    assert d == same

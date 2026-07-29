@@ -153,3 +153,66 @@ def test_decision_is_deterministic():
     a = route_integral("B10", dd_flagged=True, graph=g, target_frames=["MID"])
     b = route_integral("B10", dd_flagged=True, graph=g, target_frames=["MID"])
     assert a == b
+
+
+# --------------------------------------------------------------------------- #
+# deliverable 5 (Phase-2) — downshift routing
+# --------------------------------------------------------------------------- #
+
+from agents.patcher.precision_flip import route_downshift, DOWNSHIFT_PREFERENCE  # noqa: E402
+
+
+def test_downshift_parametric_raw_double_routes_to_first_available():
+    defs = {"ENTRY": [_fd("ENTRY")], "MID": [_fd("MID")], "LEAF": [_fd("LEAF")]}
+    g = _graph(defs, {"ENTRY": {"MID"}, "MID": {"LEAF"}})
+    d = route_downshift("B1", dd_candidate=False, graph=g, target_frames=["LEAF"],
+                        available_targets={TargetPrecision.FLOAT})
+    assert d.route is Route.PRECISION_FLIP
+    assert d.target is TargetPrecision.FLOAT
+
+
+def test_downshift_never_touches_a_dd_candidate():
+    # STOP #ZZ: a Phase-1 dd accept is never downshifted, regardless of parametricity.
+    defs = {"ENTRY": [_fd("ENTRY")], "MID": [_fd("MID")]}
+    g = _graph(defs, {"ENTRY": {"MID"}})
+    d = route_downshift("B10", dd_candidate=True, graph=g, target_frames=["MID"],
+                        available_targets={TargetPrecision.FLOAT})
+    assert d.route is Route.RAW_DOUBLE
+    assert "dd candidate" in d.reason
+
+
+def test_downshift_non_parametric_stays_double():
+    defs = {"ENTRY": [_fd("ENTRY")], "MID": [_fd("MID", tmpl=False)]}
+    g = _graph(defs, {"ENTRY": {"MID"}})
+    d = route_downshift("B5", dd_candidate=False, graph=g, target_frames=["MID"],
+                        available_targets={TargetPrecision.FLOAT})
+    assert d.route is Route.RAW_DOUBLE
+    assert "not fully template-parametric" in d.reason
+
+
+def test_downshift_ff_unavailable_falls_to_float():
+    # Preference is (FLOAT, FF); with only FLOAT available FF is filtered out (STOP #EEE).
+    assert DOWNSHIFT_PREFERENCE[0] is TargetPrecision.FLOAT
+    defs = {"ENTRY": [_fd("ENTRY")], "MID": [_fd("MID")]}
+    g = _graph(defs, {"ENTRY": {"MID"}})
+    d = route_downshift("B2", dd_candidate=False, graph=g, target_frames=["MID"],
+                        available_targets={TargetPrecision.FLOAT})
+    assert d.target is TargetPrecision.FLOAT
+
+
+def test_downshift_no_available_target_stays_double():
+    defs = {"ENTRY": [_fd("ENTRY")], "MID": [_fd("MID")]}
+    g = _graph(defs, {"ENTRY": {"MID"}})
+    d = route_downshift("B3", dd_candidate=False, graph=g, target_frames=["MID"],
+                        available_targets=set())
+    assert d.route is Route.RAW_DOUBLE
+    assert "no available downshift target" in d.reason
+
+
+def test_downshift_prefers_cheapest_when_multiple_available():
+    # If both FLOAT and FF were available, the cheapest (FLOAT, first in preference) wins.
+    defs = {"ENTRY": [_fd("ENTRY")], "MID": [_fd("MID")]}
+    g = _graph(defs, {"ENTRY": {"MID"}})
+    d = route_downshift("B4", dd_candidate=False, graph=g, target_frames=["MID"],
+                        available_targets={TargetPrecision.FLOAT, TargetPrecision.FF})
+    assert d.target is TargetPrecision.FLOAT

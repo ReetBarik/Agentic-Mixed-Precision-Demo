@@ -103,13 +103,47 @@ def test_dd_profile_available():
 
 
 def test_unavailable_precision_fails_loud_not_dd_fallback():
-    # ff/float profiles exist (parameterization) but their headers aren't vendored yet:
-    # selecting one must fail, never silently degrade to dd (reverse-STOP #SS).
+    # ff profile exists (parameterization) but has no library-native container/leaves
+    # (STOP #EEE): selecting it must fail, never silently degrade to dd (reverse-STOP #SS).
     assert not PROFILES[TargetPrecision.FF].available
     with pytest.raises(TUEmitError):
         profile_for(TargetPrecision.FF)
     with pytest.raises(TUEmitError):
         render_group_driver("box/B1m.h", TargetPrecision.FF)
+
+
+def test_float_profile_available_via_shim_synthesis():
+    # Phase-2: FLOAT is served by shim synthesis (no static header, no enrichment).
+    prof = PROFILES[TargetPrecision.FLOAT]
+    assert prof.available
+    assert prof.shim_synthesis
+    assert prof.maths_reference_header == "kokkosMaths.h"
+    assert prof.reference_scalar == "double"
+    assert prof.cpp_scalar == "float"
+    assert not prof.two_limb
+    # profile_for must return it (not fail loud) now that it is available.
+    assert profile_for(TargetPrecision.FLOAT).precision is TargetPrecision.FLOAT
+
+
+def test_float_wrapper_is_two_line_shim_shape():
+    # A shim-synthesis wrapper includes the double reference then the generated shim, and
+    # carries NO precision #define ladder (the shim supplies the leaves directly).
+    w = render_wrapper(TargetPrecision.FLOAT)
+    assert '#include "kokkosMaths.h"' in w
+    assert '#include "kokkosMaths_float_shim.hpp"' in w
+    assert "USE_DD_COMPLEX" not in w
+    assert "#elif" not in w
+    assert w.count("#pragma once") == 1
+
+
+def test_float_group_driver_shape():
+    d = render_group_driver("box/B1m.h", TargetPrecision.FLOAT)
+    assert '#include "box/B1m.h"' in d
+    assert "Kokkos::complex<float>" in d
+    assert "FloatPrinter" in d
+    # native single-limb float: no USE_*_COMPLEX define, includes Kokkos_Complex for the container.
+    assert "#define USE_" not in d
+    assert "#include <Kokkos_Complex.hpp>" in d
 
 
 def test_profiles_declare_all_three_targets():
@@ -121,11 +155,25 @@ def test_profiles_declare_all_three_targets():
 # emission + snapshot guard (STOP #Z)
 # --------------------------------------------------------------------------- #
 
+_FAKE_MATHS = """\
+#pragma once
+namespace ql {
+    template<typename T>
+    KOKKOS_INLINE_FUNCTION T kAbs(T const& x) { return Kokkos::abs(x); }
+
+    KOKKOS_INLINE_FUNCTION double kAbs(double const& x) { return Kokkos::abs(x); }
+
+    KOKKOS_INLINE_FUNCTION double Real(Kokkos::complex<double> const& x) { return x.real(); }
+}
+"""
+
+
 def _fake_tree(root: Path) -> Path:
     (root / "box").mkdir(parents=True)
     (root / "boxGPU.h").write_text("// meta\n")
     (root / "box" / "B1m.h").write_text("// group\n")
     (root / "kokkosMaths_wrapper.h").write_text("// old wrapper\n")
+    (root / "kokkosMaths.h").write_text(_FAKE_MATHS)
     return root
 
 
@@ -137,6 +185,55 @@ def test_emit_writes_wrapper_and_driver_into_clone(tmp_path):
     assert "USE_DD_COMPLEX" in tu.wrapper_path.read_text()
     assert tu.driver_path.exists()
     assert '#include "box/B1m.h"' in tu.driver_path.read_text()
+
+
+def test_emit_float_writes_shim_into_clone(tmp_path):
+    clone = _fake_tree(tmp_path / "tree")
+    drv = tmp_path / "drv"
+    tu = emit_flip_tu(clone, "box/B1m.h", drv, TargetPrecision.FLOAT)
+    # The shim is written into the clone, alongside (not over) the reference header.
+    assert tu.shim_path == clone / "kokkosMaths_float_shim.hpp"
+    assert tu.shim_path.exists()
+    shim = tu.shim_path.read_text()
+    assert "@shim-inventory-sha256:" in shim
+    # Only the non-template double overloads get float siblings (kAbs(double), Real(complex)).
+    assert "float kAbs(float const& x)" in shim
+    assert "Real(Kokkos::complex<float> const& x)" in shim
+    # The generic template kAbs<T> is NOT re-emitted (it auto-instantiates at float).
+    body = shim[shim.index("namespace ql {"):]
+    assert "template" not in body
+    # The wrapper points at the reference + the shim.
+    w = tu.wrapper_path.read_text()
+    assert '#include "kokkosMaths.h"' in w
+    assert '#include "kokkosMaths_float_shim.hpp"' in w
+    # The reference header itself is untouched.
+    assert (clone / "kokkosMaths.h").read_text() == _FAKE_MATHS
+
+
+def test_emit_float_shim_reused_when_reference_unchanged(tmp_path):
+    clone = _fake_tree(tmp_path / "tree")
+    drv = tmp_path / "drv"
+    tu = emit_flip_tu(clone, "box/B1m.h", drv, TargetPrecision.FLOAT)
+    first = tu.shim_path.read_text()
+    # Re-emit against the same (unchanged) reference: sha-keyed no-op, byte-identical shim.
+    tu2 = emit_flip_tu(clone, "box/B1m.h", drv, TargetPrecision.FLOAT)
+    assert tu2.shim_path.read_text() == first
+
+
+def test_emit_float_shim_regenerated_when_reference_changes(tmp_path):
+    clone = _fake_tree(tmp_path / "tree")
+    drv = tmp_path / "drv"
+    emit_flip_tu(clone, "box/B1m.h", drv, TargetPrecision.FLOAT)
+    # Add a new non-template leaf to the reference -> inventory sha changes -> regenerate.
+    ref = clone / "kokkosMaths.h"
+    ref.write_text(ref.read_text().replace(
+        "    KOKKOS_INLINE_FUNCTION double Real(Kokkos::complex<double> const& x) "
+        "{ return x.real(); }\n",
+        "    KOKKOS_INLINE_FUNCTION double Real(Kokkos::complex<double> const& x) "
+        "{ return x.real(); }\n"
+        "    KOKKOS_INLINE_FUNCTION double Imag(double const& x) { return 0.0; }\n"))
+    tu2 = emit_flip_tu(clone, "box/B1m.h", drv, TargetPrecision.FLOAT)
+    assert "Imag(float const& x)" in tu2.shim_path.read_text()
 
 
 def test_emit_refuses_snapshot_write():

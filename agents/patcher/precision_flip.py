@@ -226,3 +226,69 @@ def route_integral(integral: str, *, dd_flagged: bool, graph: CallGraph,
         reason=f"dd-flagged + subtree parametric ({len(para.frames_checked)} frames) "
                f"→ per-integral TU precision flip at {target.value}",
         parametricity=para)
+
+
+# --------------------------------------------------------------------------- #
+# deliverable 5 (Phase-2) — downshift routing
+# --------------------------------------------------------------------------- #
+
+# The Phase-2 downshift preference order, cheapest (narrowest) precision first.  The router
+# picks the first *available* target in this order; ``FF`` sits here so the stack stays
+# precision-parameterized (STOP #SS), but it is filtered out at runtime whenever it is not
+# an available target (STOP #EEE: no library-native ff container/leaves → no shim path).
+DOWNSHIFT_PREFERENCE: tuple[TargetPrecision, ...] = (
+    TargetPrecision.FLOAT, TargetPrecision.FF)
+
+
+def route_downshift(integral: str, *, dd_candidate: bool, graph: CallGraph,
+                    target_frames: list[str],
+                    available_targets: "frozenset[TargetPrecision] | set[TargetPrecision]",
+                    preference: tuple[TargetPrecision, ...] = DOWNSHIFT_PREFERENCE,
+                    max_depth: int = 32) -> FlipDecision:
+    """Route one raw-double integral to a *narrower* precision (Phase-2), or keep it double.
+
+    A downshift candidate is a raw-double integral (``dd_candidate=False`` — a Phase-1 dd
+    accept is **never** downshifted, STOP #ZZ) whose enclosing subtree is fully
+    template-parametric.  The router walks ``preference`` (cheapest precision first) and
+    selects the **first target that is both available and parametric**:
+
+    * ``available_targets`` is the set of precisions the emission stack can serve without
+      enrichment — passed in by the caller (from the profile table) so this module never
+      imports it (and never hard-codes which precisions are live).  With float-only Phase-2
+      this is ``{FLOAT}``; ``FF`` is filtered out (STOP #EEE).
+    * parametricity is the same structural check as the upshift path
+      (:func:`subtree_is_parametric`) — a non-parametric subtree is out of the template-arg
+      downshift's scope and stays double.
+
+    A dd candidate, a non-parametric subtree, or no available/parametric target all route to
+    :data:`Route.RAW_DOUBLE`.  The acceptance gate (deliverable 6, ``lift_direction=downshift``)
+    may still demote a *built-but-precision-losing* candidate back to raw double afterward;
+    this function makes only the initial structural routing.
+    """
+    if dd_candidate:
+        return FlipDecision(
+            integral=integral, route=Route.RAW_DOUBLE, target=None,
+            reason="dd candidate (Phase-1 accept) — never downshifted (STOP #ZZ)")
+    para = subtree_is_parametric(graph, target_frames, max_depth=max_depth)
+    if not para.parametric:
+        detail = ", ".join(para.non_template) or "no target frame resolved"
+        return FlipDecision(
+            integral=integral, route=Route.RAW_DOUBLE, target=None,
+            reason=f"subtree not fully template-parametric (non-template: {detail}) "
+                   f"— out of the downshift path; stays raw double",
+            parametricity=para)
+    live = [t for t in preference if t in available_targets]
+    if not live:
+        offered = ", ".join(t.value for t in preference) or "<none>"
+        return FlipDecision(
+            integral=integral, route=Route.RAW_DOUBLE, target=None,
+            reason=f"no available downshift target among [{offered}] "
+                   f"(none servable without enrichment) — stays raw double",
+            parametricity=para)
+    target = live[0]
+    return FlipDecision(
+        integral=integral, route=Route.PRECISION_FLIP, target=target,
+        reason=f"raw-double + subtree parametric ({len(para.frames_checked)} frames) "
+               f"→ downshift to {target.value} (first available of "
+               f"[{', '.join(t.value for t in preference)}])",
+        parametricity=para)

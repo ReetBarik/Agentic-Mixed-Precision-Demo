@@ -192,7 +192,8 @@ int run_app(int argc, char* argv[]) {
         // discarded — no `.hi` on a plain double in the vanilla build).
         auto to_d = [](auto v) -> double {
             if constexpr (std::is_same_v<decltype(v), double>) return v;
-            else return v.hi;
+            else if constexpr (std::is_same_v<decltype(v), float>) return static_cast<double>(v);
+            else return v.hi;   // two-limb (ddouble/ffloat): the high limb is the double value
         };
 
         auto run_integral = [&](const std::string& name,
