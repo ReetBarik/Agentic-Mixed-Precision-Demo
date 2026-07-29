@@ -52,6 +52,12 @@ struct ffloat {
     KOKKOS_INLINE_FUNCTION ffloat(float h) : hi(h), lo(0.0f) {}
     KOKKOS_INLINE_FUNCTION ffloat(float h, float l) : hi(h), lo(l) {}
     KOKKOS_INLINE_FUNCTION ffloat(double h) : hi((float)h), lo((float)(h - (double)(float)h)) {}
+    // Explicit int ctor: disambiguates int->ffloat (both ffloat(float) and ffloat(double)
+    // are viable via user-defined conversion from int, making it ambiguous). Route via
+    // double so ints beyond float's 2^24 exact range don't truncate at conversion.
+    // Mirrors the ffloat(double) path with an explicit int source, matching the
+    // convention ddouble uses implicitly (dd has only one floating ctor, ffloat has two).
+    KOKKOS_INLINE_FUNCTION ffloat(int h) : hi((float)(double)h), lo((float)((double)h - (double)(float)(double)h)) {}
     KOKKOS_INLINE_FUNCTION ffloat(const ffloat& o) : hi(o.hi), lo(o.lo) {}
     KOKKOS_INLINE_FUNCTION ffloat& operator=(const ffloat& o) { hi=o.hi; lo=o.lo; return *this; }
 
