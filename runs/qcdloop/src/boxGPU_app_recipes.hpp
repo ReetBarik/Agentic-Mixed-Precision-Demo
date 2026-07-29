@@ -222,11 +222,33 @@ int run_app(int argc, char* argv[]) {
                 return;
             }
 
-            // Which per-integral offsets to dispatch: the explicit list, or the
-            // contiguous [offset, total) range.  Both fill the identical prefix
-            // above, so a listed offset is bit-identical to its range counterpart.
-            auto dispatch_one = [&](int i) {
-                ql::BO<TOutput, TMass, TScale>(res, mu2, m, p, i);
+            // Two-phase dispatch: parallel compute, then serial print.
+            //
+            // Phase A (parallel): Kokkos::parallel_for over [0, total_samples) computes
+            // every sample's coeff triple into res(i, 0..2). Uses DefaultExecutionSpace,
+            // which resolves to whichever backend Kokkos was built with (Serial, OpenMP,
+            // CUDA, HIP, ...). Under OpenMP with OMP_NUM_THREADS=N, this dispatches N-way
+            // parallel across samples. Per-sample compute is fully independent (no
+            // cross-sample state, no reductions), so results are bit-identical to serial
+            // regardless of backend or thread count.
+            //
+            // We compute ALL total_samples samples (not just the dispatched slice) so
+            // that --sample-list with sparse indices reads from initialized res entries.
+            // For contiguous [offset, total) dispatch, samples [0, offset) are computed
+            // but not printed — modest wasted work, cleaner contract.
+            //
+            // Phase B (serial): iterate the requested subset (list or [offset, total))
+            // and format each row into `out`. Kept serial because std::string mutation
+            // is not thread-safe and per-sample output ordering is load-bearing for the
+            // Validator's line-oriented parser.
+            Kokkos::RangePolicy<Kokkos::DefaultExecutionSpace> policy(0, total_samples);
+            Kokkos::parallel_for(name.c_str(), policy,
+                KOKKOS_LAMBDA(const int& i) {
+                    ql::BO<TOutput, TMass, TScale>(res, mu2, m, p, i);
+                });
+            Kokkos::fence();
+
+            auto print_one = [&](int i) {
                 out += "RES,";
                 out += name;
                 out += ',';
@@ -243,11 +265,11 @@ int run_app(int argc, char* argv[]) {
             if (list_mode) {
                 out.reserve(sample_list.size() * 96);
                 for (int i : sample_list) {
-                    if (i >= 0 && i < total_samples) dispatch_one(i);
+                    if (i >= 0 && i < total_samples) print_one(i);
                 }
             } else {
                 out.reserve(sample_count * 96);
-                for (int i = sample_offset; i < total_samples; ++i) dispatch_one(i);
+                for (int i = sample_offset; i < total_samples; ++i) print_one(i);
             }
             std::cout << out;
         };
