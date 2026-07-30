@@ -118,7 +118,20 @@ def _coeffs(binary: Path, total: int) -> dict:
 
 
 def _min_digits(cand: dict, ref: dict, integral: str, total: int) -> float | None:
-    """min over samples/components of precise_digits(cand vs ref) for one integral."""
+    """min over samples/components of precise_digits(cand vs ref) for one integral.
+
+    Each sample carries a ``ref_scale`` — the max ``|DD reference component|`` across
+    that sample's :data:`N_COMPONENTS` coeffs — passed into every
+    :func:`precise_digits_fast` call so a component whose DD reference is an analytic
+    zero against the sample scale reports at the DD cap rather than as spurious
+    0-digit noise.  This is the SAME convention the Validator uses in
+    ``agents.validator.validate._score`` (per-sample max\\|oracle-component\\|,
+    computed from the *oracle* values, never the candidate) — so the whole-TU walk's
+    digits agree with the Validator's.  Without it, roundoff bit-disagreement at an
+    analytic zero (e.g. B14/B16's ~1e-30-of-scale components) reads as 0.0 and drops
+    a genuinely dd-accurate integral to ``double`` (the metric artifact diagnosed in
+    ``runs/qcdloop/PHASE_2_B15_TWO_LIMB_TRACE_2026-07-30.md``).
+    """
     if integral not in cand or integral not in ref:
         return None
     c_hi, c_lo = cand[integral]
@@ -127,9 +140,17 @@ def _min_digits(cand: dict, ref: dict, integral: str, total: int) -> float | Non
     worst = None
     for s in range(n):
         base = s * N_COMPONENTS
+        # Per-sample characteristic magnitude: the largest |DD reference coeff|
+        # (oracle values only — the oracle is the reference).  Mirrors _score.
+        ref_scale = 0.0
+        for c in range(N_COMPONENTS):
+            m = abs(r_hi[base + c] + r_lo[base + c])
+            if m > ref_scale:
+                ref_scale = m
         for c in range(N_COMPONENTS):
             d = precise_digits_fast(c_hi[base + c], c_lo[base + c],
-                                    r_hi[base + c], r_lo[base + c])
+                                    r_hi[base + c], r_lo[base + c],
+                                    ref_scale=ref_scale)
             if worst is None or d < worst:
                 worst = d
     return worst
