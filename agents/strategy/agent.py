@@ -23,10 +23,12 @@ from __future__ import annotations
 
 import datetime
 import hashlib
+import json
 import time
 from pathlib import Path
 
 from agents.config import StrategyConfig
+from agents.patcher.flip_gate import GateInputs, LiftDirection, evaluate
 from agents.state import PipelineState
 from agents.strategy.characterization import load_chains, load_regions
 from agents.strategy.dispatch import dispatch
@@ -38,6 +40,10 @@ from agents.strategy.models import (
 from agents.strategy.ranking import build_queues, error_threshold, load_flop_weights
 from agents.strategy.report import write_reports
 from agents.strategy.source_probe import region_has_bare_double
+from agents.strategy.tu_walk import (
+    TU_ACCEPTED, TU_BUILD_FAILED, TU_NO_FLIP_NEEDED, TU_REJECTED_BELOW_TOL,
+    float_is_candidate, status_for,
+)
 from agents.strategy.walk import RetryWalk
 
 _REPO = Path(__file__).resolve().parents[2]
@@ -62,13 +68,22 @@ class StrategyRun:
         self.cfg = cfg
         self.tolerance = float(cfg.tolerance)
         self.snapshot = dict(cfg.snapshot)
+        self.strategy_mode = getattr(cfg, "strategy_mode", "region")
 
         self.report_path = state.get("characterization_report_path")
         self.repo_path = state.get("strategy_repo_path")
         self.starting_sha = state.get("strategy_starting_sha")
         self.patcher_fn = state.get("patcher_fn")
         self.validator_fn = state.get("validator_fn")
-        if self.patcher_fn is None or self.validator_fn is None:
+        # tu_only mode drives an injected whole-TU measure provider instead of the
+        # Patcher LLM / region walk (Phase-2.1); region mode keeps the LLM walk.
+        self.tu_measure_fn = state.get("tu_measure_fn")
+        self.tu_promote_fn = state.get("tu_promote_fn")
+        if self.strategy_mode == "tu_only":
+            if self.tu_measure_fn is None:
+                raise ValueError(
+                    "Strategy tu_only mode requires tu_measure_fn on the state")
+        elif self.patcher_fn is None or self.validator_fn is None:
             raise ValueError("Strategy requires patcher_fn and validator_fn on the state")
         if not self.report_path:
             raise ValueError("Strategy requires characterization_report_path on the state")
@@ -138,6 +153,13 @@ class StrategyRun:
 
     # ------------------------------------------------------------------
     def execute(self) -> dict:
+        # Phase-2.1: whole-TU-only walk.  No region/chain walk, no Patcher LLM —
+        # the region machinery below is guarded off and revived for Phase-2.2.
+        if self.strategy_mode == "tu_only":
+            return self._execute_tu_only()
+        return self._execute_region()
+
+    def _execute_region(self) -> dict:
         regions, meta = load_regions(self.report_path)
         chains, chain_meta = load_chains(self.report_path)
         meta.update(chain_meta)
@@ -187,6 +209,220 @@ class StrategyRun:
 
         status = self.stop_status or "success"
         return self._finalize(status, meta, len(correctness_q))
+
+    # ==================================================================
+    # Whole-TU-only walk (strategy_mode="tu_only", Phase-2.1)
+    # ==================================================================
+    def _execute_tu_only(self) -> dict:
+        """Mechanical whole-TU walk — no Patcher LLM, no region/chain walk.
+
+        Enumerates the report's integrals, drives ``tu_measure_fn`` per precision
+        (dd correctness, then float→ff speedup), applies the tolerance gate, and
+        records a per-integral routing decision.  See :mod:`agents.strategy.tu_walk`.
+        """
+        report = json.loads(Path(self.report_path).read_text())
+        integrals = sorted(report.get("integrals", {}))
+        signals = self._tu_report_signals(report)
+        meta = {
+            "schema_version": report.get("schema_version"),
+            "kind": report.get("kind"),
+            "strategy_mode": "tu_only",
+            "n_integrals": len(integrals),
+        }
+
+        if self.repo and self.starting_sha:
+            self.repo.create_branch(self.branch, self.starting_sha)
+
+        # tu_route[integral] = final precision ("double"|"dd"|"float"|"ff").
+        self.tu_route: dict[str, str] = {i: "double" for i in integrals}
+        # tu_rows[integral] = per-candidate telemetry for the report.
+        self.tu_rows: dict[str, dict] = {}
+
+        # -- baseline pass: measure raw-double p100 digits per integral. --
+        baselines: dict[str, float | None] = {}
+        for integral in integrals:
+            res = self.tu_measure_fn(integral, "baseline")
+            baselines[integral] = res.get("baseline_digits")
+            self.tu_rows[integral] = {
+                "integral": integral,
+                "baseline_digits": baselines[integral],
+                "candidates": [],
+                "route": "double",
+            }
+
+        # == Phase 1 — correctness (UPSHIFT to dd) =========================
+        self.phase = INTENT_CORRECTNESS
+        for integral in integrals:
+            base = baselines[integral]
+            # Signal-driven prune: an integral already at/above the bar at double
+            # needs no correctness flip (the gate returns no_flip_needed anyway;
+            # skipping the build here saves the measure).
+            if base is not None and base >= (self.tolerance):
+                self._tu_record(integral, "dd", built=False, baseline=base,
+                                candidate=None, direction=LiftDirection.UPSHIFT,
+                                skipped_no_flip=True)
+                continue
+            res = self.tu_measure_fn(integral, "dd")
+            self._tu_record(integral, "dd", built=bool(res.get("built")),
+                            baseline=res.get("baseline_digits", base),
+                            candidate=res.get("candidate_digits"),
+                            direction=LiftDirection.UPSHIFT,
+                            log_tail=res.get("log_tail", ""))
+
+        # == Phase 2 — speedup (DOWNSHIFT float→ff) ========================
+        # Every integral is a downshift candidate (regardless of the correctness
+        # outcome); the first target that clears the bar wins.
+        self.phase = INTENT_SPEEDUP
+        for integral in integrals:
+            base = baselines[integral]
+            for target in ("float", "ff"):
+                if target == "float" and not float_is_candidate(
+                        signals[integral].get("predicted_rel_err_if_float"),
+                        self.tolerance, report_prunes=self.report_prunes):
+                    self.n_flagged_pred_float += 1
+                    continue
+                res = self.tu_measure_fn(integral, target)
+                accepted = self._tu_record(
+                    integral, target, built=bool(res.get("built")),
+                    baseline=res.get("baseline_digits", base),
+                    candidate=res.get("candidate_digits"),
+                    direction=LiftDirection.DOWNSHIFT,
+                    log_tail=res.get("log_tail", ""))
+                if accepted:
+                    break     # first clearing precision wins the downshift walk
+
+        # -- promote accepted flips into the working tree (if a promoter is wired) --
+        if self.tu_promote_fn is not None:
+            for integral, precision in self.tu_route.items():
+                if precision != "double":
+                    self.tu_promote_fn(integral, precision)
+
+        return self._finalize_tu(meta)
+
+    def _tu_report_signals(self, report: dict) -> dict:
+        """Per-integral worst-case report signals used to prune candidates.
+
+        ``predicted_rel_err_if_float`` drives the float-rung admission (the same
+        signal the region walk's ``_float_rung_ok`` consults).  Taken worst-case
+        (max) across the integral's regions so a single float-unsafe region blocks
+        the float attempt — matching the region walk's merge semantics.
+        """
+        out: dict[str, dict] = {}
+        for integral, idata in report.get("integrals", {}).items():
+            pred_float = None
+            for region in (idata.get("regions", {}) or {}).values():
+                if region.get("non_localizable"):
+                    continue
+                v = region.get("predicted_rel_err_if_float")
+                if v is None:
+                    continue
+                v = float(v)
+                pred_float = v if pred_float is None else max(pred_float, v)
+            out[integral] = {"predicted_rel_err_if_float": pred_float}
+        # integrals with no localizable regions still need an entry (fail-open)
+        for integral in report.get("integrals", {}):
+            out.setdefault(integral, {"predicted_rel_err_if_float": None})
+        return out
+
+    def _tu_record(self, integral: str, target: str, *, built: bool,
+                   baseline: float | None, candidate: float | None,
+                   direction: LiftDirection, log_tail: str = "",
+                   skipped_no_flip: bool = False) -> bool:
+        """Gate one flip candidate, log it, and update routing.  Returns accept."""
+        gd = evaluate(
+            GateInputs(integral, built=built, baseline_digits=baseline,
+                       candidate_digits=candidate, tolerance=self.tolerance),
+            direction=direction)
+        status = status_for(gd, built)
+
+        iter_id = self.logger.next_iter_id()
+        phase = (INTENT_CORRECTNESS if direction is LiftDirection.UPSHIFT
+                 else INTENT_SPEEDUP)
+        self.logger.write(
+            iter_id=iter_id,
+            target={"integral": integral, "precision": target},
+            kind=f"tu-flip-to-{target}", intent=direction.value,
+            current_precision="double",
+            patcher_status="ok" if built else "build_failed",
+            validator_verdict=("accept" if gd.accept else "reject"),
+            accepted=gd.accept, log_tag=status, phase=phase,
+            rationale=gd.reason,
+            extra={"baseline_digits": baseline, "candidate_digits": candidate,
+                   "lift": gd.lift, "no_flip_needed": gd.no_flip_needed,
+                   "tu_status": status,
+                   **({"log_tail": log_tail[-800:]} if log_tail else {})})
+
+        self.phase_stats[phase]["iterations"] += 1
+        if gd.accept:
+            self.phase_stats[phase]["accepts"] += 1
+
+        self.tu_rows[integral]["candidates"].append({
+            "target": target, "built": built, "baseline_digits": baseline,
+            "candidate_digits": candidate, "lift": gd.lift,
+            "accept": gd.accept, "no_flip_needed": gd.no_flip_needed,
+            "status": status, "reason": gd.reason})
+
+        if gd.accept:
+            self.tu_route[integral] = target
+            self.tu_rows[integral]["route"] = target
+        return gd.accept
+
+    def _finalize_tu(self, meta: dict) -> dict:
+        """Write the tu_only report artifacts and return the state delta."""
+        self.logger.close()
+
+        diff_path = self.run_dir / "final.diff"
+        if self.repo and self.starting_sha:
+            try:
+                self.repo.write_cumulative_diff(self.starting_sha, diff_path)
+            except Exception as exc:  # noqa: BLE001 - forensic best-effort
+                diff_path.write_text(f"# diff unavailable: {exc}\n")
+        elif not diff_path.exists():
+            diff_path.write_text("")
+
+        dist = {p: 0 for p in LADDER}
+        for precision in self.tu_route.values():
+            dist[precision] = dist.get(precision, 0) + 1
+
+        rows = [self.tu_rows[i] for i in sorted(self.tu_rows)]
+        report = {
+            "status": "success",
+            "run_id": self.run_id,
+            "strategy_mode": "tu_only",
+            "final_branch": self.branch,
+            "final_working_tree": self.repo.head() if self.repo else None,
+            "starting_sha": self.starting_sha,
+            "tolerance": self.tolerance,
+            "duration_sec": round(time.monotonic() - self.t0, 2),
+            "iterations": self.logger._next_id,
+            "phase_summary": {
+                "correctness": dict(self.phase_stats[INTENT_CORRECTNESS]),
+                "speedup": dict(self.phase_stats[INTENT_SPEEDUP]),
+            },
+            "tu_routing": {i: self.tu_route[i] for i in sorted(self.tu_route)},
+            "tu_rows": rows,
+            "precision_distribution": dist,
+            "speedup_summary": {
+                "report_prunes_enabled": self.report_prunes,
+                "regions_flagged_pred_float": self.n_flagged_pred_float,
+            },
+            "region_meta": meta,
+            "iteration_log_path": str(self.logger.path),
+        }
+        json_path, md_path = write_reports(self.run_dir, report)
+        return {
+            "strategy_result": {
+                "status": "success",
+                "run_id": self.run_id,
+                "strategy_mode": "tu_only",
+                "final_branch": self.branch,
+                "report_json_path": str(json_path),
+                "report_md_path": str(md_path),
+                "cumulative_diff_path": str(diff_path),
+                "tu_routing": {i: self.tu_route[i] for i in sorted(self.tu_route)},
+                "precision_distribution": dist,
+            }
+        }
 
     def _phase_over(self) -> bool:
         """True when the current phase must stop — a hard run stop OR the soft
