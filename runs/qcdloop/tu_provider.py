@@ -61,6 +61,24 @@ def _bash(cmd: str) -> subprocess.CompletedProcess:
                           capture_output=True, text=True)
 
 
+def _backend_flags(kokkos_root: Path) -> str:
+    """Extra g++ flags the Kokkos install's enabled backend needs on the raw
+    (non-cmake) flip compile.
+
+    The cmake-driven vanilla/dd builds get these from Kokkos's exported cmake
+    package; the per-group flip TU is compiled with a bare ``g++`` (mirroring the
+    L-measure scripts), so we read the backend from ``KokkosCore_config.h`` and add
+    what it requires.  An OpenMP install fails to compile without ``-fopenmp``
+    (Kokkos_OpenMP_Instance.hpp #errors otherwise).  Detected, never hard-coded to
+    a backend — a Serial/CUDA install adds nothing here."""
+    cfg = Path(kokkos_root) / "include" / "KokkosCore_config.h"
+    text = cfg.read_text(errors="ignore") if cfg.is_file() else ""
+    flags: list[str] = []
+    if "KOKKOS_ENABLE_OPENMP" in text:
+        flags.append("-fopenmp")
+    return " ".join(flags)
+
+
 def _git_archive(repo: Path, ref: str, subpath: str, dest: Path) -> None:
     """Extract ``repo@ref:subpath`` into ``dest`` (repo stays on its branch)."""
     proc = subprocess.run(["git", "-C", str(repo), "archive", ref, subpath],
@@ -136,6 +154,7 @@ class TUMeasureProvider:
                          else _REPO / "runs" / "qcdloop_headers_full")
 
         self.clone: Path | None = None
+        self._backend_flags = _backend_flags(self.kokkos)
         self._van: dict | None = None
         self._ref: dict | None = None
         self._group_of: dict[str, str] = {}
@@ -195,7 +214,8 @@ class TUMeasureProvider:
                f"-I{self.kokkos}/include")
         lib = (f"-L{self.kokkos}/lib -L{self.kokkos}/lib64 "
                f"-lkokkoscore -lkokkoscontainers -ldl")
-        r = _bash(f"g++ -std=c++20 -O2 -w {inc} {tu.driver_path} -o {binary} {lib}")
+        r = _bash(f"g++ -std=c++20 -O2 -w {self._backend_flags} {inc} "
+                  f"{tu.driver_path} -o {binary} {lib}")
         if r.returncode != 0 or not binary.is_file():
             log = (r.stdout + r.stderr)[-3000:]
             (build_dir.parent / f"flip_build_{stem}_{precision}.log").write_text(log)
