@@ -122,7 +122,7 @@ def test_e2e_three_region_run(repo, report_path, tmp_path):
         "strategy_repo_path": str(root),
         "strategy_starting_sha": start,
         "strategy_config": StrategyConfig(
-            tolerance=6.0, runs_root=tmp_path / "runs",
+            tolerance=6.0, runs_root=tmp_path / "runs", strategy_mode="region",
             budget=StrategyBudget(max_iters=500, max_wall_clock_sec=600, max_llm_tokens=10**9),
             diminishing_returns_k=20),
         "patcher_fn": make_patcher(root),
@@ -256,7 +256,7 @@ def test_e2e_chain_overlap_required_by_and_floor(chain_repo, chain_report_path, 
         "strategy_repo_path": str(root),
         "strategy_starting_sha": start,
         "strategy_config": StrategyConfig(
-            tolerance=6.0, runs_root=tmp_path / "runs",
+            tolerance=6.0, runs_root=tmp_path / "runs", strategy_mode="region",
             budget=StrategyBudget(max_iters=500, max_wall_clock_sec=600, max_llm_tokens=10**9),
             diminishing_returns_k=50),
         "patcher_fn": make_patcher(root),
@@ -293,7 +293,8 @@ def test_required_by_overlap_takes_max_precision(tmp_path):
     from agents.strategy.agent import StrategyRun
     run = StrategyRun({
         "characterization_report_path": str(tmp_path / "unused.json"),
-        "strategy_config": StrategyConfig(runs_root=tmp_path / "runs"),
+        "strategy_config": StrategyConfig(runs_root=tmp_path / "runs",
+                                          strategy_mode="region"),
         "patcher_fn": lambda i, c: {}, "validator_fn": lambda s, c: {},
     })
     key = ("B2m.h", 355, 355)

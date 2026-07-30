@@ -111,7 +111,7 @@ def make_validator():
 
 def run_agent(tmp_path, report, *, tolerance=10.0, **budget_kw):
     cfg = StrategyConfig(
-        tolerance=tolerance, runs_root=tmp_path / "runs",
+        tolerance=tolerance, runs_root=tmp_path / "runs", strategy_mode="region",
         budget=StrategyBudget(
             max_iters=budget_kw.pop("max_iters", 10**7),
             max_iters_correctness=budget_kw.pop("max_iters_correctness", None),

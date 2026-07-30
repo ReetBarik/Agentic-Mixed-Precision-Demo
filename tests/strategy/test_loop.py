@@ -33,7 +33,7 @@ def write_report(tmp_path, regions):
 
 def run_agent(tmp_path, report, patcher, validator, **cfg_kw):
     cfg = StrategyConfig(
-        tolerance=10.0, runs_root=tmp_path / "runs",
+        tolerance=10.0, runs_root=tmp_path / "runs", strategy_mode="region",
         budget=StrategyBudget(
             max_iters=cfg_kw.pop("max_iters", 10**7),
             max_wall_clock_sec=cfg_kw.pop("max_wall", 600),

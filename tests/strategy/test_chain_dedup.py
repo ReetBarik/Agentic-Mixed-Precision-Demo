@@ -65,7 +65,7 @@ def accept_dd_validator():
 
 def run_agent(tmp_path, report):
     cfg = StrategyConfig(
-        tolerance=7.0, runs_root=tmp_path / "runs",
+        tolerance=7.0, runs_root=tmp_path / "runs", strategy_mode="region",
         budget=StrategyBudget(max_iters=10**7, max_wall_clock_sec=600,
                               max_llm_tokens=10**12),
         diminishing_returns_k=10**7)

@@ -65,6 +65,7 @@ def _run(tmp_path, report, *, tolerance=10.0, report_prunes=True,
         kw["ratio_multipliers_path"] = ratio_path
     cfg = StrategyConfig(
         tolerance=tolerance, runs_root=tmp_path / "runs", report_prunes=report_prunes,
+        strategy_mode="region",
         budget=StrategyBudget(max_iters=10**6, max_iters_correctness=10**5,
                               max_iters_speedup=10**5, max_wall_clock_sec=600,
                               max_llm_tokens=10**12),
