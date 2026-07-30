@@ -77,6 +77,13 @@ class StrategyConfig:
 
     tolerance: float = 10.0
     budget: StrategyBudget = field(default_factory=StrategyBudget)
+    # Walk mode.  "tu_only" (Phase-2.1 default) drives a whole-TU-only walk: per
+    # integral it mechanically emits a per-precision flip TU (dd for correctness,
+    # then float->ff for speedup), scores it via the injected TU-measure provider +
+    # the tolerance gate, and never invokes the Patcher LLM or the region/chain
+    # walk.  "region" is the historical per-region Patcher-LLM walk, retained for
+    # Phase-2.2 region-level demotion (guarded off in tu_only mode, never deleted).
+    strategy_mode: str = "tu_only"
     # Wave-3 report-field prunes (WI1/WI2/WI3), ON by default in production; the
     # STRATEGY_DISABLE_REPORT_PRUNES env var flips the whole set off (no per-prune
     # flags — they are designed to ride together).

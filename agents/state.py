@@ -43,6 +43,19 @@ class PipelineState(TypedDict):
     patcher_fn: Callable[[dict, dict], dict] | None
     # Validator(candidate_sha: str, ctx: dict) -> verdict dict.
     validator_fn: Callable[[str, dict], dict] | None
+    # Whole-TU measure provider (strategy_mode="tu_only"): builds + measures a
+    # per-integral precision-flip TU mechanically (no LLM).  Contract:
+    #   tu_measure_fn(integral: str, target: str) -> dict
+    #     target == "baseline"       -> {"built": bool, "baseline_digits": float|None}
+    #     target in {dd, float, ff}  -> {"built": bool, "baseline_digits": float|None,
+    #                                    "candidate_digits": float|None, "log_tail": str}
+    # It is the qcdloop-specific build/oracle/measure recipe (the L-measure), injected
+    # so agents/strategy stays generic (feedback_no_placeholder_patterns).
+    tu_measure_fn: Callable[[str, str], dict] | None
+    # Optional: promote an accepted flip's clone into the working tree.  Absent -> the
+    # walk records routing only (matches the L-measure reference, which does not mutate
+    # a working tree).  tu_promote_fn(integral: str, target: str) -> None.
+    tu_promote_fn: Callable[[str, str], None] | None
 
     # ---- Strategy output (thin pointer bundle; fat artifacts live on disk) ----
     strategy_result: dict | None
