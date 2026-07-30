@@ -75,7 +75,7 @@ def _build_headers_repo(dest: Path, headers_src: Path) -> str:
 def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("--report", default=str(HERE / "report_smoke.json"))
-    ap.add_argument("--sample-count", type=int, default=1000)
+    ap.add_argument("--sample-count", type=int, default=5000)
     ap.add_argument("--seed", type=int, default=12345)
     ap.add_argument("--tolerance", type=float, default=8.0)
     ap.add_argument("--headers-repo", default=str(Path.home() / "amp_strategy_headers_repo"))
@@ -101,6 +101,13 @@ def main(argv: list[str] | None = None) -> int:
                          "it when the cascade-chain phase's repeated per-representative "
                          "llm_gen_failed (which don't consume budget) would trip the "
                          "streak before the correctness budget cap binds.")
+    ap.add_argument("--strategy-mode", default="tu_only",
+                    choices=["tu_only", "region"],
+                    help="tu_only (default): whole-TU-only mechanical walk (no LLM); "
+                         "region: historical per-region Patcher-LLM walk.")
+    ap.add_argument("--tu-out-dir", default=None,
+                    help="tu_only: build/measure scratch dir (default: "
+                         "<report-parent>/tu_e2e_out).")
     args = ap.parse_args(argv)
 
     report = Path(args.report).resolve()
@@ -131,43 +138,66 @@ def main(argv: list[str] | None = None) -> int:
         tolerance=args.tolerance,
         budget=budget,
         snapshot=snapshot,
+        strategy_mode=args.strategy_mode,
         runs_root=HERE,                 # runs/qcdloop/strategy/<run_id>/
         **({"diminishing_returns_k": args.dr_k} if args.dr_k is not None else {}),
     )
 
-    build_config = {
-        "app_cmake_dir": str(HERE / "app"),
-        "kokkos_root": args.kokkos_root,
-    }
-    patcher_fn = make_patcher_fn(build_config=build_config, config=PipelineConfig())
+    # tu_only: mechanical whole-TU walk driven by the injected L-measure provider.
+    # No Patcher LLM / Validator callable are consulted (guarded off in the agent);
+    # they stay None so an accidental region-walk invocation fails loud.
+    if args.strategy_mode == "tu_only":
+        from runs.qcdloop.tu_provider import make_tu_measure_fn  # noqa: E402
+        tu_out = Path(args.tu_out_dir) if args.tu_out_dir else (
+            report.parent / "tu_e2e_out")
+        tu_measure_fn = make_tu_measure_fn(
+            out_dir=tu_out, kokkos_root=args.kokkos_root,
+            dd_repo=args.dd_repo, dd_ref=args.dd_ref,
+            sample_count=args.sample_count)
+        state = {
+            "characterization_report_path": str(report),
+            "strategy_repo_path": None,        # no working-tree mutation (route only)
+            "strategy_starting_sha": None,
+            "patcher_fn": None,
+            "validator_fn": None,
+            "tu_measure_fn": tu_measure_fn,
+            "strategy_config": strategy_config,
+        }
+    else:
+        build_config = {
+            "app_cmake_dir": str(HERE / "app"),
+            "kokkos_root": args.kokkos_root,
+        }
+        patcher_fn = make_patcher_fn(build_config=build_config, config=PipelineConfig())
 
-    # Tail battery: if the report carries per-integral tail_samples (from
-    # emit_tail_offsets.py), thread them into base_state so the Validator re-tests
-    # the adversarial offsets on every candidate.  Absent → fail-open (random-only).
-    tail_samples = _tail.load_tail_samples(report)
-    tail_offsets = _tail.all_offsets(tail_samples) if tail_samples else []
+        # Tail battery: if the report carries per-integral tail_samples (from
+        # emit_tail_offsets.py), thread them into base_state so the Validator re-tests
+        # the adversarial offsets on every candidate.  Absent → fail-open (random-only).
+        tail_samples = _tail.load_tail_samples(report)
+        tail_offsets = _tail.all_offsets(tail_samples) if tail_samples else []
 
-    base_state = {
-        "vanilla_headers": str(vanilla_headers),
-        "dd_source_repo": args.dd_repo,
-        "dd_ref": args.dd_ref,
-        "accepted_patches": [],
-        "kokkos_root": args.kokkos_root,
-        "tail_samples": tail_samples,
-    }
-    validator_fn = make_validator_fn(
-        base_state, starting_sha, str(repo), tolerance=args.tolerance)
+        base_state = {
+            "vanilla_headers": str(vanilla_headers),
+            "dd_source_repo": args.dd_repo,
+            "dd_ref": args.dd_ref,
+            "accepted_patches": [],
+            "kokkos_root": args.kokkos_root,
+            "tail_samples": tail_samples,
+        }
+        validator_fn = make_validator_fn(
+            base_state, starting_sha, str(repo), tolerance=args.tolerance)
 
-    state = {
-        "characterization_report_path": str(report),
-        "strategy_repo_path": str(repo),
-        "strategy_starting_sha": starting_sha,
-        "patcher_fn": patcher_fn,
-        "validator_fn": validator_fn,
-        "strategy_config": strategy_config,
-    }
+        state = {
+            "characterization_report_path": str(report),
+            "strategy_repo_path": str(repo),
+            "strategy_starting_sha": starting_sha,
+            "patcher_fn": patcher_fn,
+            "validator_fn": validator_fn,
+            "strategy_config": strategy_config,
+        }
 
     print("=== Strategy e2e config ===", flush=True)
+    print(f"  strategy_mode   : {args.strategy_mode}", flush=True)
     print(f"  report          : {report}", flush=True)
     print(f"  starting_sha    : {starting_sha}", flush=True)
     print(f"  headers_repo    : {repo}", flush=True)
@@ -176,11 +206,13 @@ def main(argv: list[str] | None = None) -> int:
     print(f"  kokkos_root     : {args.kokkos_root}", flush=True)
     print(f"  tolerance       : {args.tolerance}", flush=True)
     print(f"  snapshot        : {snapshot}", flush=True)
-    if tail_samples:
-        print(f"  tail battery    : {len(tail_samples)} integrals, "
-              f"{len(tail_offsets)} distinct offsets (always-on)", flush=True)
-    else:
-        print("  tail battery    : none in report (fail-open, random-only)", flush=True)
+    if args.strategy_mode != "tu_only":
+        if tail_samples:
+            print(f"  tail battery    : {len(tail_samples)} integrals, "
+                  f"{len(tail_offsets)} distinct offsets (always-on)", flush=True)
+        else:
+            print("  tail battery    : none in report (fail-open, random-only)",
+                  flush=True)
     cap_c, cap_s = budget.phase_caps()
     print(f"  budget          : max_iters={budget.max_iters} "
           f"wall={args.max_wall_hours}h tokens={budget.max_llm_tokens}", flush=True)
