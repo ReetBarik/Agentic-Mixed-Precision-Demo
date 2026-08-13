@@ -1,0 +1,214 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1280 720" font-family="ui-sans-serif, system-ui, -apple-system, sans-serif">
+  <style>
+    .title { font-size: 26px; font-weight: 700; fill: #172033; }
+    .h { font-size: 16px; font-weight: 650; fill: #172033; }
+    .lbl { font-size: 14px; font-weight: 700; fill: #172033; }
+    .sub { font-size: 12px; fill: #5b6475; }
+    .sub-sm { font-size: 11px; fill: #5b6475; }
+    .edge-lbl { font-size: 11px; fill: #172033; font-weight: 600; font-family: ui-monospace, "SF Mono", Menlo, monospace; }
+    .box { stroke: #64748b; stroke-width: 1; fill: #f8fafc; }
+    .app-box { stroke: #1e40af; stroke-width: 1.6; fill: #dbeafe; }
+    .tracked-box { stroke: #6d28d9; stroke-width: 1.6; fill: #ede9fe; }
+    .llm-box { stroke: #be185d; stroke-width: 2; fill: #fce7f3; }
+    .char-box { stroke: #b45309; stroke-width: 1.6; fill: #fef3c7; }
+    .report-box { stroke: #6d28d9; stroke-width: 1.6; fill: #ede9fe; }
+    .strat-box { stroke: #b45309; stroke-width: 1.6; fill: #fef3c7; }
+    .patcher-box { stroke: #be185d; stroke-width: 2; fill: #fce7f3; }
+    .val-box { stroke: #0f766e; stroke-width: 1.6; fill: #99f6e4; }
+    .output-box { stroke: #166534; stroke-width: 2; fill: #bbf7d0; }
+    .container-box { stroke: #475569; stroke-width: 1; fill: #f1f5f9; }
+    .edge { stroke: #475569; stroke-width: 2; fill: none; marker-end: url(#arrow); }
+    .edge-back { stroke: #166534; stroke-width: 2; fill: none; marker-end: url(#arrow-green); stroke-dasharray: 4 3; }
+  </style>
+  <defs>
+    <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" fill="#475569"/>
+    </marker>
+    <marker id="arrow-green" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" fill="#166534"/>
+    </marker>
+  </defs>
+
+  <!-- Title -->
+  <text x="40" y="44" class="title">Pipeline — end-to-end data flow</text>
+  <text x="40" y="66" class="sub">Data flow between modules with named artifacts on each edge. Pink borders mark the two LLM touchpoints.</text>
+
+  <!-- =================== TOP: Characterization phase (dashed container) =================== -->
+  <rect x="20" y="90" width="1240" height="130" rx="10" fill="none" stroke="#94a3b8" stroke-width="1.2" stroke-dasharray="6 4"/>
+  <text x="40" y="110" class="h">Characterization  (one-shot, offline)</text>
+
+  <!-- App (raw) -->
+  <g transform="translate(40, 130)">
+    <rect x="0" y="0" width="140" height="70" rx="8" class="app-box"/>
+    <text x="70" y="30" text-anchor="middle" class="lbl">App source</text>
+    <text x="70" y="50" text-anchor="middle" class="sub-sm">plain double</text>
+    <text x="70" y="66" text-anchor="middle" class="sub-sm">R1…R6 scopes</text>
+  </g>
+
+  <!-- Tracked -->
+  <g transform="translate(220, 130)">
+    <rect x="0" y="0" width="140" height="70" rx="8" class="tracked-box"/>
+    <text x="70" y="30" text-anchor="middle" class="lbl">Tracked&lt;T&gt;</text>
+    <text x="70" y="50" text-anchor="middle" class="sub-sm">value, rel_err,</text>
+    <text x="70" y="66" text-anchor="middle" class="sub-sm">cond, provenance</text>
+  </g>
+
+  <!-- Tracked Integrator (LLM) -->
+  <g transform="translate(400, 130)">
+    <rect x="0" y="0" width="150" height="70" rx="8" class="llm-box"/>
+    <text x="75" y="30" text-anchor="middle" class="lbl">Tracked Integrator</text>
+    <text x="75" y="50" text-anchor="middle" class="sub-sm">LLM agent — rewrites</text>
+    <text x="75" y="66" text-anchor="middle" class="sub-sm">app for instrumentation</text>
+  </g>
+
+  <!-- Sample driver -->
+  <g transform="translate(660, 130)">
+    <rect x="0" y="0" width="130" height="70" rx="8" class="char-box"/>
+    <text x="65" y="30" text-anchor="middle" class="lbl">Sample driver</text>
+    <text x="65" y="50" text-anchor="middle" class="sub-sm">instrumented app</text>
+    <text x="65" y="66" text-anchor="middle" class="sub-sm">N seeded inputs</text>
+  </g>
+
+  <!-- Reduce (moved slightly left to lengthen its outgoing arrow) -->
+  <g transform="translate(870, 130)">
+    <rect x="0" y="0" width="100" height="70" rx="8" class="char-box"/>
+    <text x="50" y="30" text-anchor="middle" class="lbl">Reduce</text>
+    <text x="50" y="50" text-anchor="middle" class="sub-sm">journal → report</text>
+    <text x="50" y="66" text-anchor="middle" class="sub-sm">(offline)</text>
+  </g>
+
+  <!-- Report -->
+  <g transform="translate(1070, 130)">
+    <rect x="0" y="0" width="140" height="70" rx="8" class="report-box"/>
+    <text x="70" y="30" text-anchor="middle" class="lbl">report.json</text>
+    <text x="70" y="50" text-anchor="middle" class="sub-sm">per-region signals,</text>
+    <text x="70" y="66" text-anchor="middle" class="sub-sm">DAG, hotspots</text>
+  </g>
+
+  <!-- Arrows in top row with edge labels (wider gaps to fit labels) -->
+  <path d="M180 165 L 220 165" class="edge"/>
+  <path d="M360 165 L 400 165" class="edge"/>
+  <path d="M550 165 L 660 165" class="edge"/>
+  <text x="605" y="158" text-anchor="middle" class="edge-lbl">app_tracked.cpp</text>
+  <path d="M790 165 L 870 165" class="edge"/>
+  <text x="830" y="142" text-anchor="middle" class="edge-lbl">journal</text>
+  <text x="830" y="156" text-anchor="middle" class="edge-lbl">(transient)</text>
+  <path d="M970 165 L 1070 165" class="edge"/>
+
+  <!-- Vertical bridge from Report DOWN to Strategy phase (top-center of Strategy at x=1090) -->
+  <path d="M1090 200 L 1090 360" class="edge"/>
+
+  <!-- =================== MIDDLE: Optimization loop (dashed container) =================== -->
+  <rect x="20" y="260" width="1240" height="270" rx="10" fill="none" stroke="#94a3b8" stroke-width="1.2" stroke-dasharray="6 4"/>
+  <text x="40" y="286" class="h">Optimization loop</text>
+  <text x="40" y="306" class="h">(Phase 1: <tspan style="fill:#b45309">Correctness</tspan>,  Phase 2: <tspan style="fill:#166534">Speedup</tspan>)</text>
+
+  <!-- Strategy walk -->
+  <g transform="translate(980, 360)">
+    <rect x="0" y="0" width="220" height="100" rx="8" class="strat-box"/>
+    <text x="110" y="26" text-anchor="middle" class="lbl">Strategy walk</text>
+    <text x="110" y="46" text-anchor="middle" class="sub-sm">correctness (safety-ordered)</text>
+    <text x="110" y="62" text-anchor="middle" class="sub-sm">+ speedup (flop-weighted)</text>
+    <text x="110" y="82" text-anchor="middle" class="sub-sm">prunes: float_range_ok,</text>
+    <text x="110" y="98" text-anchor="middle" class="sub-sm">chain-dedup</text>
+  </g>
+
+  <!-- Patcher (LLM + retry loop) -->
+  <g transform="translate(560, 360)">
+    <rect x="0" y="0" width="220" height="100" rx="8" class="patcher-box"/>
+    <text x="110" y="26" text-anchor="middle" class="lbl">Patcher</text>
+    <text x="110" y="46" text-anchor="middle" class="sub-sm">LLM agent  ·  bounded retry</text>
+    <text x="110" y="62" text-anchor="middle" class="sub-sm">(k ≤ dr_k, default 60)</text>
+    <text x="110" y="82" text-anchor="middle" class="sub-sm">generates regional shim,</text>
+    <text x="110" y="98" text-anchor="middle" class="sub-sm">builds candidate binary</text>
+  </g>
+
+  <!-- Precision containers (dependency, small, above Patcher, with vertical gap) -->
+  <g transform="translate(540, 280)">
+    <rect x="0" y="0" width="80" height="50" rx="6" class="container-box"/>
+    <text x="40" y="20" text-anchor="middle" class="sub-sm" font-weight="700">dd_math</text>
+    <text x="40" y="36" text-anchor="middle" class="sub-sm">.hpp</text>
+  </g>
+  <g transform="translate(630, 280)">
+    <rect x="0" y="0" width="80" height="50" rx="6" class="container-box"/>
+    <text x="40" y="20" text-anchor="middle" class="sub-sm" font-weight="700">qf_math</text>
+    <text x="40" y="36" text-anchor="middle" class="sub-sm">.hpp</text>
+  </g>
+  <g transform="translate(720, 280)">
+    <rect x="0" y="0" width="80" height="50" rx="6" class="container-box"/>
+    <text x="40" y="20" text-anchor="middle" class="sub-sm" font-weight="700">ff_math</text>
+    <text x="40" y="36" text-anchor="middle" class="sub-sm">.hpp</text>
+  </g>
+  <path d="M580 330 L 612 358" stroke="#475569" stroke-width="1.2" stroke-dasharray="3 3" fill="none" marker-end="url(#arrow)"/>
+  <path d="M670 330 L 670 358" stroke="#475569" stroke-width="1.2" stroke-dasharray="3 3" fill="none" marker-end="url(#arrow)"/>
+  <path d="M760 330 L 728 358" stroke="#475569" stroke-width="1.2" stroke-dasharray="3 3" fill="none" marker-end="url(#arrow)"/>
+
+  <!-- Validator -->
+  <g transform="translate(140, 360)">
+    <rect x="0" y="0" width="220" height="100" rx="8" class="val-box"/>
+    <text x="110" y="24" text-anchor="middle" class="lbl">Validator</text>
+    <text x="110" y="44" text-anchor="middle" class="sub-sm">candidate vs dd oracle over</text>
+    <text x="110" y="60" text-anchor="middle" class="sub-sm">all N characterization samples</text>
+    <text x="110" y="78" text-anchor="middle" class="sub-sm">(OpenMP-parallel, seed 12345)</text>
+    <text x="110" y="94" text-anchor="middle" class="sub-sm">digit floor + regression guard</text>
+  </g>
+
+  <!-- Strategy → Patcher (candidate) -->
+  <path d="M980 410 L 780 410" class="edge"/>
+  <text x="880" y="402" text-anchor="middle" class="edge-lbl">candidate = (region, target)</text>
+
+  <!-- Patcher → Validator (built binary) -->
+  <path d="M560 410 L 360 410" class="edge"/>
+  <text x="460" y="402" text-anchor="middle" class="edge-lbl">built binary + shim</text>
+
+  <!-- Validator → Strategy (verdict) - bottom channel, 2 segments -->
+  <path d="M250 460 L 250 510 L 1090 510 L 1090 460" class="edge-back"/>
+  <text x="670" y="502" text-anchor="middle" class="edge-lbl" style="fill:#166534">verdict (accept / reject / patcher-failure)</text>
+
+  <!-- =================== BOTTOM: Terminal state and output (dashed container) =================== -->
+  <rect x="20" y="545" width="1240" height="140" rx="10" fill="none" stroke="#94a3b8" stroke-width="1.2" stroke-dasharray="6 4"/>
+  <text x="40" y="565" class="h">Output</text>
+
+  <!-- Terminal state indicator (kept at 430 wide; ends at x=1300 within viewBox 1280 margin) -->
+  <g transform="translate(870, 585)">
+    <rect x="0" y="0" width="400" height="90" rx="8" class="box"/>
+    <text x="200" y="24" text-anchor="middle" class="lbl">Loop drains when both phase budgets exhausted</text>
+    <text x="200" y="46" text-anchor="middle" class="sub-sm">correctness_max_iters + speedup_max_iters</text>
+    <text x="200" y="66" text-anchor="middle" class="sub-sm">→ terminal status: success</text>
+    <text x="200" y="82" text-anchor="middle" class="sub-sm">strategy commits final precision distribution</text>
+  </g>
+
+  <!-- Arrow from Strategy bottom edge DOWN (right-shifted to x=1150 so it doesn't overlap outgoing candidate arrow at x=1090) -->
+  <path d="M1150 460 L 1150 585" class="edge"/>
+
+  <!-- Arrow from terminal state LEFT to Optimized app -->
+  <path d="M870 630 L 800 630" class="edge"/>
+
+  <!-- Optimized app output (moved left of terminal) -->
+  <g transform="translate(540, 585)">
+    <rect x="0" y="0" width="260" height="90" rx="8" class="output-box"/>
+    <text x="130" y="26" text-anchor="middle" class="lbl">Optimized app</text>
+    <text x="130" y="48" text-anchor="middle" class="sub-sm">source with regional shims installed</text>
+    <text x="130" y="66" text-anchor="middle" class="sub-sm">per-region precision assigned</text>
+    <text x="130" y="82" text-anchor="middle" class="sub-sm">(shipping artifact)</text>
+  </g>
+
+  <!-- Telemetry (secondary output; further left) -->
+  <g transform="translate(260, 585)">
+    <rect x="0" y="0" width="260" height="90" rx="8" class="box"/>
+    <text x="130" y="26" text-anchor="middle" class="lbl">Telemetry log</text>
+    <text x="130" y="48" text-anchor="middle" class="sub-sm">accept/reject per candidate</text>
+    <text x="130" y="66" text-anchor="middle" class="sub-sm">prune firings, verdict reasons</text>
+    <text x="130" y="82" text-anchor="middle" class="sub-sm">(diagnostic artifact)</text>
+  </g>
+
+  <!-- Arrow from Optimized app LEFT to Telemetry -->
+  <path d="M540 630 L 520 630" class="edge"/>
+
+  <!-- LLM legend -->
+  <g transform="translate(40, 690)">
+    <rect x="0" y="0" width="18" height="14" class="llm-box"/>
+    <text x="26" y="12" class="sub-sm">= LLM agent  (Tracked Integrator: one-shot per app; Patcher: per candidate)</text>
+  </g>
+</svg>

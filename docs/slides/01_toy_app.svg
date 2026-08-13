@@ -1,0 +1,118 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1280 720" font-family="ui-sans-serif, system-ui, -apple-system, sans-serif">
+  <style>
+    .title { font-size: 26px; font-weight: 700; fill: #172033; }
+    .h { font-size: 16px; font-weight: 650; fill: #172033; }
+    .lbl { font-size: 15px; font-weight: 700; fill: #172033; }
+    .sub { font-size: 11px; fill: #5b6475; }
+    .code { font-family: ui-monospace, "SF Mono", Menlo, monospace; font-size: 13px; fill: #172033; }
+    .code-cmt { font-family: ui-monospace, "SF Mono", Menlo, monospace; font-size: 12px; fill: #5b6475; }
+    .code-warn { font-family: ui-monospace, "SF Mono", Menlo, monospace; font-size: 12px; fill: #b45309; font-weight: 600; }
+    .code-sing { font-family: ui-monospace, "SF Mono", Menlo, monospace; font-size: 12px; fill: #475569; font-weight: 600; }
+    .rnode-safe { stroke: #166534; stroke-width: 1.6; fill: #bbf7d0; }
+    .rnode-warn { stroke: #b45309; stroke-width: 1.8; fill: #fde68a; }
+    .rnode-sing { stroke: #475569; stroke-width: 1.6; fill: #cbd5e1; }
+    .edge { stroke: #475569; stroke-width: 2; fill: none; marker-end: url(#arrow); }
+    .box { stroke: #64748b; stroke-width: 1; fill: #f8fafc; }
+  </style>
+  <defs>
+    <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" fill="#475569"/>
+    </marker>
+  </defs>
+
+  <!-- Title -->
+  <text x="40" y="44" class="title">Toy app: 6-region kernel</text>
+
+  <!-- ============ LEFT: DAG ============ -->
+  <text x="40" y="96" class="h">Region DAG  (data-flow dependencies)</text>
+
+  <g transform="translate(40, 130)">
+    <!-- Level 0: R1 R2 R3 -->
+    <rect x="10" y="0" width="160" height="72" rx="10" class="rnode-safe"/>
+    <text x="90" y="30" text-anchor="middle" class="lbl">R1</text>
+    <text x="90" y="52" text-anchor="middle" class="sub">adds, muls</text>
+
+    <rect x="200" y="0" width="160" height="72" rx="10" class="rnode-warn"/>
+    <text x="280" y="30" text-anchor="middle" class="lbl">R2</text>
+    <text x="280" y="52" text-anchor="middle" class="sub">near-cancel sub</text>
+
+    <rect x="390" y="0" width="160" height="72" rx="10" class="rnode-sing"/>
+    <text x="470" y="30" text-anchor="middle" class="lbl">R3</text>
+    <text x="470" y="52" text-anchor="middle" class="sub">log near 1</text>
+
+    <!-- Level 1: R4 R5 -->
+    <rect x="100" y="200" width="180" height="72" rx="10" class="rnode-safe"/>
+    <text x="190" y="230" text-anchor="middle" class="lbl">R4</text>
+    <text x="190" y="252" text-anchor="middle" class="sub">div(R1+R2, R1−R2)</text>
+
+    <rect x="320" y="200" width="180" height="72" rx="10" class="rnode-safe"/>
+    <text x="410" y="230" text-anchor="middle" class="lbl">R5</text>
+    <text x="410" y="252" text-anchor="middle" class="sub">sqrt(R3² + 1)</text>
+
+    <!-- Level 2: R6 -->
+    <rect x="200" y="400" width="220" height="86" rx="10" class="rnode-safe"/>
+    <text x="310" y="430" text-anchor="middle" class="lbl">R6</text>
+    <text x="310" y="454" text-anchor="middle" class="sub">mul(R4, R5)</text>
+    <text x="310" y="472" text-anchor="middle" class="sub">+ sub(R4, R5)</text>
+
+    <!-- Edges -->
+    <path d="M90 72 L170 200" class="edge"/>
+    <path d="M280 72 L210 200" class="edge"/>
+    <path d="M470 72 L440 200" class="edge"/>
+    <path d="M205 272 L280 400" class="edge"/>
+    <path d="M405 272 L340 400" class="edge"/>
+  </g>
+
+  <!-- Legend -->
+  <g transform="translate(40, 640)">
+    <text x="0" y="0" class="h">Numerical character</text>
+
+    <rect x="0" y="14" width="18" height="14" class="rnode-safe"/>
+    <text x="26" y="26" class="sub">well-conditioned</text>
+
+    <rect x="150" y="14" width="18" height="14" class="rnode-warn"/>
+    <text x="176" y="26" class="sub">cancellation risk</text>
+
+    <rect x="310" y="14" width="18" height="14" class="rnode-sing"/>
+    <text x="336" y="26" class="sub">near a singular point</text>
+  </g>
+
+  <!-- ============ RIGHT: Annotated source ============ -->
+  <text x="620" y="96" class="h">Kernel source  (tracked scopes annotate region boundaries)</text>
+
+  <rect x="620" y="115" width="640" height="560" rx="6" class="box"/>
+
+  <text x="640" y="142" class="code">double kernel(double x, y, z, w) {</text>
+  <text x="640" y="160" class="code">    tracked::scope s0("kernel");</text>
+
+  <text x="640" y="190" class="code">    tracked::scope("R1"); {</text>
+  <text x="640" y="208" class="code">        a = mul(x, y) + add(x, z);</text>
+  <text x="640" y="226" class="code-cmt">        // well-conditioned: sums of positive terms</text>
+  <text x="640" y="244" class="code">    }</text>
+
+  <text x="640" y="274" class="code">    tracked::scope("R2"); {</text>
+  <text x="640" y="292" class="code">        b = sub(mul(x, x), mul(y, y));</text>
+  <text x="640" y="310" class="code-warn">        // cancellation risk: x² − y² when x ≈ y</text>
+  <text x="640" y="328" class="code">    }</text>
+
+  <text x="640" y="358" class="code">    tracked::scope("R3"); {</text>
+  <text x="640" y="376" class="code">        c = log(add(1.0, w));</text>
+  <text x="640" y="394" class="code-sing">        // singularity: log(1+w) → 0 as w → 0</text>
+  <text x="640" y="412" class="code">    }</text>
+
+  <text x="640" y="442" class="code">    tracked::scope("R4"); {</text>
+  <text x="640" y="460" class="code">        ab = div(add(a, b), sub(a, b));</text>
+  <text x="640" y="478" class="code-cmt">        // consumes R1, R2</text>
+  <text x="640" y="496" class="code">    }</text>
+
+  <text x="640" y="526" class="code">    tracked::scope("R5"); {</text>
+  <text x="640" y="544" class="code">        cc = sqrt(add(mul(c, c), 1.0));</text>
+  <text x="640" y="562" class="code-cmt">        // consumes R3</text>
+  <text x="640" y="580" class="code">    }</text>
+
+  <text x="640" y="610" class="code">    tracked::scope("R6"); {</text>
+  <text x="640" y="628" class="code">        return add(mul(ab, cc), sub(ab, cc));</text>
+  <text x="640" y="646" class="code-cmt">        // consumes R4, R5</text>
+  <text x="640" y="664" class="code">    }</text>
+</svg>

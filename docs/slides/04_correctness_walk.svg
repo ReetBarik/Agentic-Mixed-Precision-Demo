@@ -1,0 +1,233 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1280 720" font-family="ui-sans-serif, system-ui, -apple-system, sans-serif">
+  <style>
+    .title { font-size: 26px; font-weight: 700; fill: #172033; }
+    .h { font-size: 16px; font-weight: 650; fill: #172033; }
+    .panel-title { font-size: 15px; font-weight: 700; fill: #172033; }
+    .lbl { font-size: 14px; font-weight: 600; fill: #172033; }
+    .sub { font-size: 12px; fill: #5b6475; }
+    .sub-sm { font-size: 11px; fill: #5b6475; }
+    .code { font-family: ui-monospace, "SF Mono", Menlo, monospace; font-size: 12px; fill: #172033; }
+    .box { stroke: #64748b; stroke-width: 1; fill: #f8fafc; }
+    .queue-box { stroke: #b45309; stroke-width: 1.6; fill: #fef3c7; }
+    .rnode-safe { stroke: #166534; stroke-width: 1.4; fill: #bbf7d0; }
+    .rnode-warn { stroke: #b45309; stroke-width: 1.6; fill: #fde68a; }
+    .rnode-sing { stroke: #475569; stroke-width: 1.4; fill: #cbd5e1; }
+    .rung-safest { fill: #86efac; stroke: #166534; stroke-width: 1.4; }
+    .rung-qf     { fill: #d9f99d; stroke: #4d7c0f; stroke-width: 1.4; }
+    .rung-base   { fill: #f1f5f9; stroke: #475569; stroke-width: 1.6; }
+    .rung-mid    { fill: #fed7aa; stroke: #b45309; stroke-width: 1.4; }
+    .rung-risky  { fill: #fecaca; stroke: #991b1b; stroke-width: 1.4; }
+    .rung-lbl { font-size: 15px; font-weight: 700; fill: #172033; }
+    .rung-sub { font-size: 11px; fill: #5b6475; }
+    .arrow-corr { stroke: #b45309; stroke-width: 2.2; fill: none; }
+    .arrow-speed { stroke: #166534; stroke-width: 1.8; fill: none; stroke-dasharray: 5 4; }
+    .verdict-accept { font-weight: 700; fill: #166534; }
+    .verdict-reject { font-weight: 700; fill: #991b1b; }
+    .verdict-upbump { font-weight: 700; fill: #166534; }
+    .verdict-prune  { font-weight: 700; fill: #64748b; }
+    .th { font-size: 12px; font-weight: 700; fill: #172033; }
+    .td { font-size: 12px; fill: #172033; }
+  </style>
+  <defs>
+    <marker id="arrow-corr-m" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" fill="#b45309"/>
+    </marker>
+    <marker id="arrow-speed-m" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" fill="#166534"/>
+    </marker>
+  </defs>
+
+  <!-- Title -->
+  <text x="40" y="44" class="title">Strategy walk — <tspan style="fill:#b45309">correctness</tspan> phase</text>
+  <text x="40" y="66" class="sub">Queue 1 of 2 — only the regions that miss tolerance at double. Each is up-bumped to the cheapest rung that clears.</text>
+
+  <!-- ============ LEFT: precision ladder ============ -->
+  <text x="40" y="108" class="h">Precision ladder</text>
+
+  <g transform="translate(60, 130)">
+    <!-- dd rung (top) -->
+    <rect x="0" y="0" width="200" height="60" rx="8" class="rung-safest"/>
+    <text x="100" y="26" text-anchor="middle" class="rung-lbl">dd</text>
+    <text x="100" y="46" text-anchor="middle" class="rung-sub">106-bit mantissa · oracle</text>
+
+    <!-- qf rung -->
+    <rect x="0" y="82" width="200" height="60" rx="8" class="rung-qf"/>
+    <text x="100" y="108" text-anchor="middle" class="rung-lbl">qf</text>
+    <text x="100" y="128" text-anchor="middle" class="rung-sub">96-bit mantissa · four-float</text>
+
+    <!-- double rung (baseline) -->
+    <rect x="0" y="164" width="200" height="60" rx="8" class="rung-base"/>
+    <text x="100" y="190" text-anchor="middle" class="rung-lbl">double</text>
+    <text x="100" y="210" text-anchor="middle" class="rung-sub">53-bit mantissa · baseline</text>
+
+    <!-- ff rung -->
+    <rect x="0" y="246" width="200" height="60" rx="8" class="rung-mid"/>
+    <text x="100" y="272" text-anchor="middle" class="rung-lbl">ff</text>
+    <text x="100" y="292" text-anchor="middle" class="rung-sub">48-bit mantissa · pair-of-floats</text>
+
+    <!-- float rung (bottom) -->
+    <rect x="0" y="328" width="200" height="60" rx="8" class="rung-risky"/>
+    <text x="100" y="354" text-anchor="middle" class="rung-lbl">float</text>
+    <text x="100" y="374" text-anchor="middle" class="rung-sub">24-bit mantissa · fastest</text>
+
+    <!-- Correctness arrows (solid): one rung up, inner lane -->
+    <!-- double → qf -->
+    <path d="M215 179 C 275 179, 275 112, 215 112" class="arrow-corr" marker-end="url(#arrow-corr-m)"/>
+    <!-- qf → dd -->
+    <path d="M215 97 C 275 97, 275 30, 215 30" class="arrow-corr" marker-end="url(#arrow-corr-m)"/>
+
+
+    <!-- Speedup arrows (dotted): one rung down; same arc radius, arced further out than correctness -->
+    <!-- dd → qf -->
+    <path d="M215 30 C 385 30, 385 112, 215 112" class="arrow-speed" marker-end="url(#arrow-speed-m)"/>
+    <!-- qf → double -->
+    <path d="M215 112 C 385 112, 385 194, 215 194" class="arrow-speed" marker-end="url(#arrow-speed-m)"/>
+    <!-- double → ff -->
+    <path d="M215 194 C 385 194, 385 276, 215 276" class="arrow-speed" marker-end="url(#arrow-speed-m)"/>
+    <!-- ff → float -->
+    <path d="M215 276 C 385 276, 385 358, 215 358" class="arrow-speed" marker-end="url(#arrow-speed-m)"/>
+
+
+    <!-- Legend under the ladder -->
+    <text x="0" y="414" class="sub">↑ safer / slower</text>
+    <text x="0" y="430" class="sub">↓ faster / riskier</text>
+
+    <!-- Escalation note: the walk climbs in cost order, cheapest-sufficient -->
+    <text x="0" y="454" class="sub-sm">correctness climbs in cost order — qf first, and dd only if</text>
+    <text x="0" y="470" class="sub-sm">the qf rung is unavailable (see trace 2a → 2b).</text>
+
+    <!-- Phase legend -->
+    <line x1="0" y1="496" x2="36" y2="496" class="arrow-corr" marker-end="url(#arrow-corr-m)"/>
+    <text x="46" y="500" class="lbl" style="fill:#b45309">correctness</text>
+    <line x1="0" y1="520" x2="36" y2="520" class="arrow-speed" marker-end="url(#arrow-speed-m)"/>
+    <text x="46" y="524" class="lbl" style="fill:#166534">speedup</text>
+  </g>
+
+  <!-- ============ MIDDLE: correctness queue ============ -->
+  <text x="500" y="108" class="h">Correctness queue  (dequeue-order)</text>
+
+  <g transform="translate(500, 130)">
+    <rect x="0" y="0" width="320" height="490" rx="8" class="queue-box"/>
+
+    <text x="160" y="26" text-anchor="middle" class="panel-title">2 of 6 regions miss tolerance</text>
+
+    <!-- queue entries (widened) -->
+    <g transform="translate(16, 48)">
+      <rect x="0" y="0" width="288" height="46" rx="6" class="rnode-safe"/>
+      <text x="10" y="18" class="lbl">1.  R4   double → qf  (up-bump)</text>
+      <text x="10" y="36" class="sub-sm">1 div, 1 add, 1 sub  ·  cascade from R1 + R2</text>
+    </g>
+    <g transform="translate(16, 106)">
+      <rect x="0" y="0" width="288" height="46" rx="6" class="rnode-warn"/>
+      <text x="10" y="18" class="lbl">2.  R2   double → dd  (up-bump)</text>
+      <text x="10" y="36" class="sub-sm">2 mul, 1 sub  ·  cancellation, max_cond 7e3</text>
+    </g>
+
+    <!-- The other four regions never enter this queue -->
+    <line x1="16" y1="176" x2="304" y2="176" stroke="#b45309" stroke-width="1" stroke-dasharray="4 3"/>
+    <text x="16" y="198" class="lbl">Deferred — speedup queue (slide 5)</text>
+    <text x="16" y="216" class="sub-sm">the two queues are disjoint: a region up-bumped here</text>
+    <text x="16" y="232" class="sub-sm">is never demoted later in the same run</text>
+
+    <g transform="translate(16, 244)">
+      <rect x="0" y="0" width="288" height="24" rx="4" class="rnode-safe"/>
+      <text x="10" y="16" class="sub-sm">R1 · 2 add, 2 mul · pred_err_ff 3e-15</text>
+    </g>
+    <g transform="translate(16, 272)">
+      <rect x="0" y="0" width="288" height="24" rx="4" class="rnode-safe"/>
+      <text x="10" y="16" class="sub-sm">R5 · 1 sqrt, 1 mul, 1 add · pred_err_ff 5e-15</text>
+    </g>
+    <g transform="translate(16, 300)">
+      <rect x="0" y="0" width="288" height="24" rx="4" class="rnode-safe"/>
+      <text x="10" y="16" class="sub-sm">R6 · 1 mul, 1 add, 1 sub · pred_err_ff 7e-15</text>
+    </g>
+    <g transform="translate(16, 328)">
+      <rect x="0" y="0" width="288" height="24" rx="4" class="rnode-sing"/>
+      <text x="10" y="16" class="sub-sm">R3 · 1 log, 1 add · pred_err_ff 4e-10 (log)</text>
+    </g>
+
+    <!-- Prune-check callout -->
+    <g transform="translate(16, 384)">
+      <text x="0" y="0" class="lbl">Prune check at dequeue</text>
+      <text x="0" y="18" class="sub-sm">float_range_ok ✗ on R2 drops the qf rung from its</text>
+      <text x="0" y="34" class="sub-sm">up-targets, so R2's ladder is double → dd (trace 2a).</text>
+      <text x="0" y="54" class="sub-sm">chain-dedup: no matches yet (first pass)</text>
+    </g>
+  </g>
+
+  <!-- ============ RIGHT: walk trace + result ============ -->
+  <text x="850" y="108" class="h">Walk trace</text>
+
+  <g transform="translate(850, 130)">
+    <rect x="0" y="0" width="410" height="340" rx="8" class="box"/>
+
+    <!-- header (widened columns) -->
+    <rect x="0" y="0" width="410" height="26" fill="#e2e8f0" stroke="#64748b" stroke-width="1"/>
+    <text x="10" y="18" class="th">step</text>
+    <text x="50" y="18" class="th">region</text>
+    <text x="115" y="18" class="th">attempt</text>
+    <text x="240" y="18" class="th">verdict</text>
+    <text x="320" y="18" class="th">new state</text>
+
+    <!-- rows -->
+    <g font-size="12" fill="#172033">
+      <!-- step 1: R4 clears at the cheapest rung above double -->
+      <rect x="0" y="26" width="410" height="46" fill="#bbf7d0" stroke="#86efac"/>
+      <text x="10" y="46">1</text>
+      <text x="50" y="46">R4</text>
+      <text x="115" y="46">double → qf</text>
+      <text x="240" y="46" class="verdict-upbump">accept ↑</text>
+      <text x="320" y="46">R4 = qf</text>
+      <text x="50" y="64" class="sub-sm" font-style="italic">up-bump: cascade from R1+R2 pushes rel-err past tol at double</text>
+
+      <!-- step 2a: R2's qf rung is pruned before any attempt is spent -->
+      <rect x="0" y="72" width="410" height="28" fill="#fde68a" stroke="#fcd34d"/>
+      <text x="10" y="90">2a</text>
+      <text x="50" y="90">R2</text>
+      <text x="115" y="90">double → qf</text>
+      <text x="240" y="90" class="verdict-prune">pruned</text>
+      <text x="320" y="90">R2 = double</text>
+
+      <!-- step 2b: next rung up in cost order — dd -->
+      <rect x="0" y="100" width="410" height="64" fill="#fde68a" stroke="#fcd34d"/>
+      <text x="10" y="120">2b</text>
+      <text x="50" y="120">R2</text>
+      <text x="115" y="120">double → dd</text>
+      <text x="240" y="120" class="verdict-upbump">accept ↑</text>
+      <text x="320" y="120">R2 = dd</text>
+      <text x="50" y="138" class="sub-sm" font-style="italic">float / ff / qf are all built from FP32 words, so all three</text>
+      <text x="50" y="154" class="sub-sm" font-style="italic">share float's range — R2 overflows it; dd is the next rung.</text>
+    </g>
+
+    <g transform="translate(10, 190)">
+      <text x="0" y="0" class="sub-sm">Each (region, target) pair is tried at most once per run — no</text>
+      <text x="0" y="16" class="sub-sm">re-attempts, no rollback.</text>
+      <text x="0" y="38" class="sub-sm">R4 stops at qf — dd is never attempted for it. That is the point</text>
+      <text x="0" y="54" class="sub-sm">of the rung: ~29 digits at four-FP32 cost instead of dd's ~31.</text>
+      <text x="0" y="76" class="sub-sm">A pruned rung costs no build and no validation — the guard reads</text>
+      <text x="0" y="92" class="sub-sm">the characterizer's float_range_ok, not a trial run.</text>
+    </g>
+  </g>
+
+  <!-- Precision distribution after correctness phase -->
+  <g transform="translate(850, 500)">
+    <text x="0" y="0" class="h">State after <tspan style="fill:#b45309">correctness</tspan> phase</text>
+    <rect x="0" y="14" width="410" height="124" rx="6" class="box"/>
+
+    <text x="16" y="38" class="lbl">dd: 1</text>
+    <text x="120" y="38" class="sub">R2  (cancellation hotspot, qf barred by range)</text>
+
+    <text x="16" y="60" class="lbl">qf: 1</text>
+    <text x="120" y="60" class="sub">R4  (up-bumped from double; dd not needed)</text>
+
+    <text x="16" y="82" class="lbl">double: 4</text>
+    <text x="120" y="82" class="sub">R1, R3, R5, R6  —  untouched, still at baseline</text>
+
+    <text x="16" y="104" class="lbl">ff: 0</text>
+    <text x="120" y="104" class="sub">correctness only ever moves up the ladder</text>
+
+    <text x="16" y="126" class="lbl">float: 0</text>
+    <text x="120" y="126" class="sub">the speedup phase is where these fill in</text>
+  </g>
+</svg>

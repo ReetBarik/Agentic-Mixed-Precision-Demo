@@ -1,0 +1,191 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1280 720" font-family="ui-sans-serif, system-ui, -apple-system, sans-serif">
+  <style>
+    .title { font-size: 26px; font-weight: 700; fill: #172033; }
+    .h { font-size: 16px; font-weight: 650; fill: #172033; }
+    .panel-title { font-size: 15px; font-weight: 700; fill: #172033; }
+    .lbl { font-size: 14px; font-weight: 600; fill: #172033; }
+    .sub { font-size: 12px; fill: #5b6475; }
+    .code { font-family: ui-monospace, "SF Mono", Menlo, monospace; font-size: 11px; fill: #172033; }
+    .code-warn { font-family: ui-monospace, "SF Mono", Menlo, monospace; font-size: 11px; fill: #b45309; font-weight: 600; }
+    .code-sing { font-family: ui-monospace, "SF Mono", Menlo, monospace; font-size: 11px; fill: #475569; font-weight: 600; }
+    .box { stroke: #64748b; stroke-width: 1; fill: #f8fafc; }
+    .app-box { stroke: #1e40af; stroke-width: 1.6; fill: #dbeafe; }
+    .tracked-box { stroke: #6d28d9; stroke-width: 1.6; fill: #ede9fe; }
+    .journal-box { stroke: #0f766e; stroke-width: 1.6; fill: #99f6e4; }
+    .report-box { stroke: #6d28d9; stroke-width: 1.6; fill: #ede9fe; }
+    .reduce-box { stroke: #b45309; stroke-width: 1.6; fill: #fef3c7; }
+    .llm-box { stroke: #be185d; stroke-width: 1.8; fill: #fce7f3; }
+    .edge { stroke: #475569; stroke-width: 2; fill: none; marker-end: url(#arrow); }
+    .edge-big { stroke: #475569; stroke-width: 3; fill: none; marker-end: url(#arrow); }
+    .th { font-size: 11px; font-weight: 700; fill: #172033; }
+    .td { font-size: 11px; fill: #172033; }
+    .row-safe { fill: #bbf7d0; }
+    .row-warn { fill: #fde68a; }
+    .row-sing { fill: #cbd5e1; }
+  </style>
+  <defs>
+    <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" fill="#475569"/>
+    </marker>
+  </defs>
+
+  <!-- Title -->
+  <text x="40" y="44" class="title">Characterizer:  sweep → journal → report</text>
+
+  <!-- ============ LEFT PANEL ============ -->
+  <rect x="30" y="80" width="510" height="620" rx="8" fill="none" stroke="#94a3b8" stroke-width="1" stroke-dasharray="4 3"/>
+  <text x="50" y="104" class="panel-title">(a)  Instrumented sweep → journal</text>
+
+  <!-- Row 1: App + Tracked as two modules -->
+  <rect x="70" y="130" width="180" height="70" rx="6" class="app-box"/>
+  <text x="160" y="156" text-anchor="middle" class="lbl">Toy app</text>
+  <text x="160" y="176" text-anchor="middle" class="sub">plain double</text>
+  <text x="160" y="192" text-anchor="middle" class="sub">R1…R6 scopes</text>
+
+  <rect x="320" y="130" width="180" height="70" rx="6" class="tracked-box"/>
+  <text x="410" y="156" text-anchor="middle" class="lbl">Tracked&lt;T&gt;</text>
+  <text x="410" y="176" text-anchor="middle" class="sub">wrapper +</text>
+  <text x="410" y="192" text-anchor="middle" class="sub">journal API</text>
+
+  <!-- Arrows from App and Tracked into Integrator -->
+  <path d="M160 200 L230 260" class="edge"/>
+  <path d="M410 200 L340 260" class="edge"/>
+
+  <!-- Row 2: Integrator LLM -->
+  <rect x="180" y="260" width="220" height="70" rx="6" class="llm-box"/>
+  <text x="290" y="286" text-anchor="middle" class="lbl">Tracked Integrator</text>
+  <text x="290" y="304" text-anchor="middle" class="sub">LLM agent — rewrites app,</text>
+  <text x="290" y="320" text-anchor="middle" class="sub">emits &lt;app&gt;_interop.hpp</text>
+
+  <!-- Arrow from Integrator to Sample driver -->
+  <path d="M290 330 L290 380" class="edge-big"/>
+
+  <!-- Row 3: Sample driver -->
+  <rect x="150" y="380" width="280" height="70" rx="6" class="reduce-box"/>
+  <text x="290" y="406" text-anchor="middle" class="lbl">Sample driver (instrumented app)</text>
+  <text x="290" y="426" text-anchor="middle" class="sub">N seeded inputs</text>
+  <text x="290" y="442" text-anchor="middle" class="sub">(mt19937, srand=12345)</text>
+
+  <!-- Arrow to journal -->
+  <path d="M290 450 L290 490" class="edge-big"/>
+
+  <!-- Journal -->
+  <rect x="60" y="490" width="460" height="200" rx="6" class="journal-box"/>
+  <text x="290" y="514" text-anchor="middle" class="panel-title">Journal (JSONL, transient)</text>
+  <text x="290" y="530" text-anchor="middle" class="sub">one entry per op per sample</text>
+
+  <text x="80" y="558" class="code">{op: "add", scope: "R1", sample: 0,</text>
+  <text x="80" y="574" class="code"> in: [x,z], out_val: 3.6, rel_err: 3e-16, cond: 1.28}</text>
+
+  <text x="80" y="600" class="code-warn">{op: "sub", scope: "R2", sample: 0,</text>
+  <text x="80" y="616" class="code-warn"> in: [x², y²], out_val: 2e-3, rel_err: 1e-12, cond: 7e3}</text>
+
+  <text x="80" y="642" class="code-sing">{op: "log", scope: "R3", sample: 0,</text>
+  <text x="80" y="658" class="code-sing"> in: [1+w], out_val: 1e-3, rel_err: 2e-13, cond: 1e3}</text>
+
+  <text x="80" y="680" class="code">…  (millions more)</text>
+
+  <!-- ============ REDUCE arrow ============ -->
+  <path d="M540 400 L660 400" class="edge-big"/>
+  <rect x="560" y="360" width="80" height="80" rx="6" class="reduce-box"/>
+  <text x="600" y="388" text-anchor="middle" class="lbl">reduce</text>
+  <text x="600" y="406" text-anchor="middle" class="sub">(offline)</text>
+
+  <!-- ============ RIGHT PANEL ============ -->
+  <rect x="660" y="80" width="600" height="620" rx="8" fill="none" stroke="#94a3b8" stroke-width="1" stroke-dasharray="4 3"/>
+  <text x="680" y="104" class="panel-title">(b)  Reduction → per-region report</text>
+
+  <!-- Report box -->
+  <rect x="680" y="130" width="560" height="490" rx="6" class="report-box"/>
+  <text x="960" y="154" text-anchor="middle" class="panel-title">report.json  — one entry per region</text>
+
+  <!-- Table -->
+  <g transform="translate(700, 175)">
+    <!-- Header row: widened columns to prevent collisions -->
+    <rect x="0" y="0" width="520" height="30" fill="#e2e8f0" stroke="#64748b" stroke-width="1"/>
+    <!-- Note: cons. = consumers (shortened for column fit) -->
+    <text x="10" y="20" class="th">region</text>
+    <text x="80" y="20" class="th">op_counts</text>
+    <text x="200" y="20" class="th">float_range_ok</text>
+    <text x="300" y="20" class="th">pred_err_ff</text>
+    <text x="380" y="20" class="th">pred_err_float</text>
+    <text x="475" y="20" class="th">cons.</text>
+
+    <!-- Row R1 -->
+    <rect x="0" y="30" width="520" height="52" class="row-safe" stroke="#64748b" stroke-width="0.8"/>
+    <text x="10" y="50" class="td" font-weight="700">R1</text>
+    <text x="10" y="66" class="td" font-size="10" fill="#5b6475">well-cond</text>
+    <text x="80" y="50" class="td">2 add, 2 mul</text>
+    <text x="220" y="50" class="td">✓</text>
+    <text x="300" y="50" class="td">3e-15</text>
+    <text x="380" y="50" class="td">8e-7</text>
+    <text x="475" y="50" class="td">[R4]</text>
+
+    <!-- Row R2 -->
+    <rect x="0" y="82" width="520" height="52" class="row-warn" stroke="#64748b" stroke-width="0.8"/>
+    <text x="10" y="102" class="td" font-weight="700">R2</text>
+    <text x="10" y="118" class="td" font-size="10" fill="#5b6475">cancel</text>
+    <text x="80" y="102" class="td">2 mul, 1 sub</text>
+    <text x="220" y="102" class="td" fill="#b45309" font-weight="700">✗</text>
+    <text x="300" y="102" class="td">2e-9</text>
+    <text x="380" y="102" class="td" fill="#b45309" font-weight="700">4e-5</text>
+    <text x="475" y="102" class="td">[R4]</text>
+
+    <!-- Row R3 -->
+    <rect x="0" y="134" width="520" height="52" class="row-sing" stroke="#64748b" stroke-width="0.8"/>
+    <text x="10" y="154" class="td" font-weight="700">R3</text>
+    <text x="10" y="170" class="td" font-size="10" fill="#5b6475">singular</text>
+    <text x="80" y="154" class="td">1 log, 1 add</text>
+    <text x="220" y="154" class="td">✓</text>
+    <text x="300" y="154" class="td">4e-10</text>
+    <text x="380" y="154" class="td" fill="#475569" font-weight="700">6e-5</text>
+    <text x="475" y="154" class="td">[R5]</text>
+
+    <!-- Row R4 -->
+    <rect x="0" y="186" width="520" height="52" class="row-safe" stroke="#64748b" stroke-width="0.8"/>
+    <text x="10" y="206" class="td" font-weight="700">R4</text>
+    <text x="10" y="222" class="td" font-size="10" fill="#5b6475">well-cond</text>
+    <text x="80" y="206" class="td">1 div, 1 add, 1 sub</text>
+    <text x="220" y="206" class="td">✓</text>
+    <text x="300" y="206" class="td">6e-15</text>
+    <text x="380" y="206" class="td">1e-6</text>
+    <text x="475" y="206" class="td">[R6]</text>
+
+    <!-- Row R5 -->
+    <rect x="0" y="238" width="520" height="52" class="row-safe" stroke="#64748b" stroke-width="0.8"/>
+    <text x="10" y="258" class="td" font-weight="700">R5</text>
+    <text x="10" y="274" class="td" font-size="10" fill="#5b6475">well-cond</text>
+    <text x="80" y="258" class="td">1 sqrt, 1 mul, 1 add</text>
+    <text x="220" y="258" class="td">✓</text>
+    <text x="300" y="258" class="td">5e-15</text>
+    <text x="380" y="258" class="td">9e-7</text>
+    <text x="475" y="258" class="td">[R6]</text>
+
+    <!-- Row R6 -->
+    <rect x="0" y="290" width="520" height="52" class="row-safe" stroke="#64748b" stroke-width="0.8"/>
+    <text x="10" y="310" class="td" font-weight="700">R6</text>
+    <text x="10" y="326" class="td" font-size="10" fill="#5b6475">well-cond</text>
+    <text x="80" y="310" class="td">1 mul, 1 add, 1 sub</text>
+    <text x="220" y="310" class="td">✓</text>
+    <text x="300" y="310" class="td">7e-15</text>
+    <text x="380" y="310" class="td">1e-6</text>
+    <text x="475" y="310" class="td">[ ]</text>
+
+    <!-- Notes below the table -->
+    <text x="0" y="370" class="sub">float_range_ok = observed values fit float/ff dynamic range without over/underflow.</text>
+    <text x="0" y="388" class="sub">Also emitted per region: cancellation_hotspots (op, cond, provenance trace).</text>
+    <text x="0" y="406" class="sub">Row color = numerical character discovered by the reduction.</text>
+  </g>
+
+  <!-- Legend inside the right panel, tight spacing -->
+  <g transform="translate(680, 640)">
+    <text x="0" y="0" class="h">Row colors</text>
+    <rect x="0" y="14" width="16" height="14" class="row-safe" stroke="#64748b"/>
+    <text x="22" y="26" class="sub">well-cond</text>
+    <rect x="110" y="14" width="16" height="14" class="row-warn" stroke="#64748b"/>
+    <text x="132" y="26" class="sub">cancellation hotspot</text>
+    <rect x="290" y="14" width="16" height="14" class="row-sing" stroke="#64748b"/>
+    <text x="312" y="26" class="sub">singular (pred_err_float flagged)</text>
+  </g>
+</svg>
