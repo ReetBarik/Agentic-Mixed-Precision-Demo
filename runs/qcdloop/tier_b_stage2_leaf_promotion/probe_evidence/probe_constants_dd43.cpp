@@ -23,10 +23,16 @@
 // The enriched dd-precision Constants<T> from the vendored qcdloop-under-test snapshot.
 #include "kokkosMaths_dd.h"
 
-using quad::ddfun::ddouble;
+// Narrow exception to the tier_b_stage2 freeze: this probe is COMPILED by a
+// live test (tests/patcher/fanout/test_l3_compile_gate.py), so it has to track
+// the vendored API. Retargeted from quad::ddfun to the ql::ddfun surface that
+// kokkosMaths_dd.h (included above) exports — which is what this probe actually
+// exercises. That keeps the change to two tokens and leaves the probe's own
+// `ddouble` / `make_dd` spellings, and the rest of the file, untouched.
+using ql::ddfun::ddouble;
 
 static bool bit_eq(ddouble const& a, uint64_t hi_bits, uint64_t lo_bits) {
-    ddouble ref = quad::ddfun::make_dd(hi_bits, lo_bits);
+    ddouble ref = ql::ddfun::make_dd(hi_bits, lo_bits);
     uint64_t a_hi, a_lo, r_hi, r_lo;
     __builtin_memcpy(&a_hi, &a.hi, 8);  __builtin_memcpy(&a_lo, &a.lo, 8);
     __builtin_memcpy(&r_hi, &ref.hi, 8); __builtin_memcpy(&r_lo, &ref.lo, 8);

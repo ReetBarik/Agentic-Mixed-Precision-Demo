@@ -337,14 +337,3 @@ KOKKOS_INLINE_FUNCTION Experimental::FloatFloatComplex atanh(Experimental::Float
 KOKKOS_INLINE_FUNCTION Experimental::FloatFloatComplex pow(Experimental::FloatFloatComplex z, Experimental::FloatFloatComplex w) { return Experimental::pow(z, w); }
 // clang-format on
 }  // namespace Kokkos
-
-// ============================================================
-// COMPAT SHIM — TEMPORARY, REMOVED IN T4. See the ff_math.hpp block.
-// ffcomplex lives here because FloatFloatComplex is only declared once
-// this header is included.
-// ============================================================
-namespace quad {
-namespace ffun {
-using ffcomplex = ::Kokkos::Experimental::FloatFloatComplex;
-}  // namespace ffun
-}  // namespace quad

@@ -65,6 +65,20 @@ local_patches:
     why:   pairs with 45197be's operator int() — resolves the `ff == 0`
            ambiguity. Cleared the B4m.h comparison ambiguity.
 
-# Authoritative per-file added-line counts vs pristine upstream are recorded
-# below once the temporary T2 compat shim is removed (see the T4 commit).
-local_delta_lines:  (pending T4)
+# Authoritative delta vs pristine upstream, measured with the temporary compat
+# shim removed, i.e. this is exactly the persistent local patch set:
+#
+#   diff -u <upstream>/<file> third_party/include/<file>
+#
+# The 2 deleted lines in each complex header are the naive sqrt(re^2+im^2) abs
+# body and the inlined magnitude inside complex sqrt(), both replaced by the
+# hypot form (45197be). Everything else is pure addition, so a future refresh
+# can re-apply the set by adding the marked blocks back.
+local_delta_lines:
+  dd_math.hpp:     +20  -0
+  dd_complex.hpp:  +32  -2
+  ff_math.hpp:     +26  -0
+  ff_complex.hpp:  +28  -2
+
+# Locate every re-applied block in a refreshed file with:
+#   grep -n 'LOCAL PATCH' third_party/include/*.hpp

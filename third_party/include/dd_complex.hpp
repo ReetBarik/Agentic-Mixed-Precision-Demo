@@ -372,14 +372,3 @@ KOKKOS_INLINE_FUNCTION Experimental::DoubleDoubleComplex atanh(Experimental::Dou
 KOKKOS_INLINE_FUNCTION Experimental::DoubleDoubleComplex pow(Experimental::DoubleDoubleComplex z, Experimental::DoubleDoubleComplex w) { return Experimental::pow(z, w); }
 // clang-format on
 }  // namespace Kokkos
-
-// ============================================================
-// COMPAT SHIM — TEMPORARY, REMOVED IN T4. See the dd_math.hpp block.
-// ddcomplex lives here rather than in dd_math.hpp because
-// DoubleDoubleComplex is only declared once this header is included.
-// ============================================================
-namespace quad {
-namespace ddfun {
-using ddcomplex = ::Kokkos::Experimental::DoubleDoubleComplex;
-}  // namespace ddfun
-}  // namespace quad

@@ -1138,30 +1138,3 @@ KOKKOS_INLINE_FUNCTION Experimental::DoubleDouble erfc(Experimental::DoubleDoubl
 KOKKOS_INLINE_FUNCTION Experimental::DoubleDouble tgamma(Experimental::DoubleDouble x){ return Experimental::tgamma(x); }
 // clang-format on
 }  // namespace Kokkos
-
-// ============================================================
-// COMPAT SHIM — TEMPORARY, REMOVED IN T4.
-// Keeps the Agentic tree building while the T3 sweep renames
-// quad::ddfun -> Kokkos::Experimental in one commit. Nothing below is
-// upstream; delete this whole block together with the ff_math.hpp twin.
-//
-// The using-directive is what makes qualified calls like quad::ddfun::abs(x),
-// ::log(x), ::sqrt(x) resolve: qualified lookup in a namespace also searches
-// namespaces nominated by its using-directives. Types and the two renamed
-// entry points (make_dd -> from_bits, dd_pi -> DoubleDouble_pi) need explicit
-// aliases because upstream renamed them outright.
-// ============================================================
-namespace quad {
-namespace ddfun {
-
-using namespace ::Kokkos::Experimental;
-
-using ddouble = ::Kokkos::Experimental::DoubleDouble;
-
-KOKKOS_INLINE_FUNCTION ddouble make_dd(uint64_t hi_bits, uint64_t lo_bits) {
-    return ::Kokkos::Experimental::DoubleDouble::from_bits(hi_bits, lo_bits);
-}
-KOKKOS_INLINE_FUNCTION ddouble dd_pi() { return ::Kokkos::Experimental::DoubleDouble_pi(); }
-
-}  // namespace ddfun
-}  // namespace quad

@@ -1341,23 +1341,3 @@ KOKKOS_INLINE_FUNCTION Experimental::FloatFloat erfc(Experimental::FloatFloat x)
 KOKKOS_INLINE_FUNCTION Experimental::FloatFloat tgamma(Experimental::FloatFloat x){ return Experimental::tgamma(x); }
 // clang-format on
 }  // namespace Kokkos
-
-// ============================================================
-// COMPAT SHIM — TEMPORARY, REMOVED IN T4. Twin of the dd_math.hpp block;
-// see there for why the using-directive is what makes qualified calls
-// (quad::ffun::abs, ::sqrt) resolve. Nothing below is upstream.
-// ============================================================
-namespace quad {
-namespace ffun {
-
-using namespace ::Kokkos::Experimental;
-
-using ffloat = ::Kokkos::Experimental::FloatFloat;
-
-KOKKOS_INLINE_FUNCTION ffloat make_ff(uint32_t hi_bits, uint32_t lo_bits) {
-    return ::Kokkos::Experimental::FloatFloat::from_bits(hi_bits, lo_bits);
-}
-KOKKOS_INLINE_FUNCTION ffloat ff_pi() { return ::Kokkos::Experimental::FloatFloat_pi(); }
-
-}  // namespace ffun
-}  // namespace quad
