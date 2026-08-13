@@ -12,6 +12,59 @@ files:
   - ff_math.hpp
   - ff_complex.hpp
 
-# As of this commit the four files above are byte-identical to upstream.
-# A "local_patches:" block is appended in the next commit, which re-applies
-# the Agentic-local delta that upstream does not carry.
+# ============================================================
+# LOCAL DELTA — the vendored files are NOT byte-identical to upstream.
+#
+# Upstream carries none of the patches below. They were re-applied on top of
+# the verbatim copy and each is marked in-file as:
+#     // LOCAL PATCH (<sha>): <rationale> — not upstream
+# Run `git show <sha>` for the original commit. On the next refresh, re-apply
+# every entry here against the newer upstream tip, or record why it was dropped.
+#
+# Note the entries are NOT independent: the scalar-comparison overloads exist
+# to disambiguate the operator int() conversions. Re-applying one without the
+# other reintroduces the `dd == 0` / `ff == 0` ambiguity. Treat as one unit.
+# ============================================================
+local_patches:
+  - sha:   44c1ec4
+    file:  dd_math.hpp
+    what:  unary operator+(), operator int(), 6 scalar-double comparisons
+    why:   template-arg promotion rewrites double exprs to DoubleDouble in place;
+           int-context and unary-plus uses must survive (B3m/B4m int<->Tracked).
+           Upstream REMOVED operator int() in the Kokkos::Experimental rename —
+           it was present in the original vendor drop.
+
+  - sha:   3ab4aa6
+    file:  ff_math.hpp
+    what:  unary operator+()
+    why:   FloatFloat mirror of the DoubleDouble patch above.
+
+  - sha:   4f21245
+    file:  ff_math.hpp
+    what:  explicit FloatFloat(int) ctor
+    why:   int -> FloatFloat is ambiguous between the float and double ctors.
+           Routes via double so ints past float's 2^24 range don't truncate.
+           DoubleDouble needs no equivalent (single floating ctor).
+
+  - sha:   45197be
+    file:  ff_math.hpp, dd_complex.hpp, ff_complex.hpp
+    what:  FloatFloat operator int(); hypot-style overflow-safe complex abs()
+           in BOTH complex headers, plus complex sqrt() reusing that abs
+    why:   naive sqrt(re^2+im^2) overflows at sqrt(FLT_MAX) ~ 1.84e19, which was
+           ff = nan on ~half of BIN inputs (STOP #HHH / #III). Applied to dd too
+           for symmetry (same bug class, latent at ~1.34e154).
+    NOTE:  dd_complex::abs is LOAD-BEARING FOR THE DD ORACLE — it is the oracle's
+           magnitude, and the routing baseline is measured against this
+           hypot-aligned form. Reverting to upstream's naive form shifts oracle
+           values at the noise floor and reintroduces the analytic-zero metric
+           artifact. Do not drop on refresh without re-baselining routing.
+
+  - sha:   f12d8bf
+    file:  ff_math.hpp
+    what:  6 scalar-float comparison overloads
+    why:   pairs with 45197be's operator int() — resolves the `ff == 0`
+           ambiguity. Cleared the B4m.h comparison ambiguity.
+
+# Authoritative per-file added-line counts vs pristine upstream are recorded
+# below once the temporary T2 compat shim is removed (see the T4 commit).
+local_delta_lines:  (pending T4)

@@ -142,8 +142,35 @@ KOKKOS_INLINE_FUNCTION DoubleDoubleComplex operator/(double b, DoubleDoubleCompl
 // Basic complex operations
 // ============================================================
 
+// LOCAL PATCH (45197be): hypot-style scaled magnitude, overflow-safe complex abs
+// — not upstream (upstream still uses the naive sqrt(re^2 + im^2) form).
+//
+// The naive form squares each limb, overflowing whenever |component| >
+// sqrt(DBL_MAX) ~ 1.34e154. dd survives this in practice on the box workloads
+// (magnitudes stay far below the double range), but the ff sibling
+// (ff_complex.hpp) has the same algorithm and does overflow at sqrt(FLT_MAX) ~
+// 1.84e19, producing nans on ~half of BIN inputs. Applied here too for symmetry
+// — same bug class, closed in both.
+//
+// LOAD-BEARING FOR THE DD ORACLE: this function is the oracle's magnitude, so
+// the routing baseline is measured against the hypot-aligned form. Reverting it
+// to the naive upstream form shifts oracle values at the noise floor and
+// reintroduces the analytic-zero metric artifact. Keep on future refreshes.
+//
+// Algorithm: factor out the larger component before squaring.
+//   mx = max(|re|, |im|)
+//   if mx == 0: return 0
+//   |z| = mx * sqrt((re/mx)^2 + (im/mx)^2)
+// Correctness: rx, ry in [-1, 1] so rx^2 + ry^2 in [1, 2] — no exponent overflow.
+// Bonus: cures naive-form underflow when both components are tiny.
 KOKKOS_INLINE_FUNCTION DoubleDouble abs(DoubleDoubleComplex z) {
-    return sqrt(add(multiply(z.re, z.re), multiply(z.im, z.im)));
+    DoubleDouble ax = abs(z.re);
+    DoubleDouble ay = abs(z.im);
+    DoubleDouble mx = (ax.hi >= ay.hi) ? ax : ay;
+    if (mx.hi == 0.0) return DoubleDouble(0.0);
+    DoubleDouble rx = divide(ax, mx);
+    DoubleDouble ry = divide(ay, mx);
+    return multiply(mx, sqrt(add(multiply(rx, rx), multiply(ry, ry))));
 }
 KOKKOS_INLINE_FUNCTION DoubleDoubleComplex conj(DoubleDoubleComplex z) {
     return DoubleDoubleComplex(z.re, negate(z.im));
@@ -155,7 +182,10 @@ KOKKOS_INLINE_FUNCTION DoubleDoubleComplex conj(DoubleDoubleComplex z) {
 KOKKOS_INLINE_FUNCTION DoubleDoubleComplex sqrt(DoubleDoubleComplex z) {
     if (z.re.hi == 0.0 && z.im.hi == 0.0) return DoubleDoubleComplex();
     // B = sqrt((R+A1)/2) + i*sign(A2)*sqrt((R-A1)/2)  where R = |z|
-    DoubleDouble r  = sqrt(add(multiply(z.re, z.re), multiply(z.im, z.im)));
+    // LOCAL PATCH (45197be): use the overflow-safe complex abs above rather than
+    // recomputing re^2 + im^2 inline (same overflow class, same fix, one
+    // implementation). Upstream still inlines the naive form here.
+    DoubleDouble r  = abs(z);
     DoubleDouble a1 = abs(z.re);
     DoubleDouble s2 = multiply_scalar(add(r, a1), 0.5);
     DoubleDouble s0 = sqrt(s2);
@@ -342,3 +372,14 @@ KOKKOS_INLINE_FUNCTION Experimental::DoubleDoubleComplex atanh(Experimental::Dou
 KOKKOS_INLINE_FUNCTION Experimental::DoubleDoubleComplex pow(Experimental::DoubleDoubleComplex z, Experimental::DoubleDoubleComplex w) { return Experimental::pow(z, w); }
 // clang-format on
 }  // namespace Kokkos
+
+// ============================================================
+// COMPAT SHIM — TEMPORARY, REMOVED IN T4. See the dd_math.hpp block.
+// ddcomplex lives here rather than in dd_math.hpp because
+// DoubleDoubleComplex is only declared once this header is included.
+// ============================================================
+namespace quad {
+namespace ddfun {
+using ddcomplex = ::Kokkos::Experimental::DoubleDoubleComplex;
+}  // namespace ddfun
+}  // namespace quad

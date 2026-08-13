@@ -129,8 +129,31 @@ KOKKOS_INLINE_FUNCTION FloatFloatComplex operator/(float b, FloatFloatComplex z)
 // Basic complex operations
 // ============================================================
 
+// LOCAL PATCH (45197be): hypot-style scaled magnitude, overflow-safe complex abs
+// — not upstream (upstream still uses the naive sqrt(re^2 + im^2) form).
+//
+// The naive form squares each limb as float, so any component with |x| >
+// sqrt(FLT_MAX) ~ 1.844e19 overflows to +Inf, producing nan through the
+// subsequent sqrt. This was the root cause of ff = nan on ~half of BIN inputs
+// (STOP #HHH / #III). dd shares the same algorithm and only escapes because
+// sqrt(DBL_MAX) ~ 1.34e154 sits far above workloads seen in practice; the fix is
+// applied there too (dd_complex.hpp) for symmetry.
+//
+// Algorithm: factor out the larger component before squaring.
+//   mx = max(|re|, |im|)
+//   if mx == 0: return 0
+//   |z| = mx * sqrt((re/mx)^2 + (im/mx)^2)
+// Correctness: rx, ry in [-1, 1] so rx^2 + ry^2 in [1, 2] — no exponent overflow.
+// Bonus: also cures naive-form underflow when both components are tiny (rx, ry
+// normalize to O(1) instead of underflowing to zero on the square).
 KOKKOS_INLINE_FUNCTION FloatFloat abs(FloatFloatComplex z) {
-    return sqrt(add(multiply(z.re, z.re), multiply(z.im, z.im)));
+    FloatFloat ax = abs(z.re);
+    FloatFloat ay = abs(z.im);
+    FloatFloat mx = (ax.hi >= ay.hi) ? ax : ay;
+    if (mx.hi == 0.0f) return FloatFloat(0.0f);
+    FloatFloat rx = divide(ax, mx);
+    FloatFloat ry = divide(ay, mx);
+    return multiply(mx, sqrt(add(multiply(rx, rx), multiply(ry, ry))));
 }
 KOKKOS_INLINE_FUNCTION FloatFloatComplex conj(FloatFloatComplex z) {
     return FloatFloatComplex(z.re, negate(z.im));
@@ -141,7 +164,10 @@ KOKKOS_INLINE_FUNCTION FloatFloatComplex conj(FloatFloatComplex z) {
 // ============================================================
 KOKKOS_INLINE_FUNCTION FloatFloatComplex sqrt(FloatFloatComplex z) {
     if (z.re.hi == 0.0f && z.im.hi == 0.0f) return FloatFloatComplex();
-    FloatFloat r  = sqrt(add(multiply(z.re, z.re), multiply(z.im, z.im)));
+    // LOCAL PATCH (45197be): use the overflow-safe complex abs above rather than
+    // recomputing re^2 + im^2 inline (same overflow class, same fix, one
+    // implementation). Upstream still inlines the naive form here.
+    FloatFloat r  = abs(z);
     FloatFloat a1 = abs(z.re);
     FloatFloat s2 = multiply_scalar(add(r, a1), 0.5f);
     FloatFloat s0 = sqrt(s2);
@@ -311,3 +337,14 @@ KOKKOS_INLINE_FUNCTION Experimental::FloatFloatComplex atanh(Experimental::Float
 KOKKOS_INLINE_FUNCTION Experimental::FloatFloatComplex pow(Experimental::FloatFloatComplex z, Experimental::FloatFloatComplex w) { return Experimental::pow(z, w); }
 // clang-format on
 }  // namespace Kokkos
+
+// ============================================================
+// COMPAT SHIM — TEMPORARY, REMOVED IN T4. See the ff_math.hpp block.
+// ffcomplex lives here because FloatFloatComplex is only declared once
+// this header is included.
+// ============================================================
+namespace quad {
+namespace ffun {
+using ffcomplex = ::Kokkos::Experimental::FloatFloatComplex;
+}  // namespace ffun
+}  // namespace quad

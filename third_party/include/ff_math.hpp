@@ -93,6 +93,12 @@ struct FloatFloat {
     KOKKOS_INLINE_FUNCTION FloatFloat(float h) : hi(h), lo(0.0f) {}
     KOKKOS_INLINE_FUNCTION FloatFloat(float h, float l) : hi(h), lo(l) {}
     KOKKOS_INLINE_FUNCTION FloatFloat(double h) : hi((float)h), lo((float)(h - (double)(float)h)) {}
+    // LOCAL PATCH (4f21245): explicit int ctor — not upstream. Disambiguates
+    // int -> FloatFloat (both FloatFloat(float) and FloatFloat(double) are viable
+    // via user-defined conversion from int, making it ambiguous). Routes via
+    // double so ints beyond float's 2^24 exact range don't truncate at conversion.
+    // DoubleDouble needs no equivalent — it has only one floating ctor.
+    KOKKOS_INLINE_FUNCTION FloatFloat(int h) : hi((float)(double)h), lo((float)((double)h - (double)(float)(double)h)) {}
     KOKKOS_INLINE_FUNCTION FloatFloat(const FloatFloat& o) : hi(o.hi), lo(o.lo) {}
     KOKKOS_INLINE_FUNCTION FloatFloat& operator=(const FloatFloat& o) { hi=o.hi; lo=o.lo; return *this; }
 
@@ -112,6 +118,13 @@ struct FloatFloat {
     }
 
     KOKKOS_INLINE_FUNCTION FloatFloat operator-() const { return negate(*this); }
+    // LOCAL PATCH (3ab4aa6): unary operator+() — not upstream. Mirrors the
+    // DoubleDouble patch; the promotion pass emits `+x` on promoted values.
+    KOKKOS_INLINE_FUNCTION FloatFloat operator+() const { return *this; }
+    // LOCAL PATCH (45197be): FloatFloat -> int conversion — not upstream.
+    // Mirrors the DoubleDouble operator int(). Routes via the two-limb sum so
+    // values near float's 2^24 exact-int boundary don't lose the lo contribution.
+    KOKKOS_INLINE_FUNCTION operator int() const { return (int)((double)hi + (double)lo); }
     KOKKOS_INLINE_FUNCTION FloatFloat operator+(FloatFloat b) const { return add(*this, b); }
     KOKKOS_INLINE_FUNCTION FloatFloat operator-(FloatFloat b) const { return subtract(*this, b); }
     KOKKOS_INLINE_FUNCTION FloatFloat operator*(FloatFloat b) const { return multiply(*this, b); }
@@ -136,6 +149,20 @@ struct FloatFloat {
     KOKKOS_INLINE_FUNCTION bool operator>(FloatFloat b)  const { return hi>b.hi || (hi==b.hi && lo>b.lo); }
     KOKKOS_INLINE_FUNCTION bool operator<=(FloatFloat b) const { return !(b < *this); }
     KOKKOS_INLINE_FUNCTION bool operator>=(FloatFloat b) const { return !(*this < b); }
+
+    // LOCAL PATCH (f12d8bf): scalar-float comparisons — not upstream. With
+    // operator int() above in scope, a bare `ff == 0` is ambiguous between
+    // operator==(FloatFloat) (promote the literal via FloatFloat(int)) and
+    // built-in int==int (demote *this via operator int()). These exact-match
+    // overloads on float resolve the literal directly and win, exactly as the
+    // DoubleDouble double overloads do. Cleared the B4m.h comparison ambiguity.
+    // Paired with the operator int() patch — do not re-apply one without the other.
+    KOKKOS_INLINE_FUNCTION bool operator==(float b) const { return *this == FloatFloat(b); }
+    KOKKOS_INLINE_FUNCTION bool operator!=(float b) const { return *this != FloatFloat(b); }
+    KOKKOS_INLINE_FUNCTION bool operator<(float b)  const { return *this <  FloatFloat(b); }
+    KOKKOS_INLINE_FUNCTION bool operator>(float b)  const { return *this >  FloatFloat(b); }
+    KOKKOS_INLINE_FUNCTION bool operator<=(float b) const { return *this <= FloatFloat(b); }
+    KOKKOS_INLINE_FUNCTION bool operator>=(float b) const { return *this >= FloatFloat(b); }
 };
 
 KOKKOS_INLINE_FUNCTION FloatFloat operator+(float a, FloatFloat b) { return add(FloatFloat(a), b); }
@@ -1314,3 +1341,23 @@ KOKKOS_INLINE_FUNCTION Experimental::FloatFloat erfc(Experimental::FloatFloat x)
 KOKKOS_INLINE_FUNCTION Experimental::FloatFloat tgamma(Experimental::FloatFloat x){ return Experimental::tgamma(x); }
 // clang-format on
 }  // namespace Kokkos
+
+// ============================================================
+// COMPAT SHIM — TEMPORARY, REMOVED IN T4. Twin of the dd_math.hpp block;
+// see there for why the using-directive is what makes qualified calls
+// (quad::ffun::abs, ::sqrt) resolve. Nothing below is upstream.
+// ============================================================
+namespace quad {
+namespace ffun {
+
+using namespace ::Kokkos::Experimental;
+
+using ffloat = ::Kokkos::Experimental::FloatFloat;
+
+KOKKOS_INLINE_FUNCTION ffloat make_ff(uint32_t hi_bits, uint32_t lo_bits) {
+    return ::Kokkos::Experimental::FloatFloat::from_bits(hi_bits, lo_bits);
+}
+KOKKOS_INLINE_FUNCTION ffloat ff_pi() { return ::Kokkos::Experimental::FloatFloat_pi(); }
+
+}  // namespace ffun
+}  // namespace quad

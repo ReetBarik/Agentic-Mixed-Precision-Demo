@@ -117,6 +117,14 @@ struct DoubleDouble {
     }
 
     KOKKOS_INLINE_FUNCTION DoubleDouble operator-() const { return negate(*this); }
+    // LOCAL PATCH (44c1ec4): unary operator+() and DoubleDouble -> int conversion —
+    // not upstream. Required by the template-arg promotion pass, which rewrites
+    // double-typed expressions to DoubleDouble in place; any `+x` or int-context
+    // use of a promoted value needs these to survive the rewrite (STOP #RR:
+    // B3m/B4m int <-> Tracked crossings). Upstream dropped operator int() in the
+    // Kokkos::Experimental rename; it was present in the original vendor drop.
+    KOKKOS_INLINE_FUNCTION DoubleDouble operator+() const { return *this; }
+    KOKKOS_INLINE_FUNCTION operator int() const { return (int)hi; }
     KOKKOS_INLINE_FUNCTION DoubleDouble operator+(DoubleDouble b) const { return add(*this, b); }
     KOKKOS_INLINE_FUNCTION DoubleDouble operator-(DoubleDouble b) const { return subtract(*this, b); }
     KOKKOS_INLINE_FUNCTION DoubleDouble operator*(DoubleDouble b) const { return multiply(*this, b); }
@@ -141,6 +149,19 @@ struct DoubleDouble {
     KOKKOS_INLINE_FUNCTION bool operator>(DoubleDouble b)  const { return hi>b.hi || (hi==b.hi && lo>b.lo); }
     KOKKOS_INLINE_FUNCTION bool operator<=(DoubleDouble b) const { return !(b < *this); }
     KOKKOS_INLINE_FUNCTION bool operator>=(DoubleDouble b) const { return !(*this < b); }
+
+    // LOCAL PATCH (44c1ec4): scalar-double comparisons — not upstream. With
+    // operator int() above in scope, a bare `dd == 0` is ambiguous between
+    // operator==(DoubleDouble) (promote the literal) and built-in int==int
+    // (demote *this). These exact-match overloads on double resolve the literal
+    // directly and win. Paired with the operator int() patch — do not re-apply
+    // one without the other.
+    KOKKOS_INLINE_FUNCTION bool operator==(double b) const { return *this == DoubleDouble(b); }
+    KOKKOS_INLINE_FUNCTION bool operator!=(double b) const { return *this != DoubleDouble(b); }
+    KOKKOS_INLINE_FUNCTION bool operator<(double b)  const { return *this <  DoubleDouble(b); }
+    KOKKOS_INLINE_FUNCTION bool operator>(double b)  const { return *this >  DoubleDouble(b); }
+    KOKKOS_INLINE_FUNCTION bool operator<=(double b) const { return *this <= DoubleDouble(b); }
+    KOKKOS_INLINE_FUNCTION bool operator>=(double b) const { return *this >= DoubleDouble(b); }
 };
 
 KOKKOS_INLINE_FUNCTION DoubleDouble operator+(double a, DoubleDouble b) { return add(DoubleDouble(a), b); }
@@ -1117,3 +1138,30 @@ KOKKOS_INLINE_FUNCTION Experimental::DoubleDouble erfc(Experimental::DoubleDoubl
 KOKKOS_INLINE_FUNCTION Experimental::DoubleDouble tgamma(Experimental::DoubleDouble x){ return Experimental::tgamma(x); }
 // clang-format on
 }  // namespace Kokkos
+
+// ============================================================
+// COMPAT SHIM — TEMPORARY, REMOVED IN T4.
+// Keeps the Agentic tree building while the T3 sweep renames
+// quad::ddfun -> Kokkos::Experimental in one commit. Nothing below is
+// upstream; delete this whole block together with the ff_math.hpp twin.
+//
+// The using-directive is what makes qualified calls like quad::ddfun::abs(x),
+// ::log(x), ::sqrt(x) resolve: qualified lookup in a namespace also searches
+// namespaces nominated by its using-directives. Types and the two renamed
+// entry points (make_dd -> from_bits, dd_pi -> DoubleDouble_pi) need explicit
+// aliases because upstream renamed them outright.
+// ============================================================
+namespace quad {
+namespace ddfun {
+
+using namespace ::Kokkos::Experimental;
+
+using ddouble = ::Kokkos::Experimental::DoubleDouble;
+
+KOKKOS_INLINE_FUNCTION ddouble make_dd(uint64_t hi_bits, uint64_t lo_bits) {
+    return ::Kokkos::Experimental::DoubleDouble::from_bits(hi_bits, lo_bits);
+}
+KOKKOS_INLINE_FUNCTION ddouble dd_pi() { return ::Kokkos::Experimental::DoubleDouble_pi(); }
+
+}  // namespace ddfun
+}  // namespace quad
