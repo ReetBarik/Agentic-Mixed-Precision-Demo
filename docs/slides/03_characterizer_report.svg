@@ -184,8 +184,8 @@
     <rect x="0" y="14" width="16" height="14" class="row-safe" stroke="#64748b"/>
     <text x="22" y="26" class="sub">well-cond</text>
     <rect x="110" y="14" width="16" height="14" class="row-warn" stroke="#64748b"/>
-    <text x="132" y="26" class="sub">cancel (float_range_ok = ✗)</text>
-    <rect x="350" y="14" width="16" height="14" class="row-sing" stroke="#64748b"/>
-    <text x="372" y="26" class="sub">singular (pred_err_float flagged)</text>
+    <text x="132" y="26" class="sub">cancellation hotspot</text>
+    <rect x="290" y="14" width="16" height="14" class="row-sing" stroke="#64748b"/>
+    <text x="312" y="26" class="sub">singular (pred_err_float flagged)</text>
   </g>
 </svg>
