@@ -1,7 +1,33 @@
+// SPDX-License-Identifier: LicenseRef-DHB-License
+//
+// Copyright (c) 2024 David H. Bailey — DDFUN v04 (original algorithms)
+// Modifications Copyright (c) 2026 UChicago Argonne, LLC
+//
+// This file is a mechanical translation of dd_complex.hpp (this repo's
+// Kokkos C++ port of DDFUN v04) from double-double (2×FP64) to
+// float-float (2×FP32). Function inventory, algorithm choices, and
+// coefficient tables descend from DDFUN v04 by David H. Bailey.
+//
+// FP32-specific modifications (input narrowing, splitter constant
+// 8193.0f = 2^13+1, joint sin/cos doublings, Taylor branches for
+// |a|<0.5 in sinh/cosh/atanh, direct exp scaling to avoid splitter
+// overflow, nint magic-constant replacement) are documented in
+// PORT_NOTES.md. These modifications fall under DHB-License §3
+// (grant-back) and are governed by the same terms as the original.
+//
+// See LICENSES/LicenseRef-DHB-License.txt for the full license text
+// and NOTICE.md for the per-file license mapping.
+
 #pragma once
-// Float-float complex arithmetic — namespace quad::ffun
+
+// Float-float complex arithmetic — Kokkos::Experimental::FloatFloatComplex.
 // All functions KOKKOS_INLINE_FUNCTION (host + device via Kokkos/CUDA).
 // Depends on ff_math.hpp.
+//
+// Naming follows ff_math.hpp (T0.4/T2.0): type + math live under
+// Kokkos::Experimental for eventual upstreaming. This remains a bespoke struct
+// rather than Kokkos::complex<FloatFloat> — that integration is a separate
+// future task.
 
 #include <ff_math.hpp>
 
@@ -9,150 +35,126 @@
 #  include <ostream>
 #endif
 
-namespace quad {
-namespace ffun {
+namespace Kokkos {
+namespace Experimental {
 
 // ============================================================
-// ffcomplex struct
+// FloatFloatComplex struct
 // ============================================================
-struct ffcomplex {
-    ffloat re;
-    ffloat im;
+struct FloatFloatComplex {
+    FloatFloat re;
+    FloatFloat im;
 
-    KOKKOS_INLINE_FUNCTION ffcomplex() : re(0.0f), im(0.0f) {}
-    KOKKOS_INLINE_FUNCTION ffcomplex(float r)               : re(r),    im(0.0f) {}
-    KOKKOS_INLINE_FUNCTION ffcomplex(ffloat r)              : re(r),    im(0.0f) {}
-    KOKKOS_INLINE_FUNCTION ffcomplex(float r, float i)      : re(r),    im(i)    {}
-    KOKKOS_INLINE_FUNCTION ffcomplex(ffloat r, ffloat i)    : re(r),    im(i)    {}
-    KOKKOS_INLINE_FUNCTION ffcomplex(const ffcomplex& o)    : re(o.re), im(o.im) {}
-    KOKKOS_INLINE_FUNCTION ffcomplex& operator=(const ffcomplex& o) {
+    KOKKOS_INLINE_FUNCTION FloatFloatComplex() : re(0.0f), im(0.0f) {}
+    KOKKOS_INLINE_FUNCTION FloatFloatComplex(float r)               : re(r),    im(0.0f) {}
+    KOKKOS_INLINE_FUNCTION FloatFloatComplex(FloatFloat r)              : re(r),    im(0.0f) {}
+    KOKKOS_INLINE_FUNCTION FloatFloatComplex(float r, float i)      : re(r),    im(i)    {}
+    KOKKOS_INLINE_FUNCTION FloatFloatComplex(FloatFloat r, FloatFloat i)    : re(r),    im(i)    {}
+    KOKKOS_INLINE_FUNCTION FloatFloatComplex(const FloatFloatComplex& o)    : re(o.re), im(o.im) {}
+    KOKKOS_INLINE_FUNCTION FloatFloatComplex& operator=(const FloatFloatComplex& o) {
         re = o.re; im = o.im; return *this;
     }
-    KOKKOS_INLINE_FUNCTION ffcomplex& operator=(ffloat r) {
-        re = r; im = ffloat(0.0f); return *this;
+    KOKKOS_INLINE_FUNCTION FloatFloatComplex& operator=(FloatFloat r) {
+        re = r; im = FloatFloat(0.0f); return *this;
     }
 
-    KOKKOS_INLINE_FUNCTION ffcomplex operator+(ffcomplex b) const {
-        return ffcomplex(ffadd(re, b.re), ffadd(im, b.im));
+    KOKKOS_INLINE_FUNCTION FloatFloatComplex operator+(FloatFloatComplex b) const {
+        return FloatFloatComplex(add(re, b.re), add(im, b.im));
     }
-    KOKKOS_INLINE_FUNCTION ffcomplex operator-(ffcomplex b) const {
-        return ffcomplex(ffsub(re, b.re), ffsub(im, b.im));
+    KOKKOS_INLINE_FUNCTION FloatFloatComplex operator-(FloatFloatComplex b) const {
+        return FloatFloatComplex(subtract(re, b.re), subtract(im, b.im));
     }
-    KOKKOS_INLINE_FUNCTION ffcomplex operator*(ffcomplex b) const {
-        return ffcomplex(ffsub(ffmul(re, b.re), ffmul(im, b.im)),
-                         ffadd(ffmul(re, b.im), ffmul(im, b.re)));
+    KOKKOS_INLINE_FUNCTION FloatFloatComplex operator*(FloatFloatComplex b) const {
+        return FloatFloatComplex(subtract(multiply(re, b.re), multiply(im, b.im)),
+                         add(multiply(re, b.im), multiply(im, b.re)));
     }
-    KOKKOS_INLINE_FUNCTION ffcomplex operator/(ffcomplex b) const {
+    KOKKOS_INLINE_FUNCTION FloatFloatComplex operator/(FloatFloatComplex b) const {
         if (b.re.hi == 0.0f && b.im.hi == 0.0f) {
             Kokkos::printf("FFCOMPLEX: division by zero\n");
-            return ffcomplex();
+            return FloatFloatComplex();
         }
-        ffloat denom = ffadd(ffmul(b.re, b.re), ffmul(b.im, b.im));
-        ffloat inv   = ffdiv(ffloat(1.0f), denom);
-        return ffcomplex(ffmul(ffadd(ffmul(re, b.re), ffmul(im, b.im)), inv),
-                         ffmul(ffsub(ffmul(im, b.re), ffmul(re, b.im)), inv));
+        FloatFloat denom = add(multiply(b.re, b.re), multiply(b.im, b.im));
+        FloatFloat inv   = divide(FloatFloat(1.0f), denom);
+        return FloatFloatComplex(multiply(add(multiply(re, b.re), multiply(im, b.im)), inv),
+                         multiply(subtract(multiply(im, b.re), multiply(re, b.im)), inv));
     }
-    KOKKOS_INLINE_FUNCTION ffcomplex operator-() const {
-        return ffcomplex(ffneg(re), ffneg(im));
+    KOKKOS_INLINE_FUNCTION FloatFloatComplex operator-() const {
+        return FloatFloatComplex(negate(re), negate(im));
     }
 
-    KOKKOS_INLINE_FUNCTION ffcomplex& operator+=(ffcomplex b) { *this = *this + b; return *this; }
-    KOKKOS_INLINE_FUNCTION ffcomplex& operator-=(ffcomplex b) { *this = *this - b; return *this; }
-    KOKKOS_INLINE_FUNCTION ffcomplex& operator*=(ffcomplex b) { *this = *this * b; return *this; }
-    KOKKOS_INLINE_FUNCTION ffcomplex& operator/=(ffcomplex b) { *this = *this / b; return *this; }
+    KOKKOS_INLINE_FUNCTION FloatFloatComplex& operator+=(FloatFloatComplex b) { *this = *this + b; return *this; }
+    KOKKOS_INLINE_FUNCTION FloatFloatComplex& operator-=(FloatFloatComplex b) { *this = *this - b; return *this; }
+    KOKKOS_INLINE_FUNCTION FloatFloatComplex& operator*=(FloatFloatComplex b) { *this = *this * b; return *this; }
+    KOKKOS_INLINE_FUNCTION FloatFloatComplex& operator/=(FloatFloatComplex b) { *this = *this / b; return *this; }
 
-    KOKKOS_INLINE_FUNCTION bool operator==(ffcomplex b) const { return re==b.re && im==b.im; }
-    KOKKOS_INLINE_FUNCTION bool operator!=(ffcomplex b) const { return !(*this == b); }
+    KOKKOS_INLINE_FUNCTION bool operator==(FloatFloatComplex b) const { return re==b.re && im==b.im; }
+    KOKKOS_INLINE_FUNCTION bool operator!=(FloatFloatComplex b) const { return !(*this == b); }
 
-    KOKKOS_INLINE_FUNCTION ffloat real() const { return re; }
-    KOKKOS_INLINE_FUNCTION ffloat imag() const { return im; }
+    KOKKOS_INLINE_FUNCTION FloatFloat real() const { return re; }
+    KOKKOS_INLINE_FUNCTION FloatFloat imag() const { return im; }
 };
 
 #ifndef __CUDA_ARCH__
-inline std::ostream& operator<<(std::ostream& os, const ffcomplex& z) {
+inline std::ostream& operator<<(std::ostream& os, const FloatFloatComplex& z) {
     os << "(" << z.re << ") + (" << z.im << ")i";
     return os;
 }
 #endif
 
 // ============================================================
-// Mixed ffloat × ffcomplex arithmetic
+// Mixed FloatFloat × FloatFloatComplex arithmetic
 // ============================================================
-KOKKOS_INLINE_FUNCTION ffcomplex operator+(ffcomplex z, ffloat r) { return ffcomplex(ffadd(z.re, r), z.im); }
-KOKKOS_INLINE_FUNCTION ffcomplex operator+(ffloat r, ffcomplex z) { return ffcomplex(ffadd(r, z.re), z.im); }
-KOKKOS_INLINE_FUNCTION ffcomplex operator-(ffcomplex z, ffloat r) { return ffcomplex(ffsub(z.re, r), z.im); }
-KOKKOS_INLINE_FUNCTION ffcomplex operator-(ffloat r, ffcomplex z) { return ffcomplex(ffsub(r, z.re), ffneg(z.im)); }
-KOKKOS_INLINE_FUNCTION ffcomplex operator*(ffcomplex z, ffloat r) { return ffcomplex(ffmul(z.re, r), ffmul(z.im, r)); }
-KOKKOS_INLINE_FUNCTION ffcomplex operator*(ffloat r, ffcomplex z) { return ffcomplex(ffmul(r, z.re), ffmul(r, z.im)); }
-KOKKOS_INLINE_FUNCTION ffcomplex operator/(ffcomplex z, ffloat r) { return ffcomplex(ffdiv(z.re, r), ffdiv(z.im, r)); }
-KOKKOS_INLINE_FUNCTION ffcomplex operator/(ffloat r, ffcomplex z) { return ffcomplex(r) / z; }
+KOKKOS_INLINE_FUNCTION FloatFloatComplex operator+(FloatFloatComplex z, FloatFloat r) { return FloatFloatComplex(add(z.re, r), z.im); }
+KOKKOS_INLINE_FUNCTION FloatFloatComplex operator+(FloatFloat r, FloatFloatComplex z) { return FloatFloatComplex(add(r, z.re), z.im); }
+KOKKOS_INLINE_FUNCTION FloatFloatComplex operator-(FloatFloatComplex z, FloatFloat r) { return FloatFloatComplex(subtract(z.re, r), z.im); }
+KOKKOS_INLINE_FUNCTION FloatFloatComplex operator-(FloatFloat r, FloatFloatComplex z) { return FloatFloatComplex(subtract(r, z.re), negate(z.im)); }
+KOKKOS_INLINE_FUNCTION FloatFloatComplex operator*(FloatFloatComplex z, FloatFloat r) { return FloatFloatComplex(multiply(z.re, r), multiply(z.im, r)); }
+KOKKOS_INLINE_FUNCTION FloatFloatComplex operator*(FloatFloat r, FloatFloatComplex z) { return FloatFloatComplex(multiply(r, z.re), multiply(r, z.im)); }
+KOKKOS_INLINE_FUNCTION FloatFloatComplex operator/(FloatFloatComplex z, FloatFloat r) { return FloatFloatComplex(divide(z.re, r), divide(z.im, r)); }
+KOKKOS_INLINE_FUNCTION FloatFloatComplex operator/(FloatFloat r, FloatFloatComplex z) { return FloatFloatComplex(r) / z; }
 
 // ============================================================
-// Mixed float × ffcomplex arithmetic
+// Mixed float × FloatFloatComplex arithmetic
 // ============================================================
-KOKKOS_INLINE_FUNCTION ffcomplex operator+(ffcomplex z, float b) { return z + ffloat(b); }
-KOKKOS_INLINE_FUNCTION ffcomplex operator+(float b, ffcomplex z) { return ffloat(b) + z; }
-KOKKOS_INLINE_FUNCTION ffcomplex operator-(ffcomplex z, float b) { return z - ffloat(b); }
-KOKKOS_INLINE_FUNCTION ffcomplex operator-(float b, ffcomplex z) { return ffloat(b) - z; }
-KOKKOS_INLINE_FUNCTION ffcomplex operator*(ffcomplex z, float b) { return z * ffloat(b); }
-KOKKOS_INLINE_FUNCTION ffcomplex operator*(float b, ffcomplex z) { return ffloat(b) * z; }
-KOKKOS_INLINE_FUNCTION ffcomplex operator/(ffcomplex z, float b) { return z / ffloat(b); }
-KOKKOS_INLINE_FUNCTION ffcomplex operator/(float b, ffcomplex z) { return ffloat(b) / z; }
+KOKKOS_INLINE_FUNCTION FloatFloatComplex operator+(FloatFloatComplex z, float b) { return z + FloatFloat(b); }
+KOKKOS_INLINE_FUNCTION FloatFloatComplex operator+(float b, FloatFloatComplex z) { return FloatFloat(b) + z; }
+KOKKOS_INLINE_FUNCTION FloatFloatComplex operator-(FloatFloatComplex z, float b) { return z - FloatFloat(b); }
+KOKKOS_INLINE_FUNCTION FloatFloatComplex operator-(float b, FloatFloatComplex z) { return FloatFloat(b) - z; }
+KOKKOS_INLINE_FUNCTION FloatFloatComplex operator*(FloatFloatComplex z, float b) { return z * FloatFloat(b); }
+KOKKOS_INLINE_FUNCTION FloatFloatComplex operator*(float b, FloatFloatComplex z) { return FloatFloat(b) * z; }
+KOKKOS_INLINE_FUNCTION FloatFloatComplex operator/(FloatFloatComplex z, float b) { return z / FloatFloat(b); }
+KOKKOS_INLINE_FUNCTION FloatFloatComplex operator/(float b, FloatFloatComplex z) { return FloatFloat(b) / z; }
 
 // ============================================================
 // Basic complex operations
 // ============================================================
 
-// Hypot-style scaled magnitude: overflow-safe complex abs.
-//
-// The naive form sqrt(re*re + im*im) squares each limb as float, so any component
-// with |x| > sqrt(FLT_MAX) ~ 1.844e19 overflows to +Inf, producing nan through the
-// subsequent sqrt. dd shares the same algorithm and only escapes because
-// sqrt(DBL_MAX) ~ 1.34e154 sits far above workloads seen in practice; the fix is
-// applied there too (dd_complex.hpp) for symmetry and to close the same latent bug.
-//
-// Algorithm: factor out the larger component before squaring.
-//   mx = max(|re|, |im|)
-//   if mx == 0: return 0
-//   |z| = mx * sqrt((re/mx)^2 + (im/mx)^2)
-// Cost: 2 abs + 2 div + 2 mul + 1 add + 1 sqrt + 1 mul (vs. naive 2 mul + 1 add + 1 sqrt).
-// Correctness: rx, ry in [-1, 1] so rx^2 + ry^2 in [1, 2] — no exponent overflow.
-// Bonus: also cures naive-form underflow when both components are tiny (rx, ry
-// normalize to O(1) instead of underflowing to zero on the square).
-KOKKOS_INLINE_FUNCTION ffloat abs(ffcomplex z) {
-    ffloat ax = abs(z.re);
-    ffloat ay = abs(z.im);
-    ffloat mx = (ax.hi >= ay.hi) ? ax : ay;
-    if (mx.hi == 0.0f) return ffloat(0.0f);
-    ffloat rx = ffdiv(ax, mx);
-    ffloat ry = ffdiv(ay, mx);
-    return ffmul(mx, sqrt(ffadd(ffmul(rx, rx), ffmul(ry, ry))));
+KOKKOS_INLINE_FUNCTION FloatFloat abs(FloatFloatComplex z) {
+    return sqrt(add(multiply(z.re, z.re), multiply(z.im, z.im)));
 }
-KOKKOS_INLINE_FUNCTION ffcomplex conj(ffcomplex z) {
-    return ffcomplex(z.re, ffneg(z.im));
+KOKKOS_INLINE_FUNCTION FloatFloatComplex conj(FloatFloatComplex z) {
+    return FloatFloatComplex(z.re, negate(z.im));
 }
 
 // ============================================================
 // Complex square root
 // ============================================================
-KOKKOS_INLINE_FUNCTION ffcomplex sqrt(ffcomplex z) {
-    if (z.re.hi == 0.0f && z.im.hi == 0.0f) return ffcomplex();
-    // Use the overflow-safe complex abs above rather than recomputing re^2 + im^2
-    // inline (same overflow class, same fix, one implementation).
-    ffloat r  = abs(z);
-    ffloat a1 = abs(z.re);
-    ffloat s2 = ffmulf(ffadd(r, a1), 0.5f);
-    ffloat s0 = sqrt(s2);
-    ffloat s1 = ffmulf(s0, 2.0f);
-    ffcomplex b;
+KOKKOS_INLINE_FUNCTION FloatFloatComplex sqrt(FloatFloatComplex z) {
+    if (z.re.hi == 0.0f && z.im.hi == 0.0f) return FloatFloatComplex();
+    FloatFloat r  = sqrt(add(multiply(z.re, z.re), multiply(z.im, z.im)));
+    FloatFloat a1 = abs(z.re);
+    FloatFloat s2 = multiply_scalar(add(r, a1), 0.5f);
+    FloatFloat s0 = sqrt(s2);
+    FloatFloat s1 = multiply_scalar(s0, 2.0f);
+    FloatFloatComplex b;
     if (z.re.hi >= 0.0f) {
         b.re = s0;
-        b.im = ffdiv(z.im, s1);
+        b.im = divide(z.im, s1);
     } else {
-        b.re = ffdiv(z.im, s1);
-        if (b.re.hi < 0.0f) b.re = ffneg(b.re);
+        b.re = divide(z.im, s1);
+        if (b.re.hi < 0.0f) b.re = negate(b.re);
         b.im = s0;
-        if (z.im.hi < 0.0f) b.im = ffneg(b.im);
+        if (z.im.hi < 0.0f) b.im = negate(b.im);
     }
     return b;
 }
@@ -160,122 +162,152 @@ KOKKOS_INLINE_FUNCTION ffcomplex sqrt(ffcomplex z) {
 // ============================================================
 // Complex exp / log
 // ============================================================
-KOKKOS_INLINE_FUNCTION ffcomplex exp(ffcomplex z) {
-    ffloat er = exp(z.re);
-    ffloat c, s;
+KOKKOS_INLINE_FUNCTION FloatFloatComplex exp(FloatFloatComplex z) {
+    FloatFloat er = exp(z.re);
+    FloatFloat c, s;
     sincos(z.im, c, s);
-    return ffcomplex(ffmul(er, c), ffmul(er, s));
+    return FloatFloatComplex(multiply(er, c), multiply(er, s));
 }
 
-KOKKOS_INLINE_FUNCTION ffcomplex log(ffcomplex z) {
-    ffloat modulus = abs(z);
-    ffloat arg     = atan2(z.im, z.re);
-    return ffcomplex(log(modulus), arg);
+KOKKOS_INLINE_FUNCTION FloatFloatComplex log(FloatFloatComplex z) {
+    FloatFloat modulus = abs(z);
+    FloatFloat arg     = atan2(z.im, z.re);
+    return FloatFloatComplex(log(modulus), arg);
 }
 
-KOKKOS_INLINE_FUNCTION ffcomplex log10(ffcomplex z) {
-    ffcomplex lg = log(z);
-    ffloat ln10 = ff_log10();
-    return ffcomplex(ffdiv(lg.re, ln10), ffdiv(lg.im, ln10));
+KOKKOS_INLINE_FUNCTION FloatFloatComplex log10(FloatFloatComplex z) {
+    FloatFloatComplex lg = log(z);
+    FloatFloat ln10 = FloatFloat_log10();
+    return FloatFloatComplex(divide(lg.re, ln10), divide(lg.im, ln10));
 }
 
 // ============================================================
 // Complex trig
 // ============================================================
-KOKKOS_INLINE_FUNCTION ffcomplex sin(ffcomplex z) {
-    ffloat ca, sa, cb, sb;
+KOKKOS_INLINE_FUNCTION FloatFloatComplex sin(FloatFloatComplex z) {
+    FloatFloat ca, sa, cb, sb;
     sincos(z.re, ca, sa);
     sinhcosh(z.im, cb, sb);
-    return ffcomplex(ffmul(sa, cb), ffmul(ca, sb));
+    return FloatFloatComplex(multiply(sa, cb), multiply(ca, sb));
 }
-KOKKOS_INLINE_FUNCTION ffcomplex cos(ffcomplex z) {
-    ffloat ca, sa, cb, sb;
+KOKKOS_INLINE_FUNCTION FloatFloatComplex cos(FloatFloatComplex z) {
+    FloatFloat ca, sa, cb, sb;
     sincos(z.re, ca, sa);
     sinhcosh(z.im, cb, sb);
-    return ffcomplex(ffmul(ca, cb), ffneg(ffmul(sa, sb)));
+    return FloatFloatComplex(multiply(ca, cb), negate(multiply(sa, sb)));
 }
-KOKKOS_INLINE_FUNCTION ffcomplex tan(ffcomplex z) {
+KOKKOS_INLINE_FUNCTION FloatFloatComplex tan(FloatFloatComplex z) {
     return sin(z) / cos(z);
 }
 
 // ============================================================
 // Complex inverse trig
 // ============================================================
-KOKKOS_INLINE_FUNCTION ffcomplex asin(ffcomplex z) {
-    ffcomplex iz  = ffcomplex(ffneg(z.im), z.re);
-    ffcomplex z2  = z * z;
-    ffcomplex one_minus_z2 = ffcomplex(ffloat(1.0f)) - z2;
-    ffcomplex sum = iz + sqrt(one_minus_z2);
-    ffcomplex lg  = log(sum);
-    return ffcomplex(lg.im, ffneg(lg.re));
+KOKKOS_INLINE_FUNCTION FloatFloatComplex asin(FloatFloatComplex z) {
+    FloatFloatComplex iz  = FloatFloatComplex(negate(z.im), z.re);
+    FloatFloatComplex z2  = z * z;
+    FloatFloatComplex one_minus_z2 = FloatFloatComplex(FloatFloat(1.0f)) - z2;
+    FloatFloatComplex sum = iz + sqrt(one_minus_z2);
+    FloatFloatComplex lg  = log(sum);
+    return FloatFloatComplex(lg.im, negate(lg.re));
 }
-KOKKOS_INLINE_FUNCTION ffcomplex acos(ffcomplex z) {
-    ffloat pi_over_2 = ffmulf(ff_pi(), 0.5f);
-    ffcomplex asin_z  = asin(z);
-    return ffcomplex(ffsub(pi_over_2, asin_z.re), ffneg(asin_z.im));
+KOKKOS_INLINE_FUNCTION FloatFloatComplex acos(FloatFloatComplex z) {
+    FloatFloat pi_over_2 = multiply_scalar(FloatFloat_pi(), 0.5f);
+    FloatFloatComplex asin_z  = asin(z);
+    return FloatFloatComplex(subtract(pi_over_2, asin_z.re), negate(asin_z.im));
 }
-KOKKOS_INLINE_FUNCTION ffcomplex atan(ffcomplex z) {
-    ffcomplex iz    = ffcomplex(ffneg(z.im), z.re);
-    ffcomplex num   = ffcomplex(ffloat(1.0f)) - iz;
-    ffcomplex den   = ffcomplex(ffloat(1.0f)) + iz;
-    ffcomplex ratio = num / den;
-    ffcomplex lg    = log(ratio);
-    return ffcomplex(ffmulf(ffneg(lg.im), 0.5f), ffmulf(lg.re, 0.5f));
+KOKKOS_INLINE_FUNCTION FloatFloatComplex atan(FloatFloatComplex z) {
+    FloatFloatComplex iz    = FloatFloatComplex(negate(z.im), z.re);
+    FloatFloatComplex num   = FloatFloatComplex(FloatFloat(1.0f)) - iz;
+    FloatFloatComplex den   = FloatFloatComplex(FloatFloat(1.0f)) + iz;
+    FloatFloatComplex ratio = num / den;
+    FloatFloatComplex lg    = log(ratio);
+    return FloatFloatComplex(multiply_scalar(negate(lg.im), 0.5f), multiply_scalar(lg.re, 0.5f));
 }
 
 // ============================================================
 // Complex hyperbolic
 // ============================================================
-KOKKOS_INLINE_FUNCTION ffcomplex sinh(ffcomplex z) {
-    ffloat ca, sa, cb, sb;
+KOKKOS_INLINE_FUNCTION FloatFloatComplex sinh(FloatFloatComplex z) {
+    FloatFloat ca, sa, cb, sb;
     sinhcosh(z.re, ca, sa);
     sincos(z.im, cb, sb);
-    return ffcomplex(ffmul(sa, cb), ffmul(ca, sb));
+    return FloatFloatComplex(multiply(sa, cb), multiply(ca, sb));
 }
-KOKKOS_INLINE_FUNCTION ffcomplex cosh(ffcomplex z) {
-    ffloat ca, sa, cb, sb;
+KOKKOS_INLINE_FUNCTION FloatFloatComplex cosh(FloatFloatComplex z) {
+    FloatFloat ca, sa, cb, sb;
     sinhcosh(z.re, ca, sa);
     sincos(z.im, cb, sb);
-    return ffcomplex(ffmul(ca, cb), ffmul(sa, sb));
+    return FloatFloatComplex(multiply(ca, cb), multiply(sa, sb));
 }
-KOKKOS_INLINE_FUNCTION ffcomplex tanh(ffcomplex z) {
-    ffloat T = tanh(z.re);
-    ffloat cb, sb;
+KOKKOS_INLINE_FUNCTION FloatFloatComplex tanh(FloatFloatComplex z) {
+    FloatFloat T = tanh(z.re);
+    FloatFloat cb, sb;
     sincos(z.im, cb, sb);
-    ffloat T2    = ffmul(T, T);
-    ffloat denom = ffadd(ffmul(cb, cb), ffmul(T2, ffmul(sb, sb)));
-    return ffcomplex(ffdiv(T, denom),
-                     ffdiv(ffmul(ffmul(sb, cb), ffsub(ffloat(1.0f), T2)), denom));
+    FloatFloat T2    = multiply(T, T);
+    FloatFloat denom = add(multiply(cb, cb), multiply(T2, multiply(sb, sb)));
+    return FloatFloatComplex(divide(T, denom),
+                     divide(multiply(multiply(sb, cb), subtract(FloatFloat(1.0f), T2)), denom));
 }
 
 // ============================================================
 // Complex inverse hyperbolic
 // ============================================================
-KOKKOS_INLINE_FUNCTION ffcomplex asinh(ffcomplex z) {
-    return log(z + sqrt(z*z + ffcomplex(ffloat(1.0f))));
+KOKKOS_INLINE_FUNCTION FloatFloatComplex asinh(FloatFloatComplex z) {
+    return log(z + sqrt(z*z + FloatFloatComplex(FloatFloat(1.0f))));
 }
-KOKKOS_INLINE_FUNCTION ffcomplex acosh(ffcomplex z) {
-    return log(z + sqrt(z*z - ffcomplex(ffloat(1.0f))));
+KOKKOS_INLINE_FUNCTION FloatFloatComplex acosh(FloatFloatComplex z) {
+    return log(z + sqrt(z*z - FloatFloatComplex(FloatFloat(1.0f))));
 }
-KOKKOS_INLINE_FUNCTION ffcomplex atanh(ffcomplex z) {
-    ffcomplex one = ffcomplex(ffloat(1.0f));
-    ffcomplex lg  = log((one + z) / (one - z));
-    return ffcomplex(ffmulf(lg.re, 0.5f), ffmulf(lg.im, 0.5f));
+KOKKOS_INLINE_FUNCTION FloatFloatComplex atanh(FloatFloatComplex z) {
+    FloatFloatComplex one = FloatFloatComplex(FloatFloat(1.0f));
+    FloatFloatComplex lg  = log((one + z) / (one - z));
+    return FloatFloatComplex(multiply_scalar(lg.re, 0.5f), multiply_scalar(lg.im, 0.5f));
 }
 
 // ============================================================
 // Complex power and polar
 // ============================================================
-KOKKOS_INLINE_FUNCTION ffcomplex pow(ffcomplex z, ffcomplex w) {
-    if (z.re.hi == 0.0f && z.im.hi == 0.0f) return ffcomplex();
+KOKKOS_INLINE_FUNCTION FloatFloatComplex pow(FloatFloatComplex z, FloatFloatComplex w) {
+    if (z.re.hi == 0.0f && z.im.hi == 0.0f) return FloatFloatComplex();
     return exp(w * log(z));
 }
 
-KOKKOS_INLINE_FUNCTION ffcomplex polar(ffloat r, ffloat theta) {
-    ffloat c, s;
+KOKKOS_INLINE_FUNCTION FloatFloatComplex polar(FloatFloat r, FloatFloat theta) {
+    FloatFloat c, s;
     sincos(theta, c, s);
-    return ffcomplex(ffmul(r, c), ffmul(r, s));
+    return FloatFloatComplex(multiply(r, c), multiply(r, s));
 }
 
-} // namespace ffun
-} // namespace quad
+} // namespace Experimental
+} // namespace Kokkos
+
+// ============================================================
+// Re-exposure under namespace Kokkos (T0.4/T2.0)
+// ============================================================
+// Mirror of ff_math.hpp: so Kokkos::exp(ffc) works identically to
+// Kokkos::exp(Kokkos::complex<double>). One-line forwards. Arithmetic operators
+// are reached directly / via ADL and are not re-exposed here.
+namespace Kokkos {
+// clang-format off
+KOKKOS_INLINE_FUNCTION Experimental::FloatFloat        abs(Experimental::FloatFloatComplex z)   { return Experimental::abs(z); }
+KOKKOS_INLINE_FUNCTION Experimental::FloatFloatComplex conj(Experimental::FloatFloatComplex z)  { return Experimental::conj(z); }
+KOKKOS_INLINE_FUNCTION Experimental::FloatFloatComplex sqrt(Experimental::FloatFloatComplex z)  { return Experimental::sqrt(z); }
+KOKKOS_INLINE_FUNCTION Experimental::FloatFloatComplex exp(Experimental::FloatFloatComplex z)   { return Experimental::exp(z); }
+KOKKOS_INLINE_FUNCTION Experimental::FloatFloatComplex log(Experimental::FloatFloatComplex z)   { return Experimental::log(z); }
+KOKKOS_INLINE_FUNCTION Experimental::FloatFloatComplex log10(Experimental::FloatFloatComplex z) { return Experimental::log10(z); }
+KOKKOS_INLINE_FUNCTION Experimental::FloatFloatComplex sin(Experimental::FloatFloatComplex z)   { return Experimental::sin(z); }
+KOKKOS_INLINE_FUNCTION Experimental::FloatFloatComplex cos(Experimental::FloatFloatComplex z)   { return Experimental::cos(z); }
+KOKKOS_INLINE_FUNCTION Experimental::FloatFloatComplex tan(Experimental::FloatFloatComplex z)   { return Experimental::tan(z); }
+KOKKOS_INLINE_FUNCTION Experimental::FloatFloatComplex asin(Experimental::FloatFloatComplex z)  { return Experimental::asin(z); }
+KOKKOS_INLINE_FUNCTION Experimental::FloatFloatComplex acos(Experimental::FloatFloatComplex z)  { return Experimental::acos(z); }
+KOKKOS_INLINE_FUNCTION Experimental::FloatFloatComplex atan(Experimental::FloatFloatComplex z)  { return Experimental::atan(z); }
+KOKKOS_INLINE_FUNCTION Experimental::FloatFloatComplex sinh(Experimental::FloatFloatComplex z)  { return Experimental::sinh(z); }
+KOKKOS_INLINE_FUNCTION Experimental::FloatFloatComplex cosh(Experimental::FloatFloatComplex z)  { return Experimental::cosh(z); }
+KOKKOS_INLINE_FUNCTION Experimental::FloatFloatComplex tanh(Experimental::FloatFloatComplex z)  { return Experimental::tanh(z); }
+KOKKOS_INLINE_FUNCTION Experimental::FloatFloatComplex asinh(Experimental::FloatFloatComplex z) { return Experimental::asinh(z); }
+KOKKOS_INLINE_FUNCTION Experimental::FloatFloatComplex acosh(Experimental::FloatFloatComplex z) { return Experimental::acosh(z); }
+KOKKOS_INLINE_FUNCTION Experimental::FloatFloatComplex atanh(Experimental::FloatFloatComplex z) { return Experimental::atanh(z); }
+KOKKOS_INLINE_FUNCTION Experimental::FloatFloatComplex pow(Experimental::FloatFloatComplex z, Experimental::FloatFloatComplex w) { return Experimental::pow(z, w); }
+// clang-format on
+}  // namespace Kokkos

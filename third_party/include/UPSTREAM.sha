@@ -1,0 +1,17 @@
+# Provenance for the four vendored extended-precision headers.
+# Refresh via: cp from kokkos-extended-precision-demo@<sha>:third_party/include/
+# Do NOT include qf_math.hpp / qf_complex.hpp — QF integration is a separate task.
+
+source_repo:   https://github.com/ReetBarik/kokkos-extended-precision-demo
+source_branch: main
+source_sha:    5ae2f800162ef4486c121e21301ff0e81615a45c
+source_date:   2026-08-09 20:26:05 -0500
+files:
+  - dd_math.hpp
+  - dd_complex.hpp
+  - ff_math.hpp
+  - ff_complex.hpp
+
+# As of this commit the four files above are byte-identical to upstream.
+# A "local_patches:" block is appended in the next commit, which re-applies
+# the Agentic-local delta that upstream does not carry.

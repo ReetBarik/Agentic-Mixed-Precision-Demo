@@ -1,7 +1,43 @@
+// SPDX-License-Identifier: LicenseRef-DHB-License
+// SPDX-FileCopyrightText: Copyright (c) 2024 David H. Bailey
+// SPDX-FileCopyrightText: Modifications Copyright (c) 2026 UChicago Argonne, LLC
+//
+// Ported from DDFUN v04:
+//   https://www.davidhbailey.com/dhbsoftware/ddfun-v04.tar.gz
+//   Original author: David H. Bailey (LBNL retired / UC Davis)
+//   Original license: DHB-License (modified BSD-3-Clause with §3
+//     grant-back clause). Full text: LICENSES/LicenseRef-DHB-License.txt
+//     or https://www.davidhbailey.com/dhbsoftware/DHB-License.txt.
+//
+// This C++/Kokkos port is a derivative work distributed under the
+// same DHB-License. See §3 of that license regarding upstream
+// contribution rights. This is the complex layer; it builds on the
+// double-double real arithmetic in dd_math.hpp (also DHB-License).
+//
+// Modifications from the original DDFUN v04 sources:
+//   * Translated the complex double-double routines from Fortran-90
+//     (ddfunc.f90 / the ddc* entry points) to header-only C++17.
+//   * Adapted to Kokkos: every function KOKKOS_INLINE_FUNCTION for
+//     host + device portability across CUDA/HIP/SYCL/OpenMP-target.
+//   * Namespaced as Kokkos::Experimental::DoubleDoubleComplex (a
+//     bespoke struct, not yet Kokkos::complex<DoubleDouble>) with
+//     STL-style free functions and ADL-friendly re-exposure under
+//     namespace Kokkos, for potential upstreaming to Kokkos.
+//   * See docs/TEST_SUITE_PLAN.md "Upstreaming considerations" for
+//     naming and API conventions.
+
 #pragma once
-// Double-double complex arithmetic — namespace quad::ddfun
+
+// Double-double complex arithmetic — Kokkos::Experimental::DoubleDoubleComplex.
 // All functions KOKKOS_INLINE_FUNCTION (host + device via Kokkos/CUDA).
 // Depends on dd_math.hpp.
+//
+// Ported from DDFUN (David H. Bailey, Lawrence Berkeley National Lab).
+//
+// Naming follows dd_math.hpp (T0.4): type + math live under
+// Kokkos::Experimental for eventual upstreaming. This remains a bespoke struct
+// rather than Kokkos::complex<DoubleDouble> — that integration is a separate
+// future task.
 
 #include <dd_math.hpp>
 
@@ -9,155 +45,130 @@
 #  include <ostream>
 #endif
 
-namespace quad {
-namespace ddfun {
+namespace Kokkos {
+namespace Experimental {
 
 // ============================================================
-// ddcomplex struct
+// DoubleDoubleComplex struct
 // ============================================================
-struct ddcomplex {
-    ddouble re;
-    ddouble im;
+struct DoubleDoubleComplex {
+    DoubleDouble re;
+    DoubleDouble im;
 
-    KOKKOS_INLINE_FUNCTION ddcomplex() : re(0.0), im(0.0) {}
-    KOKKOS_INLINE_FUNCTION ddcomplex(double r)              : re(r),    im(0.0) {}
-    KOKKOS_INLINE_FUNCTION ddcomplex(ddouble r)             : re(r),    im(0.0) {}
-    KOKKOS_INLINE_FUNCTION ddcomplex(double r, double i)    : re(r),    im(i)   {}
-    KOKKOS_INLINE_FUNCTION ddcomplex(ddouble r, ddouble i)  : re(r),    im(i)   {}
-    KOKKOS_INLINE_FUNCTION ddcomplex(const ddcomplex& o)    : re(o.re), im(o.im){}
-    KOKKOS_INLINE_FUNCTION ddcomplex& operator=(const ddcomplex& o) {
+    KOKKOS_INLINE_FUNCTION DoubleDoubleComplex() : re(0.0), im(0.0) {}
+    KOKKOS_INLINE_FUNCTION DoubleDoubleComplex(double r)                     : re(r),    im(0.0) {}
+    KOKKOS_INLINE_FUNCTION DoubleDoubleComplex(DoubleDouble r)               : re(r),    im(0.0) {}
+    KOKKOS_INLINE_FUNCTION DoubleDoubleComplex(double r, double i)           : re(r),    im(i)   {}
+    KOKKOS_INLINE_FUNCTION DoubleDoubleComplex(DoubleDouble r, DoubleDouble i) : re(r),  im(i)   {}
+    KOKKOS_INLINE_FUNCTION DoubleDoubleComplex(const DoubleDoubleComplex& o) : re(o.re), im(o.im){}
+    KOKKOS_INLINE_FUNCTION DoubleDoubleComplex& operator=(const DoubleDoubleComplex& o) {
         re = o.re; im = o.im; return *this;
     }
-    KOKKOS_INLINE_FUNCTION ddcomplex& operator=(ddouble r) {
-        re = r; im = ddouble(0.0); return *this;
+    KOKKOS_INLINE_FUNCTION DoubleDoubleComplex& operator=(DoubleDouble r) {
+        re = r; im = DoubleDouble(0.0); return *this;
     }
 
     // Arithmetic
-    KOKKOS_INLINE_FUNCTION ddcomplex operator+(ddcomplex b) const {
-        return ddcomplex(ddadd(re, b.re), ddadd(im, b.im));
+    KOKKOS_INLINE_FUNCTION DoubleDoubleComplex operator+(DoubleDoubleComplex b) const {
+        return DoubleDoubleComplex(add(re, b.re), add(im, b.im));
     }
-    KOKKOS_INLINE_FUNCTION ddcomplex operator-(ddcomplex b) const {
-        return ddcomplex(ddsub(re, b.re), ddsub(im, b.im));
+    KOKKOS_INLINE_FUNCTION DoubleDoubleComplex operator-(DoubleDoubleComplex b) const {
+        return DoubleDoubleComplex(subtract(re, b.re), subtract(im, b.im));
     }
-    KOKKOS_INLINE_FUNCTION ddcomplex operator*(ddcomplex b) const {
+    KOKKOS_INLINE_FUNCTION DoubleDoubleComplex operator*(DoubleDoubleComplex b) const {
         // (a+bi)(c+di) = (ac-bd) + (ad+bc)i
-        return ddcomplex(ddsub(ddmul(re, b.re), ddmul(im, b.im)),
-                         ddadd(ddmul(re, b.im), ddmul(im, b.re)));
+        return DoubleDoubleComplex(subtract(multiply(re, b.re), multiply(im, b.im)),
+                         add(multiply(re, b.im), multiply(im, b.re)));
     }
-    KOKKOS_INLINE_FUNCTION ddcomplex operator/(ddcomplex b) const {
+    KOKKOS_INLINE_FUNCTION DoubleDoubleComplex operator/(DoubleDoubleComplex b) const {
         if (b.re.hi == 0.0 && b.im.hi == 0.0) {
             Kokkos::printf("DDCOMPLEX: division by zero\n");
-            return ddcomplex();
+            return DoubleDoubleComplex();
         }
         // (a+bi)/(c+di) = [(ac+bd) + (bc-ad)i] / (c²+d²)
-        ddouble denom = ddadd(ddmul(b.re, b.re), ddmul(b.im, b.im));
-        ddouble inv   = dddiv(ddouble(1.0), denom);
-        return ddcomplex(ddmul(ddadd(ddmul(re, b.re), ddmul(im, b.im)), inv),
-                         ddmul(ddsub(ddmul(im, b.re), ddmul(re, b.im)), inv));
+        DoubleDouble denom = add(multiply(b.re, b.re), multiply(b.im, b.im));
+        DoubleDouble inv   = divide(DoubleDouble(1.0), denom);
+        return DoubleDoubleComplex(multiply(add(multiply(re, b.re), multiply(im, b.im)), inv),
+                         multiply(subtract(multiply(im, b.re), multiply(re, b.im)), inv));
     }
-    KOKKOS_INLINE_FUNCTION ddcomplex operator-() const {
-        return ddcomplex(ddneg(re), ddneg(im));
+    KOKKOS_INLINE_FUNCTION DoubleDoubleComplex operator-() const {
+        return DoubleDoubleComplex(negate(re), negate(im));
     }
-    KOKKOS_INLINE_FUNCTION ddcomplex operator+() const { return *this; }
 
-    KOKKOS_INLINE_FUNCTION ddcomplex& operator+=(ddcomplex b) { *this = *this + b; return *this; }
-    KOKKOS_INLINE_FUNCTION ddcomplex& operator-=(ddcomplex b) { *this = *this - b; return *this; }
-    KOKKOS_INLINE_FUNCTION ddcomplex& operator*=(ddcomplex b) { *this = *this * b; return *this; }
-    KOKKOS_INLINE_FUNCTION ddcomplex& operator/=(ddcomplex b) { *this = *this / b; return *this; }
+    KOKKOS_INLINE_FUNCTION DoubleDoubleComplex& operator+=(DoubleDoubleComplex b) { *this = *this + b; return *this; }
+    KOKKOS_INLINE_FUNCTION DoubleDoubleComplex& operator-=(DoubleDoubleComplex b) { *this = *this - b; return *this; }
+    KOKKOS_INLINE_FUNCTION DoubleDoubleComplex& operator*=(DoubleDoubleComplex b) { *this = *this * b; return *this; }
+    KOKKOS_INLINE_FUNCTION DoubleDoubleComplex& operator/=(DoubleDoubleComplex b) { *this = *this / b; return *this; }
 
-    KOKKOS_INLINE_FUNCTION bool operator==(ddcomplex b) const { return re==b.re && im==b.im; }
-    KOKKOS_INLINE_FUNCTION bool operator!=(ddcomplex b) const { return !(*this == b); }
+    KOKKOS_INLINE_FUNCTION bool operator==(DoubleDoubleComplex b) const { return re==b.re && im==b.im; }
+    KOKKOS_INLINE_FUNCTION bool operator!=(DoubleDoubleComplex b) const { return !(*this == b); }
 
-    KOKKOS_INLINE_FUNCTION ddouble real() const { return re; }
-    KOKKOS_INLINE_FUNCTION ddouble imag() const { return im; }
+    KOKKOS_INLINE_FUNCTION DoubleDouble real() const { return re; }
+    KOKKOS_INLINE_FUNCTION DoubleDouble imag() const { return im; }
 };
 
 #ifndef __CUDA_ARCH__
-inline std::ostream& operator<<(std::ostream& os, const ddcomplex& z) {
+inline std::ostream& operator<<(std::ostream& os, const DoubleDoubleComplex& z) {
     os << "(" << z.re << ") + (" << z.im << ")i";
     return os;
 }
 #endif
 
 // ============================================================
-// Mixed ddouble × ddcomplex arithmetic
+// Mixed DoubleDouble × DoubleDoubleComplex arithmetic
 // ============================================================
-KOKKOS_INLINE_FUNCTION ddcomplex operator+(ddcomplex z, ddouble r) { return ddcomplex(ddadd(z.re, r), z.im); }
-KOKKOS_INLINE_FUNCTION ddcomplex operator+(ddouble r, ddcomplex z) { return ddcomplex(ddadd(r, z.re), z.im); }
-KOKKOS_INLINE_FUNCTION ddcomplex operator-(ddcomplex z, ddouble r) { return ddcomplex(ddsub(z.re, r), z.im); }
-KOKKOS_INLINE_FUNCTION ddcomplex operator-(ddouble r, ddcomplex z) { return ddcomplex(ddsub(r, z.re), ddneg(z.im)); }
-KOKKOS_INLINE_FUNCTION ddcomplex operator*(ddcomplex z, ddouble r) { return ddcomplex(ddmul(z.re, r), ddmul(z.im, r)); }
-KOKKOS_INLINE_FUNCTION ddcomplex operator*(ddouble r, ddcomplex z) { return ddcomplex(ddmul(r, z.re), ddmul(r, z.im)); }
-KOKKOS_INLINE_FUNCTION ddcomplex operator/(ddcomplex z, ddouble r) { return ddcomplex(dddiv(z.re, r), dddiv(z.im, r)); }
-KOKKOS_INLINE_FUNCTION ddcomplex operator/(ddouble r, ddcomplex z) { return ddcomplex(r) / z; }
+KOKKOS_INLINE_FUNCTION DoubleDoubleComplex operator+(DoubleDoubleComplex z, DoubleDouble r) { return DoubleDoubleComplex(add(z.re, r), z.im); }
+KOKKOS_INLINE_FUNCTION DoubleDoubleComplex operator+(DoubleDouble r, DoubleDoubleComplex z) { return DoubleDoubleComplex(add(r, z.re), z.im); }
+KOKKOS_INLINE_FUNCTION DoubleDoubleComplex operator-(DoubleDoubleComplex z, DoubleDouble r) { return DoubleDoubleComplex(subtract(z.re, r), z.im); }
+KOKKOS_INLINE_FUNCTION DoubleDoubleComplex operator-(DoubleDouble r, DoubleDoubleComplex z) { return DoubleDoubleComplex(subtract(r, z.re), negate(z.im)); }
+KOKKOS_INLINE_FUNCTION DoubleDoubleComplex operator*(DoubleDoubleComplex z, DoubleDouble r) { return DoubleDoubleComplex(multiply(z.re, r), multiply(z.im, r)); }
+KOKKOS_INLINE_FUNCTION DoubleDoubleComplex operator*(DoubleDouble r, DoubleDoubleComplex z) { return DoubleDoubleComplex(multiply(r, z.re), multiply(r, z.im)); }
+KOKKOS_INLINE_FUNCTION DoubleDoubleComplex operator/(DoubleDoubleComplex z, DoubleDouble r) { return DoubleDoubleComplex(divide(z.re, r), divide(z.im, r)); }
+KOKKOS_INLINE_FUNCTION DoubleDoubleComplex operator/(DoubleDouble r, DoubleDoubleComplex z) { return DoubleDoubleComplex(r) / z; }
 
 // ============================================================
-// Mixed double × ddcomplex arithmetic
+// Mixed double × DoubleDoubleComplex arithmetic
 // ============================================================
-KOKKOS_INLINE_FUNCTION ddcomplex operator+(ddcomplex z, double b) { return z + ddouble(b); }
-KOKKOS_INLINE_FUNCTION ddcomplex operator+(double b, ddcomplex z) { return ddouble(b) + z; }
-KOKKOS_INLINE_FUNCTION ddcomplex operator-(ddcomplex z, double b) { return z - ddouble(b); }
-KOKKOS_INLINE_FUNCTION ddcomplex operator-(double b, ddcomplex z) { return ddouble(b) - z; }
-KOKKOS_INLINE_FUNCTION ddcomplex operator*(ddcomplex z, double b) { return z * ddouble(b); }
-KOKKOS_INLINE_FUNCTION ddcomplex operator*(double b, ddcomplex z) { return ddouble(b) * z; }
-KOKKOS_INLINE_FUNCTION ddcomplex operator/(ddcomplex z, double b) { return z / ddouble(b); }
-KOKKOS_INLINE_FUNCTION ddcomplex operator/(double b, ddcomplex z) { return ddouble(b) / z; }
+KOKKOS_INLINE_FUNCTION DoubleDoubleComplex operator+(DoubleDoubleComplex z, double b) { return z + DoubleDouble(b); }
+KOKKOS_INLINE_FUNCTION DoubleDoubleComplex operator+(double b, DoubleDoubleComplex z) { return DoubleDouble(b) + z; }
+KOKKOS_INLINE_FUNCTION DoubleDoubleComplex operator-(DoubleDoubleComplex z, double b) { return z - DoubleDouble(b); }
+KOKKOS_INLINE_FUNCTION DoubleDoubleComplex operator-(double b, DoubleDoubleComplex z) { return DoubleDouble(b) - z; }
+KOKKOS_INLINE_FUNCTION DoubleDoubleComplex operator*(DoubleDoubleComplex z, double b) { return z * DoubleDouble(b); }
+KOKKOS_INLINE_FUNCTION DoubleDoubleComplex operator*(double b, DoubleDoubleComplex z) { return DoubleDouble(b) * z; }
+KOKKOS_INLINE_FUNCTION DoubleDoubleComplex operator/(DoubleDoubleComplex z, double b) { return z / DoubleDouble(b); }
+KOKKOS_INLINE_FUNCTION DoubleDoubleComplex operator/(double b, DoubleDoubleComplex z) { return DoubleDouble(b) / z; }
 
 // ============================================================
 // Basic complex operations
 // ============================================================
 
-// Hypot-style scaled magnitude: overflow-safe complex abs.
-//
-// The naive form sqrt(re*re + im*im) squares each limb, overflowing whenever
-// |component| > sqrt(DBL_MAX) ~ 1.34e154. dd survives this in practice on the box
-// workloads (magnitudes stay far below the double range), but the ff sibling
-// (ff_complex.hpp) has the same algorithm and does overflow at sqrt(FLT_MAX) ~ 1.84e19,
-// producing nans on ~half of BIN inputs (PHASE_2_FF_BIN_DIAGNOSIS_2026-07-29.md).
-// Applied here too for symmetry — same bug class, closed in both.
-//
-// Algorithm: factor out the larger component before squaring.
-//   mx = max(|re|, |im|)
-//   if mx == 0: return 0
-//   |z| = mx * sqrt((re/mx)^2 + (im/mx)^2)
-// Cost: 2 abs + 2 div + 2 mul + 1 add + 1 sqrt + 1 mul (vs. naive 2 mul + 1 add + 1 sqrt).
-// Correctness: rx, ry in [-1, 1] so rx^2 + ry^2 in [1, 2] — no exponent overflow.
-// Bonus: cures naive-form underflow when both components are tiny.
-KOKKOS_INLINE_FUNCTION ddouble abs(ddcomplex z) {
-    ddouble ax = abs(z.re);
-    ddouble ay = abs(z.im);
-    ddouble mx = (ax.hi >= ay.hi) ? ax : ay;
-    if (mx.hi == 0.0) return ddouble(0.0);
-    ddouble rx = dddiv(ax, mx);
-    ddouble ry = dddiv(ay, mx);
-    return ddmul(mx, sqrt(ddadd(ddmul(rx, rx), ddmul(ry, ry))));
+KOKKOS_INLINE_FUNCTION DoubleDouble abs(DoubleDoubleComplex z) {
+    return sqrt(add(multiply(z.re, z.re), multiply(z.im, z.im)));
 }
-KOKKOS_INLINE_FUNCTION ddcomplex conj(ddcomplex z) {
-    return ddcomplex(z.re, ddneg(z.im));
+KOKKOS_INLINE_FUNCTION DoubleDoubleComplex conj(DoubleDoubleComplex z) {
+    return DoubleDoubleComplex(z.re, negate(z.im));
 }
 
 // ============================================================
 // Complex square root
 // ============================================================
-KOKKOS_INLINE_FUNCTION ddcomplex sqrt(ddcomplex z) {
-    if (z.re.hi == 0.0 && z.im.hi == 0.0) return ddcomplex();
+KOKKOS_INLINE_FUNCTION DoubleDoubleComplex sqrt(DoubleDoubleComplex z) {
+    if (z.re.hi == 0.0 && z.im.hi == 0.0) return DoubleDoubleComplex();
     // B = sqrt((R+A1)/2) + i*sign(A2)*sqrt((R-A1)/2)  where R = |z|
-    // Use the overflow-safe complex abs above rather than recomputing re^2 + im^2
-    // inline (same overflow class, same fix, one implementation).
-    ddouble r  = abs(z);
-    ddouble a1 = abs(z.re);
-    ddouble s2 = ddmuld(ddadd(r, a1), 0.5);
-    ddouble s0 = sqrt(s2);
-    ddouble s1 = ddmuld(s0, 2.0);
-    ddcomplex b;
+    DoubleDouble r  = sqrt(add(multiply(z.re, z.re), multiply(z.im, z.im)));
+    DoubleDouble a1 = abs(z.re);
+    DoubleDouble s2 = multiply_scalar(add(r, a1), 0.5);
+    DoubleDouble s0 = sqrt(s2);
+    DoubleDouble s1 = multiply_scalar(s0, 2.0);
+    DoubleDoubleComplex b;
     if (z.re.hi >= 0.0) {
         b.re = s0;
-        b.im = dddiv(z.im, s1);
+        b.im = divide(z.im, s1);
     } else {
-        b.re = dddiv(z.im, s1);
-        if (b.re.hi < 0.0) b.re = ddneg(b.re);
+        b.re = divide(z.im, s1);
+        if (b.re.hi < 0.0) b.re = negate(b.re);
         b.im = s0;
-        if (z.im.hi < 0.0) b.im = ddneg(b.im);
+        if (z.im.hi < 0.0) b.im = negate(b.im);
     }
     return b;
 }
@@ -165,139 +176,169 @@ KOKKOS_INLINE_FUNCTION ddcomplex sqrt(ddcomplex z) {
 // ============================================================
 // Complex exp / log
 // ============================================================
-KOKKOS_INLINE_FUNCTION ddcomplex exp(ddcomplex z) {
-    ddouble er = exp(z.re);
-    ddouble c, s;
+KOKKOS_INLINE_FUNCTION DoubleDoubleComplex exp(DoubleDoubleComplex z) {
+    DoubleDouble er = exp(z.re);
+    DoubleDouble c, s;
     sincos(z.im, c, s);
-    return ddcomplex(ddmul(er, c), ddmul(er, s));
+    return DoubleDoubleComplex(multiply(er, c), multiply(er, s));
 }
 
-KOKKOS_INLINE_FUNCTION ddcomplex log(ddcomplex z) {
-    ddouble modulus = abs(z);
-    ddouble arg     = atan2(z.im, z.re); // atan2(im, re)
-    return ddcomplex(log(modulus), arg);
+KOKKOS_INLINE_FUNCTION DoubleDoubleComplex log(DoubleDoubleComplex z) {
+    DoubleDouble modulus = abs(z);
+    DoubleDouble arg     = atan2(z.im, z.re); // atan2(im, re)
+    return DoubleDoubleComplex(log(modulus), arg);
 }
 
-KOKKOS_INLINE_FUNCTION ddcomplex log10(ddcomplex z) {
-    ddcomplex lg = log(z);
-    ddouble ln10 = dd_log10();
-    return ddcomplex(dddiv(lg.re, ln10), dddiv(lg.im, ln10));
+KOKKOS_INLINE_FUNCTION DoubleDoubleComplex log10(DoubleDoubleComplex z) {
+    DoubleDoubleComplex lg = log(z);
+    DoubleDouble ln10 = DoubleDouble_log10();
+    return DoubleDoubleComplex(divide(lg.re, ln10), divide(lg.im, ln10));
 }
 
 // ============================================================
 // Complex trig
 // ============================================================
-KOKKOS_INLINE_FUNCTION ddcomplex sin(ddcomplex z) {
+KOKKOS_INLINE_FUNCTION DoubleDoubleComplex sin(DoubleDoubleComplex z) {
     // sin(a+bi) = sin(a)*cosh(b) + i*cos(a)*sinh(b)
-    ddouble ca, sa, cb, sb;
+    DoubleDouble ca, sa, cb, sb;
     sincos(z.re, ca, sa);
     sinhcosh(z.im, cb, sb);
-    return ddcomplex(ddmul(sa, cb), ddmul(ca, sb));
+    return DoubleDoubleComplex(multiply(sa, cb), multiply(ca, sb));
 }
-KOKKOS_INLINE_FUNCTION ddcomplex cos(ddcomplex z) {
+KOKKOS_INLINE_FUNCTION DoubleDoubleComplex cos(DoubleDoubleComplex z) {
     // cos(a+bi) = cos(a)*cosh(b) - i*sin(a)*sinh(b)
-    ddouble ca, sa, cb, sb;
+    DoubleDouble ca, sa, cb, sb;
     sincos(z.re, ca, sa);
     sinhcosh(z.im, cb, sb);
-    return ddcomplex(ddmul(ca, cb), ddneg(ddmul(sa, sb)));
+    return DoubleDoubleComplex(multiply(ca, cb), negate(multiply(sa, sb)));
 }
-KOKKOS_INLINE_FUNCTION ddcomplex tan(ddcomplex z) {
+KOKKOS_INLINE_FUNCTION DoubleDoubleComplex tan(DoubleDoubleComplex z) {
     return sin(z) / cos(z);
 }
 
 // ============================================================
 // Complex inverse trig
 // ============================================================
-KOKKOS_INLINE_FUNCTION ddcomplex asin(ddcomplex z) {
+KOKKOS_INLINE_FUNCTION DoubleDoubleComplex asin(DoubleDoubleComplex z) {
     // asin(z) = -i * log(iz + sqrt(1 - z^2))
-    ddcomplex iz  = ddcomplex(ddneg(z.im), z.re);
-    ddcomplex z2  = z * z;
-    ddcomplex one_minus_z2 = ddcomplex(ddouble(1.0)) - z2;
-    ddcomplex sum = iz + sqrt(one_minus_z2);
-    ddcomplex lg  = log(sum);
+    DoubleDoubleComplex iz  = DoubleDoubleComplex(negate(z.im), z.re);
+    DoubleDoubleComplex z2  = z * z;
+    DoubleDoubleComplex one_minus_z2 = DoubleDoubleComplex(DoubleDouble(1.0)) - z2;
+    DoubleDoubleComplex sum = iz + sqrt(one_minus_z2);
+    DoubleDoubleComplex lg  = log(sum);
     // multiply by -i: (a+bi)*(-i) = b - ai
-    return ddcomplex(lg.im, ddneg(lg.re));
+    return DoubleDoubleComplex(lg.im, negate(lg.re));
 }
-KOKKOS_INLINE_FUNCTION ddcomplex acos(ddcomplex z) {
+KOKKOS_INLINE_FUNCTION DoubleDoubleComplex acos(DoubleDoubleComplex z) {
     // acos(z) = pi/2 - asin(z)
-    ddouble pi_over_2 = ddmuld(dd_pi(), 0.5);
-    ddcomplex asin_z  = asin(z);
-    return ddcomplex(ddsub(pi_over_2, asin_z.re), ddneg(asin_z.im));
+    DoubleDouble pi_over_2 = multiply_scalar(DoubleDouble_pi(), 0.5);
+    DoubleDoubleComplex asin_z  = asin(z);
+    return DoubleDoubleComplex(subtract(pi_over_2, asin_z.re), negate(asin_z.im));
 }
-KOKKOS_INLINE_FUNCTION ddcomplex atan(ddcomplex z) {
+KOKKOS_INLINE_FUNCTION DoubleDoubleComplex atan(DoubleDoubleComplex z) {
     // atan(z) = (i/2) * log((1-iz)/(1+iz))
-    ddcomplex iz    = ddcomplex(ddneg(z.im), z.re);
-    ddcomplex num   = ddcomplex(ddouble(1.0)) - iz;
-    ddcomplex den   = ddcomplex(ddouble(1.0)) + iz;
-    ddcomplex ratio = num / den;
-    ddcomplex lg    = log(ratio);
+    DoubleDoubleComplex iz    = DoubleDoubleComplex(negate(z.im), z.re);
+    DoubleDoubleComplex num   = DoubleDoubleComplex(DoubleDouble(1.0)) - iz;
+    DoubleDoubleComplex den   = DoubleDoubleComplex(DoubleDouble(1.0)) + iz;
+    DoubleDoubleComplex ratio = num / den;
+    DoubleDoubleComplex lg    = log(ratio);
     // multiply by i/2: (a+bi)*(i/2) = (-b/2) + (a/2)*i
-    return ddcomplex(ddmuld(ddneg(lg.im), 0.5), ddmuld(lg.re, 0.5));
+    return DoubleDoubleComplex(multiply_scalar(negate(lg.im), 0.5), multiply_scalar(lg.re, 0.5));
 }
 
 // ============================================================
 // Complex hyperbolic
 // ============================================================
-KOKKOS_INLINE_FUNCTION ddcomplex sinh(ddcomplex z) {
+KOKKOS_INLINE_FUNCTION DoubleDoubleComplex sinh(DoubleDoubleComplex z) {
     // sinh(a+bi) = sinh(a)*cos(b) + i*cosh(a)*sin(b)
-    ddouble ca, sa, cb, sb;
+    DoubleDouble ca, sa, cb, sb;
     sinhcosh(z.re, ca, sa);
     sincos(z.im, cb, sb);
-    return ddcomplex(ddmul(sa, cb), ddmul(ca, sb));
+    return DoubleDoubleComplex(multiply(sa, cb), multiply(ca, sb));
 }
-KOKKOS_INLINE_FUNCTION ddcomplex cosh(ddcomplex z) {
+KOKKOS_INLINE_FUNCTION DoubleDoubleComplex cosh(DoubleDoubleComplex z) {
     // cosh(a+bi) = cosh(a)*cos(b) + i*sinh(a)*sin(b)
-    ddouble ca, sa, cb, sb;
+    DoubleDouble ca, sa, cb, sb;
     sinhcosh(z.re, ca, sa);
     sincos(z.im, cb, sb);
-    return ddcomplex(ddmul(ca, cb), ddmul(sa, sb));
+    return DoubleDoubleComplex(multiply(ca, cb), multiply(sa, sb));
 }
-KOKKOS_INLINE_FUNCTION ddcomplex tanh(ddcomplex z) {
+KOKKOS_INLINE_FUNCTION DoubleDoubleComplex tanh(DoubleDoubleComplex z) {
     // tanh(a+bi): re = tanh(a) / (cos²(b) + tanh²(a)·sin²(b))
     //             im = sin(b)·cos(b)·(1 - tanh²(a)) / (cos²(b) + tanh²(a)·sin²(b))
     // Denominator ≥ 0 always; uses improved real tanh to avoid cancellation.
-    ddouble T = tanh(z.re);
-    ddouble cb, sb;
+    DoubleDouble T = tanh(z.re);
+    DoubleDouble cb, sb;
     sincos(z.im, cb, sb);
-    ddouble T2    = ddmul(T, T);
-    ddouble denom = ddadd(ddmul(cb, cb), ddmul(T2, ddmul(sb, sb)));
-    return ddcomplex(dddiv(T, denom),
-                     dddiv(ddmul(ddmul(sb, cb), ddsub(ddouble(1.0), T2)), denom));
+    DoubleDouble T2    = multiply(T, T);
+    DoubleDouble denom = add(multiply(cb, cb), multiply(T2, multiply(sb, sb)));
+    return DoubleDoubleComplex(divide(T, denom),
+                     divide(multiply(multiply(sb, cb), subtract(DoubleDouble(1.0), T2)), denom));
 }
 
 // ============================================================
 // Complex inverse hyperbolic
 // ============================================================
-KOKKOS_INLINE_FUNCTION ddcomplex asinh(ddcomplex z) {
+KOKKOS_INLINE_FUNCTION DoubleDoubleComplex asinh(DoubleDoubleComplex z) {
     // asinh(z) = log(z + sqrt(z^2 + 1))
-    return log(z + sqrt(z*z + ddcomplex(ddouble(1.0))));
+    return log(z + sqrt(z*z + DoubleDoubleComplex(DoubleDouble(1.0))));
 }
-KOKKOS_INLINE_FUNCTION ddcomplex acosh(ddcomplex z) {
+KOKKOS_INLINE_FUNCTION DoubleDoubleComplex acosh(DoubleDoubleComplex z) {
     // acosh(z) = log(z + sqrt(z^2 - 1))
-    return log(z + sqrt(z*z - ddcomplex(ddouble(1.0))));
+    return log(z + sqrt(z*z - DoubleDoubleComplex(DoubleDouble(1.0))));
 }
-KOKKOS_INLINE_FUNCTION ddcomplex atanh(ddcomplex z) {
+KOKKOS_INLINE_FUNCTION DoubleDoubleComplex atanh(DoubleDoubleComplex z) {
     // atanh(z) = (1/2)*log((1+z)/(1-z))
-    ddcomplex one = ddcomplex(ddouble(1.0));
-    ddcomplex lg  = log((one + z) / (one - z));
-    return ddcomplex(ddmuld(lg.re, 0.5), ddmuld(lg.im, 0.5));
+    DoubleDoubleComplex one = DoubleDoubleComplex(DoubleDouble(1.0));
+    DoubleDoubleComplex lg  = log((one + z) / (one - z));
+    return DoubleDoubleComplex(multiply_scalar(lg.re, 0.5), multiply_scalar(lg.im, 0.5));
 }
 
 // ============================================================
 // Complex power and polar
 // ============================================================
-KOKKOS_INLINE_FUNCTION ddcomplex pow(ddcomplex z, ddcomplex w) {
+KOKKOS_INLINE_FUNCTION DoubleDoubleComplex pow(DoubleDoubleComplex z, DoubleDoubleComplex w) {
     // z^w = exp(w * log(z))
-    if (z.re.hi == 0.0 && z.im.hi == 0.0) return ddcomplex();
+    if (z.re.hi == 0.0 && z.im.hi == 0.0) return DoubleDoubleComplex();
     return exp(w * log(z));
 }
 
 // polar(r, theta) = r * (cos(theta) + i*sin(theta))
-KOKKOS_INLINE_FUNCTION ddcomplex polar(ddouble r, ddouble theta) {
-    ddouble c, s;
+KOKKOS_INLINE_FUNCTION DoubleDoubleComplex polar(DoubleDouble r, DoubleDouble theta) {
+    DoubleDouble c, s;
     sincos(theta, c, s);
-    return ddcomplex(ddmul(r, c), ddmul(r, s));
+    return DoubleDoubleComplex(multiply(r, c), multiply(r, s));
 }
 
-} // namespace ddfun
-} // namespace quad
+} // namespace Experimental
+} // namespace Kokkos
+
+// ============================================================
+// Re-exposure under namespace Kokkos (T0.4)
+// ============================================================
+// Mirror of dd_math.hpp: so Kokkos::exp(ddc) works identically to
+// Kokkos::exp(Kokkos::complex<double>). One-line forwards. Arithmetic operators
+// are reached directly / via ADL and are not re-exposed here.
+namespace Kokkos {
+// clang-format off
+KOKKOS_INLINE_FUNCTION Experimental::DoubleDouble        abs(Experimental::DoubleDoubleComplex z)   { return Experimental::abs(z); }
+KOKKOS_INLINE_FUNCTION Experimental::DoubleDoubleComplex conj(Experimental::DoubleDoubleComplex z)  { return Experimental::conj(z); }
+KOKKOS_INLINE_FUNCTION Experimental::DoubleDoubleComplex sqrt(Experimental::DoubleDoubleComplex z)  { return Experimental::sqrt(z); }
+KOKKOS_INLINE_FUNCTION Experimental::DoubleDoubleComplex exp(Experimental::DoubleDoubleComplex z)   { return Experimental::exp(z); }
+KOKKOS_INLINE_FUNCTION Experimental::DoubleDoubleComplex log(Experimental::DoubleDoubleComplex z)   { return Experimental::log(z); }
+KOKKOS_INLINE_FUNCTION Experimental::DoubleDoubleComplex log10(Experimental::DoubleDoubleComplex z) { return Experimental::log10(z); }
+KOKKOS_INLINE_FUNCTION Experimental::DoubleDoubleComplex sin(Experimental::DoubleDoubleComplex z)   { return Experimental::sin(z); }
+KOKKOS_INLINE_FUNCTION Experimental::DoubleDoubleComplex cos(Experimental::DoubleDoubleComplex z)   { return Experimental::cos(z); }
+KOKKOS_INLINE_FUNCTION Experimental::DoubleDoubleComplex tan(Experimental::DoubleDoubleComplex z)   { return Experimental::tan(z); }
+KOKKOS_INLINE_FUNCTION Experimental::DoubleDoubleComplex asin(Experimental::DoubleDoubleComplex z)  { return Experimental::asin(z); }
+KOKKOS_INLINE_FUNCTION Experimental::DoubleDoubleComplex acos(Experimental::DoubleDoubleComplex z)  { return Experimental::acos(z); }
+KOKKOS_INLINE_FUNCTION Experimental::DoubleDoubleComplex atan(Experimental::DoubleDoubleComplex z)  { return Experimental::atan(z); }
+KOKKOS_INLINE_FUNCTION Experimental::DoubleDoubleComplex sinh(Experimental::DoubleDoubleComplex z)  { return Experimental::sinh(z); }
+KOKKOS_INLINE_FUNCTION Experimental::DoubleDoubleComplex cosh(Experimental::DoubleDoubleComplex z)  { return Experimental::cosh(z); }
+KOKKOS_INLINE_FUNCTION Experimental::DoubleDoubleComplex tanh(Experimental::DoubleDoubleComplex z)  { return Experimental::tanh(z); }
+KOKKOS_INLINE_FUNCTION Experimental::DoubleDoubleComplex asinh(Experimental::DoubleDoubleComplex z) { return Experimental::asinh(z); }
+KOKKOS_INLINE_FUNCTION Experimental::DoubleDoubleComplex acosh(Experimental::DoubleDoubleComplex z) { return Experimental::acosh(z); }
+KOKKOS_INLINE_FUNCTION Experimental::DoubleDoubleComplex atanh(Experimental::DoubleDoubleComplex z) { return Experimental::atanh(z); }
+KOKKOS_INLINE_FUNCTION Experimental::DoubleDoubleComplex pow(Experimental::DoubleDoubleComplex z, Experimental::DoubleDoubleComplex w) { return Experimental::pow(z, w); }
+// clang-format on
+}  // namespace Kokkos
