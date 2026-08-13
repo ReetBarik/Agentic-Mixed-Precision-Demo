@@ -59,22 +59,6 @@ def _bash(cmd: str) -> subprocess.CompletedProcess:
                           capture_output=True, text=True)
 
 
-def _git_archive(repo: Path, ref: str, subpath: str, dest: Path) -> None:
-    """Extract ``repo@ref:subpath`` into ``dest`` (repo stays on its branch).
-
-    Mirrors agents.validator.validate._git_archive — the dd oracle is materialized from
-    the pinned ddfun_enabled ref, never read from the repo's on-disk working tree."""
-    proc = subprocess.run(["git", "-C", str(repo), "archive", ref, subpath],
-                          capture_output=True)
-    if proc.returncode != 0:
-        raise RuntimeError(f"git archive {ref}:{subpath} failed:\n"
-                           f"{proc.stderr.decode()[-1500:]}")
-    tar = subprocess.run(["tar", "-x", "-C", str(dest)], input=proc.stdout,
-                         capture_output=True)
-    if tar.returncode != 0:
-        raise RuntimeError(f"tar extract failed:\n{tar.stderr.decode()[-1500:]}")
-
-
 def _group_of(integral: str, tree: Path) -> str:
     """The ``box/B<k>m.h`` group header that DEFINES ``integral`` (structural scan)."""
     import re
@@ -184,10 +168,8 @@ def main(argv=None) -> int:
     #    (the Validator's oracle black box — reference only; never a Phase-1 build input).
     print("  materializing + building dd oracle reference ...", flush=True)
     oracle_tree = out / "dd_oracle_tree"
-    oracle_tree.mkdir()
-    _git_archive(Path(args.dd_repo), args.dd_ref, "src/qcdloop", oracle_tree)
-    # Repoint at third_party/include — the fork ships shadowing dd_/ff_ primitives.
-    oracle_headers = _runner.stage_dd_headers(oracle_tree / "src" / "qcdloop")
+    oracle_headers = _runner.materialize_dd_headers(
+        Path(args.dd_repo), args.dd_ref, oracle_tree)
     dd_bin = _runner.build_driver(oracle_headers, "dd", out / "dd_build", kokkos)
     ref = _coeffs(dd_bin, total)
 

@@ -514,11 +514,7 @@ def _build_dd_binary(dd_repo: Path, dd_ref: str, kokkos_root: Path,
                      scratch: Path) -> Path:
     """Archive the ddfun_enabled DD tree, verify via the stub, build the DD driver."""
     tree = scratch / "ddtree"
-    tree.mkdir(parents=True, exist_ok=True)
-    _git_archive(dd_repo, dd_ref, "src/qcdloop", tree)
-    # Repoint the archived tree at third_party/include (the fork ships shadowing
-    # dd_/ff_ primitives that a quoted #include would otherwise win).
-    dd_headers = runner.stage_dd_headers(tree / "src" / "qcdloop")
+    dd_headers = runner.materialize_dd_headers(dd_repo, dd_ref, tree)
     # dd_integrator stub: verify the DD triple is present (raises loudly if not).
     dd_integrator.integrate(dd_headers, dd_headers / "boxGPU.h")
     return runner.build_driver(dd_headers, "dd", scratch / "build", kokkos_root)
@@ -727,18 +723,6 @@ def _git_apply(tree: Path, patch_text: str) -> None:
                        capture_output=True)
     if r.returncode != 0:
         raise RuntimeError(f"git apply failed in {tree}:\n{r.stderr}")
-
-
-def _git_archive(repo: Path, ref: str, subpath: str, dest: Path) -> None:
-    """Extract ``repo@ref:subpath`` into ``dest`` (repo stays on its branch)."""
-    proc = subprocess.run(["git", "-C", str(repo), "archive", ref, subpath],
-                          capture_output=True)
-    if proc.returncode != 0:
-        raise RuntimeError(f"git archive {ref}:{subpath} failed:\n{proc.stderr.decode()[-1500:]}")
-    tar = subprocess.run(["tar", "-x", "-C", str(dest)], input=proc.stdout,
-                         capture_output=True)
-    if tar.returncode != 0:
-        raise RuntimeError(f"tar extract failed:\n{tar.stderr.decode()[-1500:]}")
 
 
 def _working_tree_hash(vanilla_headers: Path, accepted: list) -> str:

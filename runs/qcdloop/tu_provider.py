@@ -79,19 +79,6 @@ def _backend_flags(kokkos_root: Path) -> str:
     return " ".join(flags)
 
 
-def _git_archive(repo: Path, ref: str, subpath: str, dest: Path) -> None:
-    """Extract ``repo@ref:subpath`` into ``dest`` (repo stays on its branch)."""
-    proc = subprocess.run(["git", "-C", str(repo), "archive", ref, subpath],
-                          capture_output=True)
-    if proc.returncode != 0:
-        raise RuntimeError(f"git archive {ref}:{subpath} failed:\n"
-                           f"{proc.stderr.decode()[-1500:]}")
-    tar = subprocess.run(["tar", "-x", "-C", str(dest)], input=proc.stdout,
-                         capture_output=True)
-    if tar.returncode != 0:
-        raise RuntimeError(f"tar extract failed:\n{tar.stderr.decode()[-1500:]}")
-
-
 def _coeffs(binary: Path, total: int) -> dict:
     """Run a driver binary and fold RES lines into {integral:(hi,lo)} flat arrays."""
     r = _bash(f"{binary} --sample-count {total}")
@@ -201,12 +188,8 @@ class TUMeasureProvider:
         oracle_tree = self.out_dir / "dd_oracle_tree"
         if oracle_tree.exists():
             shutil.rmtree(oracle_tree)
-        oracle_tree.mkdir(parents=True)
-        _git_archive(self.dd_repo, self.dd_ref, "src/qcdloop", oracle_tree)
-        # Repoint the archived tree at third_party/include so the oracle and the
-        # candidate flips share one set of DD primitives (the fork ships shadowing
-        # copies that a quoted #include would otherwise win).
-        oracle_headers = _runner.stage_dd_headers(oracle_tree / "src" / "qcdloop")
+        oracle_headers = _runner.materialize_dd_headers(
+            self.dd_repo, self.dd_ref, oracle_tree)
         dd_bin = _runner.build_driver(oracle_headers, "dd",
                                       self.out_dir / "dd_build", self.kokkos)
         self._ref = _coeffs(dd_bin, self.total)

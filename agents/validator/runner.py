@@ -97,13 +97,30 @@ KOKKOS_INLINE_FUNCTION ddouble dd_pi() { return ::Kokkos::Experimental::DoubleDo
 _SHIM_MARKER = "injected by agents/validator/runner.stage_dd_headers"
 
 
+def git_archive(repo: Path, ref: str, subpath: str, dest: Path) -> None:
+    """Extract ``repo@ref:subpath`` into ``dest`` (repo stays on its branch).
+
+    The DD oracle is always materialized from the pinned ref, never read from the
+    repo's on-disk working tree.
+    """
+    proc = subprocess.run(["git", "-C", str(repo), "archive", ref, subpath],
+                          capture_output=True)
+    if proc.returncode != 0:
+        raise RuntimeError(
+            f"git archive {ref}:{subpath} failed:\n{proc.stderr.decode()[-1500:]}")
+    tar = subprocess.run(["tar", "-x", "-C", str(dest)], input=proc.stdout,
+                         capture_output=True)
+    if tar.returncode != 0:
+        raise RuntimeError(f"tar extract failed:\n{tar.stderr.decode()[-1500:]}")
+
+
 def stage_dd_headers(dd_headers: Path) -> Path:
     """Repoint an archived ``ddfun_enabled:src/qcdloop`` tree at the vendored DD headers.
 
     Mutates ``dd_headers`` in place (it must be a throwaway archive dir, never a
-    real checkout) and returns it, so callers can wrap their existing path:
-
-        dd_headers = runner.stage_dd_headers(tree / "src" / "qcdloop")
+    real checkout) and returns it. Prefer :func:`materialize_dd_headers`, which
+    pairs this with the archive step; call this directly only if you already have
+    an archived tree in hand.
 
     Idempotent. Raises if the tree does not look like a ddfun_enabled checkout.
     """
@@ -129,6 +146,22 @@ def stage_dd_headers(dd_headers: Path) -> Path:
     text = text.replace(anchor, anchor + "\n" + _QL_DDFUN_SHIM, 1)
     maths_dd.write_text(text)
     return dd_headers
+
+
+def materialize_dd_headers(dd_repo: Path, dd_ref: str, dest: Path) -> Path:
+    """Archive ``dd_repo@dd_ref:src/qcdloop`` into ``dest`` and stage it for building.
+
+    Returns the header dir to hand to :func:`build_driver` as ``QL_HEADERS``.
+
+    The two steps are fused deliberately: archiving without staging is what left
+    the DD oracle silently reading the fork's own shadowing dd_/ff_ headers
+    instead of third_party/include. Keeping them together means a new caller
+    cannot reintroduce that by forgetting the second call.
+    """
+    dest = Path(dest)
+    dest.mkdir(parents=True, exist_ok=True)
+    git_archive(Path(dd_repo), dd_ref, "src/qcdloop", dest)
+    return stage_dd_headers(dest / "src" / "qcdloop")
 
 
 def build_driver(
