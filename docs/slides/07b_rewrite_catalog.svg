@@ -101,28 +101,34 @@
   </g>
 
   <!-- =================== NEW: Algorithmic rewrite catalog (shifted right to clear header text) =================== -->
-  <g transform="translate(240, 280)">
-    <rect x="0" y="0" width="310" height="50" rx="6" class="new-box"/>
+  <g transform="translate(262, 274)">
+    <rect x="0" y="0" width="310" height="60" rx="6" class="new-box"/>
     <text x="155" y="18" text-anchor="middle" class="lbl" style="fill:#dc2626">Algorithmic rewrite catalog</text>
-    <text x="12" y="34" class="catalog-item">• Kahan / Neumaier compensated sum</text>
-    <text x="12" y="48" class="catalog-item">• TwoProduct compensated multiplication,  etc.</text>
+    <text x="12" y="36" class="catalog-item">• Kahan / Neumaier compensated sum</text>
+    <text x="12" y="52" class="catalog-item">• TwoProduct compensated multiplication,  etc.</text>
   </g>
   <!-- Arrow from bottom of catalog down then RIGHT to Patcher's LEFT edge at ~75% height (y=385) -->
-  <path d="M510 330 L 510 385 L 560 385" class="edge-new"/>
+  <path d="M510 334 L 510 385 L 560 385" class="edge-new"/>
 
   <!-- Precision containers (fallback, name-only, right of Patcher for asymmetry) -->
-  <g transform="translate(675, 280)">
+  <g transform="translate(620, 280)">
     <rect x="0" y="0" width="90" height="50" rx="6" class="container-box"/>
     <text x="45" y="22" text-anchor="middle" class="sub-sm" font-weight="700">dd_math</text>
     <text x="45" y="40" text-anchor="middle" class="sub-sm">(fallback)</text>
   </g>
-  <g transform="translate(775, 280)">
+  <g transform="translate(720, 280)">
+    <rect x="0" y="0" width="90" height="50" rx="6" class="container-box"/>
+    <text x="45" y="22" text-anchor="middle" class="sub-sm" font-weight="700">qf_math</text>
+    <text x="45" y="40" text-anchor="middle" class="sub-sm">(fallback)</text>
+  </g>
+  <g transform="translate(820, 280)">
     <rect x="0" y="0" width="90" height="50" rx="6" class="container-box"/>
     <text x="45" y="22" text-anchor="middle" class="sub-sm" font-weight="700">ff_math</text>
     <text x="45" y="40" text-anchor="middle" class="sub-sm">(fallback)</text>
   </g>
-  <path d="M720 330 L 720 360" stroke="#475569" stroke-width="1.2" stroke-dasharray="3 3" fill="none" marker-end="url(#arrow)"/>
-  <path d="M780 330 L 770 360" stroke="#475569" stroke-width="1.2" stroke-dasharray="3 3" fill="none" marker-end="url(#arrow)"/>
+  <path d="M665 330 L 645 358" stroke="#475569" stroke-width="1.2" stroke-dasharray="3 3" fill="none" marker-end="url(#arrow)"/>
+  <path d="M765 330 L 700 358" stroke="#475569" stroke-width="1.2" stroke-dasharray="3 3" fill="none" marker-end="url(#arrow)"/>
+  <path d="M865 330 L 755 358" stroke="#475569" stroke-width="1.2" stroke-dasharray="3 3" fill="none" marker-end="url(#arrow)"/>
 
   <!-- Validator (name-only) -->
   <g transform="translate(140, 360)">
@@ -136,7 +142,7 @@
 
   <!-- Patcher → Validator (built binary) — elongated to accommodate label above -->
   <path d="M560 425 L 360 425" class="edge"/>
-  <text x="460" y="415" text-anchor="middle" class="edge-lbl">built binary + rewrite or shim</text>
+  <text x="455" y="415" text-anchor="middle" class="edge-lbl">built binary + rewrite/shim</text>
 
   <!-- Validator → Strategy (verdict) -->
   <path d="M250 460 L 250 510 L 1090 510 L 1090 460" class="edge-back"/>
