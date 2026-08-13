@@ -25,6 +25,7 @@
     .verdict-accept { font-weight: 700; fill: #166534; }
     .verdict-reject { font-weight: 700; fill: #991b1b; }
     .verdict-upbump { font-weight: 700; fill: #166534; }
+    .verdict-prune  { font-weight: 700; fill: #64748b; }
     .th { font-size: 12px; font-weight: 700; fill: #172033; }
     .td { font-size: 12px; fill: #172033; }
   </style>
@@ -39,7 +40,7 @@
 
   <!-- Title -->
   <text x="40" y="44" class="title">Strategy walk — <tspan style="fill:#b45309">correctness</tspan> phase</text>
-  <text x="40" y="66" class="sub">For each region: attempt a demotion or, if unsafe at current precision, an up-bump.</text>
+  <text x="40" y="66" class="sub">Queue 1 of 2 — only the regions that miss tolerance at double. Each is up-bumped to the cheapest rung that clears.</text>
 
   <!-- ============ LEFT: precision ladder ============ -->
   <text x="40" y="108" class="h">Precision ladder</text>
@@ -93,8 +94,8 @@
     <text x="0" y="430" class="sub">↓ faster / riskier</text>
 
     <!-- Escalation note: the walk climbs in cost order, cheapest-sufficient -->
-    <text x="0" y="454" class="sub-sm">correctness tries rungs in cost order: qf first, then dd</text>
-    <text x="0" y="470" class="sub-sm">directly if qf does not clear (see trace 6a → 6b).</text>
+    <text x="0" y="454" class="sub-sm">correctness climbs in cost order — qf first, and dd only if</text>
+    <text x="0" y="470" class="sub-sm">the qf rung is unavailable (see trace 2a → 2b).</text>
 
     <!-- Phase legend -->
     <line x1="0" y1="496" x2="36" y2="496" class="arrow-corr" marker-end="url(#arrow-corr-m)"/>
@@ -109,46 +110,49 @@
   <g transform="translate(500, 130)">
     <rect x="0" y="0" width="320" height="490" rx="8" class="queue-box"/>
 
-    <text x="160" y="26" text-anchor="middle" class="panel-title">6 regions, predicted-safest first</text>
+    <text x="160" y="26" text-anchor="middle" class="panel-title">2 of 6 regions miss tolerance</text>
 
     <!-- queue entries (widened) -->
-    <g transform="translate(16, 46)">
+    <g transform="translate(16, 48)">
       <rect x="0" y="0" width="288" height="46" rx="6" class="rnode-safe"/>
-      <text x="10" y="18" class="lbl">1.  R1   double → ff  (demote)</text>
-      <text x="10" y="36" class="sub-sm">op_counts: 2 add, 2 mul  ·  pred_err_ff: 3e-15</text>
-    </g>
-    <g transform="translate(16, 102)">
-      <rect x="0" y="0" width="288" height="46" rx="6" class="rnode-safe"/>
-      <text x="10" y="18" class="lbl">2.  R5   double → ff  (demote)</text>
-      <text x="10" y="36" class="sub-sm">1 sqrt, 1 mul, 1 add  ·  pred_err_ff: 5e-15</text>
-    </g>
-    <g transform="translate(16, 158)">
-      <rect x="0" y="0" width="288" height="46" rx="6" class="rnode-safe"/>
-      <text x="10" y="18" class="lbl">3.  R6   double → ff  (demote)</text>
-      <text x="10" y="36" class="sub-sm">1 mul, 1 add, 1 sub  ·  pred_err_ff: 7e-15</text>
-    </g>
-    <g transform="translate(16, 214)">
-      <rect x="0" y="0" width="288" height="46" rx="6" class="rnode-safe"/>
-      <text x="10" y="18" class="lbl">4.  R4   double → qf  (up-bump)</text>
+      <text x="10" y="18" class="lbl">1.  R4   double → qf  (up-bump)</text>
       <text x="10" y="36" class="sub-sm">1 div, 1 add, 1 sub  ·  cascade from R1 + R2</text>
     </g>
-    <g transform="translate(16, 270)">
-      <rect x="0" y="0" width="288" height="46" rx="6" class="rnode-sing"/>
-      <text x="10" y="18" class="lbl">5.  R3   double → ff  (demote)</text>
-      <text x="10" y="36" class="sub-sm">1 log, 1 add  ·  pred_err_ff: 4e-10  (log)</text>
-    </g>
-    <g transform="translate(16, 326)">
+    <g transform="translate(16, 106)">
       <rect x="0" y="0" width="288" height="46" rx="6" class="rnode-warn"/>
-      <text x="10" y="18" class="lbl">6.  R2   double → qf  (up-bump)</text>
-      <text x="10" y="36" class="sub-sm">2 mul, 1 sub  ·  cancellation hotspot, max_cond 7e3</text>
+      <text x="10" y="18" class="lbl">2.  R2   double → dd  (up-bump)</text>
+      <text x="10" y="36" class="sub-sm">2 mul, 1 sub  ·  cancellation, max_cond 7e3</text>
+    </g>
+
+    <!-- The other four regions never enter this queue -->
+    <line x1="16" y1="176" x2="304" y2="176" stroke="#b45309" stroke-width="1" stroke-dasharray="4 3"/>
+    <text x="16" y="198" class="lbl">Deferred — speedup queue (slide 5)</text>
+    <text x="16" y="216" class="sub-sm">the two queues are disjoint: a region up-bumped here</text>
+    <text x="16" y="232" class="sub-sm">is never demoted later in the same run</text>
+
+    <g transform="translate(16, 244)">
+      <rect x="0" y="0" width="288" height="24" rx="4" class="rnode-safe"/>
+      <text x="10" y="16" class="sub-sm">R1 · 2 add, 2 mul · pred_err_ff 3e-15</text>
+    </g>
+    <g transform="translate(16, 272)">
+      <rect x="0" y="0" width="288" height="24" rx="4" class="rnode-safe"/>
+      <text x="10" y="16" class="sub-sm">R5 · 1 sqrt, 1 mul, 1 add · pred_err_ff 5e-15</text>
+    </g>
+    <g transform="translate(16, 300)">
+      <rect x="0" y="0" width="288" height="24" rx="4" class="rnode-safe"/>
+      <text x="10" y="16" class="sub-sm">R6 · 1 mul, 1 add, 1 sub · pred_err_ff 7e-15</text>
+    </g>
+    <g transform="translate(16, 328)">
+      <rect x="0" y="0" width="288" height="24" rx="4" class="rnode-sing"/>
+      <text x="10" y="16" class="sub-sm">R3 · 1 log, 1 add · pred_err_ff 4e-10 (log)</text>
     </g>
 
     <!-- Prune-check callout -->
-    <g transform="translate(16, 400)">
+    <g transform="translate(16, 384)">
       <text x="0" y="0" class="lbl">Prune check at dequeue</text>
-      <text x="0" y="18" class="sub-sm">float_range_ok: bars demotion — no firings this phase</text>
-      <text x="0" y="34" class="sub-sm">(R2 is flagged, but correctness only ever moves up)</text>
-      <text x="0" y="52" class="sub-sm">chain-dedup: no matches yet (first pass)</text>
+      <text x="0" y="18" class="sub-sm">float_range_ok ✗ on R2 drops the qf rung from its</text>
+      <text x="0" y="34" class="sub-sm">up-targets, so R2's ladder is double → dd (trace 2a).</text>
+      <text x="0" y="54" class="sub-sm">chain-dedup: no matches yet (first pass)</text>
     </g>
   </g>
 
@@ -168,65 +172,41 @@
 
     <!-- rows -->
     <g font-size="12" fill="#172033">
-      <rect x="0" y="26" width="410" height="28" fill="#bbf7d0" stroke="#86efac"/>
-      <text x="10" y="44">1</text>
-      <text x="50" y="44">R1</text>
-      <text x="115" y="44">double → ff</text>
-      <text x="240" y="44" class="verdict-accept">accept</text>
-      <text x="320" y="44">R1 = ff</text>
+      <!-- step 1: R4 clears at the cheapest rung above double -->
+      <rect x="0" y="26" width="410" height="46" fill="#bbf7d0" stroke="#86efac"/>
+      <text x="10" y="46">1</text>
+      <text x="50" y="46">R4</text>
+      <text x="115" y="46">double → qf</text>
+      <text x="240" y="46" class="verdict-upbump">accept ↑</text>
+      <text x="320" y="46">R4 = qf</text>
+      <text x="50" y="64" class="sub-sm" font-style="italic">up-bump: cascade from R1+R2 pushes rel-err past tol at double</text>
 
-      <rect x="0" y="54" width="410" height="28" fill="#bbf7d0" stroke="#86efac"/>
-      <text x="10" y="72">2</text>
-      <text x="50" y="72">R5</text>
-      <text x="115" y="72">double → ff</text>
-      <text x="240" y="72" class="verdict-accept">accept</text>
-      <text x="320" y="72">R5 = ff</text>
+      <!-- step 2a: R2's qf rung is pruned before any attempt is spent -->
+      <rect x="0" y="72" width="410" height="28" fill="#fde68a" stroke="#fcd34d"/>
+      <text x="10" y="90">2a</text>
+      <text x="50" y="90">R2</text>
+      <text x="115" y="90">double → qf</text>
+      <text x="240" y="90" class="verdict-prune">pruned</text>
+      <text x="320" y="90">R2 = double</text>
 
-      <rect x="0" y="82" width="410" height="28" fill="#bbf7d0" stroke="#86efac"/>
-      <text x="10" y="100">3</text>
-      <text x="50" y="100">R6</text>
-      <text x="115" y="100">double → ff</text>
-      <text x="240" y="100" class="verdict-accept">accept</text>
-      <text x="320" y="100">R6 = ff</text>
-
-      <rect x="0" y="110" width="410" height="46" fill="#bbf7d0" stroke="#86efac"/>
-      <text x="10" y="130">4</text>
-      <text x="50" y="130">R4</text>
-      <text x="115" y="130">double → qf</text>
-      <text x="240" y="130" class="verdict-upbump">accept ↑</text>
-      <text x="320" y="130">R4 = qf</text>
-      <text x="50" y="148" class="sub-sm" font-style="italic">up-bump: cascade from R1+R2 pushes rel-err past tol at double</text>
-
-      <rect x="0" y="156" width="410" height="28" fill="#cbd5e1" stroke="#94a3b8"/>
-      <text x="10" y="174">5</text>
-      <text x="50" y="174">R3</text>
-      <text x="115" y="174">double → ff</text>
-      <text x="240" y="174" class="verdict-accept">accept</text>
-      <text x="320" y="174">R3 = ff</text>
-
-      <!-- step 6a: R2 double → qf REJECT (amber region, red verdict text) -->
-      <rect x="0" y="184" width="410" height="28" fill="#fde68a" stroke="#fcd34d"/>
-      <text x="10" y="202">6a</text>
-      <text x="50" y="202">R2</text>
-      <text x="115" y="202">double → qf</text>
-      <text x="240" y="202" class="verdict-reject">reject</text>
-      <text x="320" y="202">R2 = double</text>
-
-      <!-- step 6b: escalate to the next rung up in cost order -->
-      <rect x="0" y="212" width="410" height="46" fill="#fde68a" stroke="#fcd34d"/>
-      <text x="10" y="232">6b</text>
-      <text x="50" y="232">R2</text>
-      <text x="115" y="232">double → dd</text>
-      <text x="240" y="232" class="verdict-upbump">accept ↑</text>
-      <text x="320" y="232">R2 = dd</text>
-      <text x="50" y="250" class="sub-sm" font-style="italic">escalation: qf rejected at 6a, so the walk pays for dd</text>
+      <!-- step 2b: next rung up in cost order — dd -->
+      <rect x="0" y="100" width="410" height="64" fill="#fde68a" stroke="#fcd34d"/>
+      <text x="10" y="120">2b</text>
+      <text x="50" y="120">R2</text>
+      <text x="115" y="120">double → dd</text>
+      <text x="240" y="120" class="verdict-upbump">accept ↑</text>
+      <text x="320" y="120">R2 = dd</text>
+      <text x="50" y="138" class="sub-sm" font-style="italic">float / ff / qf are all built from FP32 words, so all three</text>
+      <text x="50" y="154" class="sub-sm" font-style="italic">share float's range — R2 overflows it; dd is the next rung.</text>
     </g>
 
-    <g transform="translate(10, 268)">
-      <text x="0" y="0" class="sub-sm">Each (region, target) pair tried at most once per run — no</text>
+    <g transform="translate(10, 190)">
+      <text x="0" y="0" class="sub-sm">Each (region, target) pair is tried at most once per run — no</text>
       <text x="0" y="16" class="sub-sm">re-attempts, no rollback.</text>
-      <text x="0" y="36" class="sub-sm">R4 stops at qf — dd is never attempted for it.</text>
-      <text x="0" y="52" class="sub-sm">R2's qf attempt is spent; the speedup phase will not retry it.</text>
+      <text x="0" y="38" class="sub-sm">R4 stops at qf — dd is never attempted for it. That is the point</text>
+      <text x="0" y="54" class="sub-sm">of the rung: ~29 digits at four-FP32 cost instead of dd's ~31.</text>
+      <text x="0" y="76" class="sub-sm">A pruned rung costs no build and no validation — the guard reads</text>
+      <text x="0" y="92" class="sub-sm">the characterizer's float_range_ok, not a trial run.</text>
     </g>
   </g>
 
@@ -236,18 +216,18 @@
     <rect x="0" y="14" width="410" height="124" rx="6" class="box"/>
 
     <text x="16" y="38" class="lbl">dd: 1</text>
-    <text x="120" y="38" class="sub">R2  (cancellation hotspot — qf did not clear)</text>
+    <text x="120" y="38" class="sub">R2  (cancellation hotspot, qf barred by range)</text>
 
     <text x="16" y="60" class="lbl">qf: 1</text>
     <text x="120" y="60" class="sub">R4  (up-bumped from double; dd not needed)</text>
 
-    <text x="16" y="82" class="lbl">ff: 4</text>
-    <text x="120" y="82" class="sub">R1, R3, R5, R6</text>
+    <text x="16" y="82" class="lbl">double: 4</text>
+    <text x="120" y="82" class="sub">R1, R3, R5, R6  —  untouched, still at baseline</text>
 
-    <text x="16" y="104" class="lbl">double: 0</text>
-    <text x="120" y="104" class="sub">no region stays at the baseline</text>
+    <text x="16" y="104" class="lbl">ff: 0</text>
+    <text x="120" y="104" class="sub">correctness only ever moves up the ladder</text>
 
     <text x="16" y="126" class="lbl">float: 0</text>
-    <text x="120" y="126" class="sub">correctness never targets float</text>
+    <text x="120" y="126" class="sub">the speedup phase is where these fill in</text>
   </g>
 </svg>
