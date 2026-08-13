@@ -39,6 +39,22 @@ def test_detects_std_and_sycl_and_nested_cuda():
 def test_ignores_vendored_quad_namespace():
     assert _calls("Kokkos::Experimental::abs(x)") == []
     assert _calls("Kokkos::Experimental::sqrt(x)") == []
+    # Pre-refresh spelling: still present in trees the rename sweep excluded.
+    assert _calls("quad::ddfun::abs(x)") == []
+    assert _calls("quad::ffun::sqrt(x)") == []
+
+
+def test_vendored_allowlist_does_not_swallow_its_own_root():
+    """``Kokkos::Experimental`` is exempt; the enclosing ``Kokkos`` is NOT.
+
+    The allowlist must key on the full qualifier chain.  Keying on the root would
+    exempt every ``Kokkos::fn(promoted)`` call — precisely the bridge-needing case
+    this scan exists to catch (the 95ce538 header-refresh regression).
+    """
+    assert ("Kokkos", "fabs", "Kokkos") in _calls("Kokkos::fabs(x)")
+    assert ("Kokkos", "sqrt", "Kokkos") in _calls("Kokkos::sqrt(x)")
+    # ...while a namespace nested inside the vendored one stays exempt.
+    assert _calls("Kokkos::Experimental::detail::abs(x)") == []
 
 
 def test_ignores_call_without_promoted_arg():

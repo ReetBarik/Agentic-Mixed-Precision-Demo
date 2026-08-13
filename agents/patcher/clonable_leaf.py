@@ -39,7 +39,8 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 
-from agents.integrator_base.regional import _MATH_FN_NAMES, _VENDORED_NS_ROOTS
+from agents.integrator_base.regional import (_MATH_FN_NAMES,
+                                             _is_vendored_qualifier)
 from agents.integrator_base.shallow_wrapper import _template_param_names
 from agents.shared import region_scan
 
@@ -80,11 +81,6 @@ def _last_segment(qualified_name: str) -> str:
     return qualified_name.rsplit("::", 1)[-1]
 
 
-def _root_segment(qual: str) -> str:
-    """Leading ``::`` segment of a qualifier chain (``ql::kLog`` -> ``ql``)."""
-    return qual.split("::", 1)[0] if "::" in qual else qual
-
-
 def is_dd_boundary(qual: str, last: str, *, surface, source_instantiates_at_dd,
                    is_class1_synthesizable, resolve_primary_body,
                    source_provides_dd=None) -> bool:
@@ -116,8 +112,7 @@ def is_dd_boundary(qual: str, last: str, *, surface, source_instantiates_at_dd,
     Shared by :func:`clonable_leaf`'s clause-(2) classifier and rule (d)'s
     frame-discovery candidate filter so the two never disagree on what is a leaf.
     """
-    root = _root_segment(qual)
-    if root in _VENDORED_NS_ROOTS:
+    if _is_vendored_qualifier(qual):
         return True
     if last in _MATH_FN_NAMES:
         return last in (surface.scalar_ops | surface.complex_ops)
@@ -362,9 +357,8 @@ def clonable_leaf(
             continue                       # chain-internal frame edge (rule c)
         if "::" not in qual and last in cast_tokens:
             continue                       # functional cast ``T(x)``, not a callee
-        root = _root_segment(qual)
         # (i) vendored Kokkos::Experimental op — resolves at dd, no cloning.
-        if root in _VENDORED_NS_ROOTS:
+        if _is_vendored_qualifier(qual):
             continue
         # (i') <cmath> op the Gap-A bridge redirects onto the vendored surface — a
         # boundary iff the vendored surface actually provides it (STOP #S analogue).

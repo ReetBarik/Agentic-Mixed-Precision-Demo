@@ -60,7 +60,8 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass, field
 
-from agents.integrator_base.regional import _MATH_FN_NAMES, _VENDORED_NS_ROOTS
+from agents.integrator_base.regional import (_MATH_FN_NAMES,
+                                             _is_vendored_qualifier)
 
 # Recursion / size backstops (a shallow wrapper is trivial by construction; these
 # only bound a pathological or adversarial body so recognition always terminates).
@@ -437,7 +438,7 @@ def recognize(primary_source: str, surface: VendoredSurface,
         lone = re.fullmatch(
             r'\(?\s*(?:[A-Za-z_]\w*\s*::\s*)*[A-Za-z_]\w*\s*\([^;]*\)\s*\)?', expr)
         if lone and ifn in _MATH_FN_NAMES and chain and \
-                chain.split("::", 1)[0] not in _VENDORED_NS_ROOTS:
+                not _is_vendored_qualifier(chain):
             if param_name not in _idents(iargs):
                 return None
             # STOP #S guard: the vendored surface must provide this op for at least
@@ -750,7 +751,7 @@ def find_qualified_app_calls(region_text: str, promoted: frozenset[str]):
         chain = re.sub(r"\s+", "", m.group(1))
         fn = m.group(2)
         root = chain.split("::", 1)[0]
-        if fn in _MATH_FN_NAMES or root in _VENDORED_NS_ROOTS:
+        if fn in _MATH_FN_NAMES or _is_vendored_qualifier(chain):
             continue
         # Locate the call ``(`` — directly, or after a balanced template-arg list
         # ``<…>`` for a template-id call ``ql::g<T,U>(x)``.

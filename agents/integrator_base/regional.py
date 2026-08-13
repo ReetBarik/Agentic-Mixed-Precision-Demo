@@ -34,7 +34,7 @@ from agents.shared import constant_derive as cderive
 from agents.shared.region_scan import RegionScanError, extract_region_writes
 
 # NB: :mod:`agents.integrator_base.shallow_wrapper` imports ``_MATH_FN_NAMES`` /
-# ``_VENDORED_NS_ROOTS`` from this module at load time, so it is imported *lazily*
+# ``_is_vendored_qualifier`` from this module at load time, so it is imported *lazily*
 # (inside :func:`run_integrate_region` / :func:`synthesize_shallow_wrappers`) to
 # avoid a top-level import cycle.
 
@@ -69,7 +69,7 @@ _INCLUDE_RE = re.compile(r'^\s*#\s*include\s*[<"]([^>"]+)[>"]')
 # Gap A — namespace-qualified math bridge
 # --------------------------------------------------------------------------- #
 # A namespace-qualified call ``Ns::fn(x)`` skips ADL: name lookup only searches
-# ``Ns`` (and its enclosing scopes), NOT the vendored ``Kokkos::Experimental`` / ``Kokkos::Experimental``
+# ``Ns`` (and its enclosing scopes), NOT the vendored ``Kokkos::Experimental``
 # namespace where the shim's ADL overloads live.  So when a *promoted* (extended-
 # typed) value flows into ``Ns::fn(...)`` and ``Ns`` is not the vendored namespace,
 # the shim must inject a bridging overload into ``Ns`` (or a using-declaration) or
@@ -77,8 +77,21 @@ _INCLUDE_RE = re.compile(r'^\s*#\s*include\s*[<"]([^>"]+)[>"]')
 # built-in float and dies with ``cannot convert 'Kokkos::Experimental::DoubleDouble' to 'const
 # double'`` (the 2026-07-18 B0m.h:69 symptom).
 
-# Root namespaces the shim already reaches via ADL — never need a bridge.
-_VENDORED_NS_ROOTS = frozenset({"quad"})
+# Vendored namespaces the shim already reaches via ADL — never need a bridge.
+# Matched against the FULL qualifier chain, not its root: since the header refresh
+# the vendored namespace is ``Kokkos::Experimental``, nested inside a root
+# (``Kokkos``) that must stay policed — ``Kokkos::fabs(promoted)`` is precisely the
+# call this scan exists to catch.  A root-keyed allowlist cannot express that.
+# ``quad`` is retained because the pre-refresh spelling still occurs in trees the
+# rename sweep deliberately excluded (``runs/qcdloop/src``); for a single-component
+# entry, prefix matching reproduces the old root-keyed behaviour exactly.
+_VENDORED_NS_QUALIFIERS = frozenset({"Kokkos::Experimental", "quad"})
+
+
+def _is_vendored_qualifier(qualifier: str) -> bool:
+    """True if ``qualifier`` names a vendored namespace, or one nested inside it."""
+    return any(qualifier == v or qualifier.startswith(v + "::")
+               for v in _VENDORED_NS_QUALIFIERS)
 
 # Standard C++ <cmath>/<complex> free-function names.  Framework-agnostic: this is
 # the math library vocabulary, NOT a list of target frameworks — a qualified call
@@ -136,9 +149,9 @@ def find_qualified_math_calls(region_text: str, promoted: frozenset[str]):
 
     Returns a de-duplicated list of ``(qualifier_root, fn, full_qualifier)`` for
     each ``Root::...::fn(<args with a promoted operand>)`` where ``fn`` is a
-    standard math function and ``Root`` is not the vendored namespace.  These are
-    exactly the calls whose extended-typed argument would otherwise be narrowed to
-    a built-in float by the primary overload.
+    standard math function and the *full qualifier* is not a vendored namespace.
+    These are exactly the calls whose extended-typed argument would otherwise be
+    narrowed to a built-in float by the primary overload.
     """
     found: list[tuple[str, str, str]] = []
     seen: set[tuple[str, str]] = set()
@@ -146,7 +159,8 @@ def find_qualified_math_calls(region_text: str, promoted: frozenset[str]):
         chain = re.sub(r"\s+", "", m.group(1))       # e.g. "cuda::std::"
         fn = m.group(2)
         root = chain.split("::", 1)[0]
-        if fn not in _MATH_FN_NAMES or root in _VENDORED_NS_ROOTS:
+        qualifier = chain.rstrip(":")                # e.g. "Kokkos::Experimental"
+        if fn not in _MATH_FN_NAMES or _is_vendored_qualifier(qualifier):
             continue
         args = _balanced_args(region_text, m.end() - 1)
         if not _contains_promoted(args, promoted):
@@ -155,7 +169,7 @@ def find_qualified_math_calls(region_text: str, promoted: frozenset[str]):
         if key in seen:
             continue
         seen.add(key)
-        found.append((root, fn, chain.rstrip(":")))
+        found.append((root, fn, qualifier))
     return found
 
 
