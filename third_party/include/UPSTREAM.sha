@@ -27,8 +27,10 @@ files:
 # ============================================================
 local_patches:
   - sha:   44c1ec4
-    file:  dd_math.hpp
-    what:  unary operator+(), operator int(), 6 scalar-double comparisons
+    file:  dd_math.hpp, dd_complex.hpp
+    what:  unary operator+(), operator int(), 6 scalar-double comparisons on the
+           DoubleDouble scalar; unary operator+() on DoubleDoubleComplex too
+           (no FloatFloatComplex twin — the pre-refresh surface had none either)
     why:   template-arg promotion rewrites double exprs to DoubleDouble in place;
            int-context and unary-plus uses must survive (B3m/B4m int<->Tracked).
            Upstream REMOVED operator int() in the Kokkos::Experimental rename —

@@ -94,6 +94,14 @@ struct DoubleDoubleComplex {
     KOKKOS_INLINE_FUNCTION DoubleDoubleComplex operator-() const {
         return DoubleDoubleComplex(negate(re), negate(im));
     }
+    // LOCAL PATCH (44c1ec4): unary operator+() on the COMPLEX type — not upstream
+    // (present in the previous vendor drop, removed by upstream since). Companion
+    // to the DoubleDouble scalar unary + in dd_math.hpp: the promotion pass rewrites
+    // double expressions in place and shim_normalise handles unary `+` on an
+    // extended operand (`x = + y;`, `return + expr;`), which reaches the complex
+    // type too. No FloatFloatComplex twin — the pre-refresh surface did not have
+    // one either, and this restores that surface exactly rather than widening it.
+    KOKKOS_INLINE_FUNCTION DoubleDoubleComplex operator+() const { return *this; }
 
     KOKKOS_INLINE_FUNCTION DoubleDoubleComplex& operator+=(DoubleDoubleComplex b) { *this = *this + b; return *this; }
     KOKKOS_INLINE_FUNCTION DoubleDoubleComplex& operator-=(DoubleDoubleComplex b) { *this = *this - b; return *this; }
