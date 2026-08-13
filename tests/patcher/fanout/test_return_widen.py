@@ -30,8 +30,8 @@ from agents.patcher.fanout import (
     ClosureDecl, FanoutError, ReturnWiden, VariantSpec, render_variant,
 )
 
-DD = "quad::ddfun::ddouble"
-DDC = "ddcomplex"
+DD = "Kokkos::Experimental::DoubleDouble"
+DDC = "DoubleDoubleComplex"
 
 _KOKKOS_UTILS = Path(__file__).resolve().parents[3] / "src" / "kokkosUtils.h"
 
@@ -131,7 +131,7 @@ def test_single_line_template_return():
     out = widen_return_type_line(src, return_line=1, orig_type="TOutput",
                                  dd_type=DDC, function_name="f_B10")
     first = out.split("\n")[0]
-    assert first == "    KOKKOS_INLINE_FUNCTION ddcomplex f(TScale const& v) {"
+    assert first == "    KOKKOS_INLINE_FUNCTION DoubleDoubleComplex f(TScale const& v) {"
     # macro keyword and body untouched
     assert "return v;" in out
 
@@ -145,7 +145,7 @@ def test_multi_line_template_return():
     out = widen_return_type_line(src, return_line=1, orig_type="TOutput",
                                  dd_type=DDC, function_name="f_B10")
     lines = out.split("\n")
-    assert lines[0] == "    typename std::conditional<B, ddcomplex, TScale>::type"
+    assert lines[0] == "    typename std::conditional<B, DoubleDoubleComplex, TScale>::type"
     assert lines[1] == "    f(TScale const& v) {"
 
 
@@ -153,14 +153,14 @@ def test_const_reference_qualified_return():
     src = "    const TOutput& f(int i) {\n        return r;\n    }"
     out = widen_return_type_line(src, return_line=1, orig_type="TOutput",
                                  dd_type=DDC, function_name="f_B10")
-    assert out.split("\n")[0] == "    const ddcomplex& f(int i) {"
+    assert out.split("\n")[0] == "    const DoubleDoubleComplex& f(int i) {"
 
 
 def test_static_qualified_return():
     src = "    static inline TOutput f() {\n        return r;\n    }"
     out = widen_return_type_line(src, return_line=1, orig_type="TOutput",
                                  dd_type=DDC, function_name="f_B10")
-    assert out.split("\n")[0] == "    static inline ddcomplex f() {"
+    assert out.split("\n")[0] == "    static inline DoubleDoubleComplex f() {"
 
 
 def test_namespaced_return_last_segment():
@@ -168,7 +168,7 @@ def test_namespaced_return_last_segment():
     src = "    std::complex<TScale> f(int i) {\n        return r;\n    }"
     out = widen_return_type_line(src, return_line=1, orig_type="complex",
                                  dd_type=DDC, function_name="f_B10")
-    assert out.split("\n")[0] == "    std::ddcomplex<TScale> f(int i) {"
+    assert out.split("\n")[0] == "    std::DoubleDoubleComplex<TScale> f(int i) {"
 
 
 def test_orig_type_not_found_raises_with_diagnostic():
@@ -187,7 +187,7 @@ def test_idempotent_reapply():
     twice = widen_return_type_line(once, return_line=1, orig_type="TOutput",
                                    dd_type=DDC, function_name="f_B10")
     assert once == twice
-    assert once.split("\n")[0] == "    ddcomplex f(int i) {"
+    assert once.split("\n")[0] == "    DoubleDoubleComplex f(int i) {"
 
 
 # --------------------------------------------------------------------------- #
@@ -205,10 +205,10 @@ def test_real_li2omx2_return_type_widened_body_untouched():
                                  orig_type="TOutput", dd_type=DDC,
                                  function_name="Li2omx2_B10")
     out_lines = out.split("\n")
-    # signature line: TOutput -> ddcomplex, everything else on the line preserved
+    # signature line: TOutput -> DoubleDoubleComplex, everything else on the line preserved
     assert out_lines[_LI2_RET_LINE - 1] == lines[_LI2_RET_LINE - 1].replace(
-        "TOutput Li2omx2", "ddcomplex Li2omx2", 1)
-    assert "KOKKOS_INLINE_FUNCTION ddcomplex Li2omx2(" in out_lines[_LI2_RET_LINE - 1]
+        "TOutput Li2omx2", "DoubleDoubleComplex Li2omx2", 1)
+    assert "KOKKOS_INLINE_FUNCTION DoubleDoubleComplex Li2omx2(" in out_lines[_LI2_RET_LINE - 1]
     # the returned LOCAL statement `return Li2omx2;` (:711) is a local, not the return
     # type declaration — untouched.
     assert out_lines[711 - 1] == lines[711 - 1]
@@ -241,7 +241,7 @@ def _li2_spec(**kw) -> VariantSpec:
 
 def test_render_variant_return_widen_only_on_li2omx2():
     # A ReturnWiden and no other edits: the produced variant has
-    # `ddcomplex Li2omx2_B10(...)` in the signature; everything else is the original
+    # `DoubleDoubleComplex Li2omx2_B10(...)` in the signature; everything else is the original
     # body verbatim (modulo the orig_name -> variant_name rename the rewriter does).
     spec = _li2_spec(return_widen=ReturnWiden(
         return_line=_LI2_RET_LINE, orig_type="TOutput", dd_type=DDC,
@@ -253,11 +253,11 @@ def test_render_variant_return_widen_only_on_li2omx2():
     base = render_variant(_li2_spec()).split("\n")
     assert len(out_lines) == len(base)
     diff = [i for i in range(len(base)) if base[i] != out_lines[i]]
-    # exactly the signature line differs, and it differs only by TOutput->ddcomplex.
+    # exactly the signature line differs, and it differs only by TOutput->DoubleDoubleComplex.
     assert len(diff) == 1
     d = diff[0]
-    assert out_lines[d] == base[d].replace("TOutput Li2omx2_B10", "ddcomplex Li2omx2_B10", 1)
-    assert "ddcomplex Li2omx2_B10(" in out_lines[d]
+    assert out_lines[d] == base[d].replace("TOutput Li2omx2_B10", "DoubleDoubleComplex Li2omx2_B10", 1)
+    assert "DoubleDoubleComplex Li2omx2_B10(" in out_lines[d]
     # the returned local statement is byte-identical to the rename-only baseline.
     ret_idx = next(i for i, ln in enumerate(base) if "return Li2omx2;" in ln)
     assert out_lines[ret_idx] == base[ret_idx]

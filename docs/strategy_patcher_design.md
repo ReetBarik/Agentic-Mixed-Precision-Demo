@@ -332,7 +332,7 @@ ground truth. Two DD callers with different needs:
 
 `ff_integrator` and the regional-DD integrator are structural twins;
 shared boundary-patch machinery parameterized on scalar type
-(`ffloat` vs `ddouble`) lives in `agents/integrator_base/`.
+(`FloatFloat` vs `DoubleDouble`) lives in `agents/integrator_base/`.
 
 ## P1. Remediation-intent schema (Strategy → Patcher) — LOCKED 2026-07-17
 
@@ -555,7 +555,7 @@ result = ff_integrator.integrate_region(
     line_end=intent.target.line_end,
     variables=intent.target.variables,
     working_tree=strategy_branch_head,   # SHA, not path
-    scalar_type="ffloat",                # "ddouble" for regional-DD
+    scalar_type="FloatFloat",                # "DoubleDouble" for regional-DD
     direction="in",                      # always "in" from Patcher (out = git-revert)
     out_dir=f"runs/qcdloop/strategy/{run_id}/shims/",
     attempt=attempt_index,               # for LLM seed/temperature variation
@@ -636,7 +636,7 @@ covers all combinations. Patcher can't eat 9 LLM calls on one intent
 Call shape is stable regardless of how P7 (regional-DD integrator
 module structure) resolves — only the import path changes. If P7
 lands on "one module, two functions" (my lean), `double-to-dd` calls
-`dd_integrator.integrate_region(..., scalar_type="ddouble")`. If P7
+`dd_integrator.integrate_region(..., scalar_type="DoubleDouble")`. If P7
 splits modules, the call becomes `regional_dd_integrator.integrate(...)`.
 Same signature, same working-tree=SHA requirement, same bounded retry.
 
@@ -798,7 +798,7 @@ double.
 1. **Code reuse is the point.** Whole-app and regional DD share more
    than ff and DD do: same underlying headers
    (`third_party/include/{dd_math.hpp, dd_complex.hpp}`), same
-   `quad::ddfun::ddouble` scalar type, same DD-specific constant-table
+   `Kokkos::Experimental::DoubleDouble` scalar type, same DD-specific constant-table
    hex codegen (hex-encoded `(hi, lo)` double pairs per MEMORY.md).
    Splitting into two modules immediately spawns a shared-helper file
    — (a) with extra ceremony.
@@ -835,7 +835,7 @@ def integrate_region(
     line_end: int,
     variables: list[str],
     working_tree: str,
-    scalar_type: str = "ddouble",
+    scalar_type: str = "DoubleDouble",
     direction: str = "in",
     out_dir: Path,
     attempt: int = 0,

@@ -2,7 +2,7 @@
 
 The Gap-A bridge (:mod:`agents.integrator_base.regional`) already synthesizes
 overloads that redirect a *namespace-qualified* ``<cmath>`` call
-(``Ns::sqrt(promoted)``) onto the vendored ``quad::ffun`` / ``quad::ddfun`` surface,
+(``Ns::sqrt(promoted)``) onto the vendored ``Kokkos::Experimental`` / ``Kokkos::Experimental`` surface,
 so a promoted (extended-typed) operand is not narrowed to a built-in float.  This
 module extends that machinery **one delegation hop**: an app-qualified call
 ``Ns::g(promoted)`` where ``g`` is NOT a ``<cmath>`` name, but whose *primary body*
@@ -33,7 +33,7 @@ The four recognized body shapes (all a single ``return <expr>;``):
 
 1. **Delegation** — ``return <Ns>::<fn>(<arg>);`` where ``<fn> ∈ _MATH_FN_NAMES``
    and ``<Ns>`` is not the vendored root.  Transform: redirect the inner call to the
-   vendored equivalent (``Kokkos::abs`` → ``quad::ddfun::abs``).
+   vendored equivalent (``Kokkos::abs`` → ``Kokkos::Experimental::abs``).
 2. **Accessor** — ``return <arg>.<member>();`` where ``<member>`` is a container
    accessor (``real``/``imag``/…).  Transform: re-emit the accessor on the promoted
    parameter (the vendored complex provides ``.real()``/``.imag()``).
@@ -41,15 +41,15 @@ The four recognized body shapes (all a single ``return <expr>;``):
    arithmetic/comparison over the parameter using only operators, literals, and
    functional casts *to the parameter's own type*.  Transform: substitute the
    promoted type for the parameter's type token throughout the body, so a
-   ``double(0) < x`` becomes ``ddouble(0) < x`` (a bare re-emit does NOT compile —
-   ``double(0) < ddouble`` has no operator; verified empirically, §6 probe).
+   ``double(0) < x`` becomes ``DoubleDouble(0) < x`` (a bare re-emit does NOT compile —
+   ``double(0) < DoubleDouble`` has no operator; verified empirically, §6 probe).
 4. **Transitive** — ``return <expr>;`` where ``<expr>``'s only non-boundary call is
    itself a Class-1-recognized wrapper (recurse).  Transform: the same param-type
    substitution; the inner wrapper's own overload must be emitted first / present.
 
 All emitted overloads use ``auto`` return deduction, so the emitter needs **zero**
-app-specific return-type knowledge (verified: ``auto`` deduces ``ddouble`` /
-``ddcomplex`` / ``int`` / ``bool`` correctly for every shape).  A *template*-param
+app-specific return-type knowledge (verified: ``auto`` deduces ``DoubleDouble`` /
+``DoubleDoubleComplex`` / ``int`` / ``bool`` correctly for every shape).  A *template*-param
 primary (``T kAbs(T)``) is instantiable at either the vendored scalar or complex, so
 the emitter produces both overloads — each guarded by whether the vendored surface
 actually provides that op for that operand kind (the STOP #S guard).
@@ -120,7 +120,7 @@ class VendoredSurface:
 
     Derived from the ``RegionalSpec`` scalar/complex spellings so the recognizer /
     emitter carry no framework-specific knowledge.  ``root`` is the vendored
-    namespace (``quad::ddfun``), ``scalar`` / ``complex`` the concrete types.
+    namespace (``Kokkos::Experimental``), ``scalar`` / ``complex`` the concrete types.
     ``scalar_ops`` / ``complex_ops`` are the ``_MATH_FN_NAMES`` names the vendored
     headers actually provide for a real vs complex operand — the STOP #S guard: a
     delegation to a ``<cmath>`` op the vendored surface does NOT provide for that
@@ -139,7 +139,7 @@ def surface_from_spelling(cpp_scalar: str, cpp_complex: str,
                           complex_ops: frozenset[str] | None = None) -> VendoredSurface:
     """Build a :class:`VendoredSurface` from the concrete C++ type spellings.
 
-    ``cpp_scalar`` is e.g. ``quad::ddfun::ddouble``; the vendored root is everything
+    ``cpp_scalar`` is e.g. ``Kokkos::Experimental::DoubleDouble``; the vendored root is everything
     before the last ``::``.  ``scalar_ops`` / ``complex_ops`` default to the full
     ``_MATH_FN_NAMES`` vocabulary ("assume the vendored surface provides every
     ``<cmath>`` op"); a caller that knows the vendored headers' real op set passes
@@ -535,7 +535,7 @@ def targets_for(recog: Recognition, surface: VendoredSurface) -> list[str]:
 def _redirect_math_call(expr: str, inner_fn: str, surface: VendoredSurface) -> str:
     """Rewrite the delegated ``…::inner_fn(`` call onto the vendored root.
 
-    ``Kokkos::abs(x)`` → ``quad::ddfun::abs(x)``.  Only the qualifier is replaced;
+    ``Kokkos::abs(x)`` → ``Kokkos::Experimental::abs(x)``.  Only the qualifier is replaced;
     the argument text is preserved verbatim (the arg is the promoted parameter).
     """
     pat = re.compile(
@@ -547,9 +547,9 @@ def _substitute_param_type(expr: str, param_type: str, target: str) -> str:
     """Replace whole-word ``param_type`` tokens with ``target`` in ``expr``.
 
     A scalar-expr body ``(double(0) < x) - (x < double(0))`` becomes
-    ``(ddouble(0) < x) - (x < ddouble(0))`` — the functional casts to the
+    ``(DoubleDouble(0) < x) - (x < DoubleDouble(0))`` — the functional casts to the
     parameter's own type must widen to the promoted type or the operators do not
-    resolve (verified: ``double(0) < ddouble`` has no ``operator<``).
+    resolve (verified: ``double(0) < DoubleDouble`` has no ``operator<``).
     """
     return re.sub(r'(?<![\w:])' + re.escape(param_type) + r'\b', target, expr)
 
@@ -917,7 +917,7 @@ def source_provides_dd(fn: str, sources: list[str], surface: VendoredSurface) ->
     ``template<>`` specialization at dd and a plain concrete dd overload, and it keys
     on the core type token only — so a source that spells the dd type through a
     DIFFERENT namespace root than the vendored surface (the ``ql::ddfun`` /
-    ``quad::ddfun`` bridge) is still matched.
+    ``Kokkos::Experimental`` bridge) is still matched.
 
     A template primary (``T fn(T const&)``) has a template-parameter core and is
     NEVER a match, so under a source that provides only the primary (the pre-

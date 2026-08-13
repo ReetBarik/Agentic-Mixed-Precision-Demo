@@ -183,8 +183,8 @@ def test_e2e_regional_ff_real_llm(qcdloop_repo, tmp_path):
     # -- the committed region carries the deterministic boundary edits, demoting to
     #    the local's own template-alias type (TMass), not the passed caller "double" --
     committed = _git(root, "show", f"{resp['candidate_sha']}:kokkosUtils.h").stdout
-    assert "quad::ffun::ffloat x1__ff = quad::ffun::ffloat(x1);" in committed
-    assert "quad::ffun::ffloat arg__ext = x1__ff * x2__ff;" in committed
+    assert "Kokkos::Experimental::FloatFloat x1__ff = Kokkos::Experimental::FloatFloat(x1);" in committed
+    assert "Kokkos::Experimental::FloatFloat arg__ext = x1__ff * x2__ff;" in committed
     assert "TMass arg = static_cast<TMass>(arg__ext.hi)" in committed
     # Wave-3 dedup: the region #includes the canonical per-family shim (not a
     # per-region file); that canonical shim is committed and carries the ff type.

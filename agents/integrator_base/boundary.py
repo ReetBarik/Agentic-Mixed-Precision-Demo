@@ -4,8 +4,8 @@
 The regional ff/dd integrators split their work in two:
 
 * the **shim** (LLM-generated) provides the extended-precision *types, operators and
-  named constants* the region needs, referencing the vendored ``quad::ffun::ffloat``
-  / ``quad::ddfun::ddouble`` headers; and
+  named constants* the region needs, referencing the vendored ``Kokkos::Experimental::FloatFloat``
+  / ``Kokkos::Experimental::DoubleDouble`` headers; and
 * the **boundary patch** (this module, *deterministic*) rewrites the region's own
   source so the promoted arithmetic is actually wired in: it promotes the region's
   reads to the extended scalar on entry, keeps the region's computed locals in the
@@ -35,7 +35,7 @@ Transform (applied to the inclusive 1-based line range ``[line_start, line_end]`
    *original declared type* ``<T> w = static_cast<T>(w__ext.hi) + static_cast<T>
    (w__ext.lo);``; a pre-declared write assigned back ``w = static_cast<caller>
    (w__ext.hi) + …``.  Two-limb reconstruction is the extended types' own
-   conversion-out idiom (neither ``ffloat`` nor ``ddouble`` defines ``operator
+   conversion-out idiom (neither ``FloatFloat`` nor ``DoubleDouble`` defines ``operator
    double``).
 
 **Why dataflow, not a fixed caller type.** Real HPC kernels declare their locals
@@ -501,7 +501,7 @@ def narrow_two_limb_scalar(expr: str, caller_type: str, two_limb: bool = True) -
 def _demote_expr(name: str, caller_type: str, two_limb: bool = True) -> str:
     """Demote a promoted *scalar* region write back to the caller precision.
 
-    For a two-limb extended scalar (``ffloat`` / ``ddouble``) this is two-limb
+    For a two-limb extended scalar (``FloatFloat`` / ``DoubleDouble``) this is two-limb
     reconstruction — ``static_cast<T>(w.hi) + static_cast<T>(w.lo)`` — the extended
     types' own conversion-out idiom (no ``operator double`` exists).  For a *native*
     single-limb scalar (plain ``float``, which has no ``.hi``/``.lo`` members) it is
@@ -518,11 +518,11 @@ def _demote_complex_expr(name: str, target_type: str, caller_type: str,
 
     Phase 2d: a region operand whose type is a complex container
     (``Kokkos::complex<double>``, aliased ``TOutput``) promotes to the extended
-    *container* (``ffcomplex`` / ``ddcomplex`` / ``std::complex<float>``), not the
+    *container* (``FloatFloatComplex`` / ``DoubleDoubleComplex`` / ``std::complex<float>``), not the
     scalar.  On exit each component is reconstructed to the caller real precision and
     the caller complex value is rebuilt via ``target_type(re, im)``:
 
-    * two-limb container (``ffcomplex`` / ``ddcomplex``, components carry ``.hi``/``.lo``)
+    * two-limb container (``FloatFloatComplex`` / ``DoubleDoubleComplex``, components carry ``.hi``/``.lo``)
       → ``T(static_cast<C>(w.re.hi)+static_cast<C>(w.re.lo),
              static_cast<C>(w.im.hi)+static_cast<C>(w.im.lo))``;
     * native container (``std::complex<float>``, components are plain ``float``) →
@@ -545,8 +545,8 @@ def _promote_complex_entry(name: str, src_expr: str, complex_type: str,
     """Entry cast promoting a complex read/write ``src_expr`` to ``complex_type``.
 
     Each component is wrapped in the extended *scalar* first
-    (``ffcomplex(ffloat(z.real()), ffloat(z.imag()))``) so the value keeps full caller
-    precision: a bare ``ffcomplex(double, double)`` would bind ``ffcomplex(float,
+    (``FloatFloatComplex(FloatFloat(z.real()), FloatFloat(z.imag()))``) so the value keeps full caller
+    precision: a bare ``FloatFloatComplex(double, double)`` would bind ``FloatFloatComplex(float,
     float)`` and silently narrow the entry to single precision.  ``.real()``/``.imag()``
     are defined on every complex spelling in play (Kokkos/std/vendored).
     """
@@ -562,7 +562,7 @@ def _complex_cast_indices(toks: list["_Tok"], complex_tokens: frozenset[str],
     A cast whose type name ``T`` is a complex spelling (``T`` in ``complex_tokens``)
     and whose balanced ``(...)`` argument references a promoted (extended-typed) name
     must build the extended *container*, not the caller's complex — ``TOutput(si*ta)``
-    → ``ffcomplex(si__ff*ta__ff)`` (``ffcomplex`` has a ctor from ``ffloat``; the
+    → ``FloatFloatComplex(si__ff*ta__ff)`` (``FloatFloatComplex`` has a ctor from ``FloatFloat``; the
     caller's ``Kokkos::complex<double>`` does not).  A cast with no promoted operand is
     left alone (still a plain caller-precision value).  A ``T`` in template-argument
     position (``Constants<T>``) is followed by ``>`` / ``::``, never ``(``, so it is
@@ -639,8 +639,8 @@ def widen_carrier_assign_line(line: str, carriers: frozenset[str],
     Two RHS shapes, both build-exercised by the region transform:
 
     * a functional complex cast ``T( … )`` (``T`` a complex spelling) whose ``(…)`` is
-      the whole RHS → rewrite the leading cast token to ``complex_type`` (``ddcomplex(-xs
-      / …)``, which binds ``ddcomplex(double)``);
+      the whole RHS → rewrite the leading cast token to ``complex_type`` (``DoubleDoubleComplex(-xs
+      / …)``, which binds ``DoubleDoubleComplex(double)``);
     * any other complex value ``v`` → component reconstruction
       ``complex_type(scalar_type((v).real()), scalar_type((v).imag()))``.
 
@@ -874,9 +874,9 @@ def promote_region_block(
 
     Phase 2d — **complex-container promotion.**  A promoted operand whose type is a
     complex container promotes to the extended *complex* type ``complex_type``
-    (``ffcomplex`` / ``ddcomplex`` / ``std::complex<float>``) instead of the scalar,
-    fixing the dominant Phase-2c ``llm_gen_failed`` class (``ffloat(complex)`` /
-    ``complex(ffloat)`` etc.).  An operand is treated as complex when the caller flags
+    (``FloatFloatComplex`` / ``DoubleDoubleComplex`` / ``std::complex<float>``) instead of the scalar,
+    fixing the dominant Phase-2c ``llm_gen_failed`` class (``FloatFloat(complex)`` /
+    ``complex(FloatFloat)`` etc.).  An operand is treated as complex when the caller flags
     its name in ``complex_names`` (reads / pre-declared writes, classified from the
     enclosing function's decls + the app's template-parameter binding) or when a
     region-local decl's declared type token is in ``complex_tokens`` (e.g. ``TOutput``,
@@ -915,7 +915,7 @@ def promote_region_block(
     # store (``res(i,k) = …`` / ``res(i,k) /= …``), a call, or a bare expression.
     #
     # For an UPCAST (ff/dd, ``two_limb``) that shape is inert or unconvertible: the
-    # widened value either fails to convert (``complex<double> /= ffloat``) or is
+    # widened value either fails to convert (``complex<double> /= FloatFloat``) or is
     # silently truncated back to the caller precision on store — no observable effect.
     # Report it honestly as a no-op (→ Patcher ``promotion_no_op``), Phase 2d.
     #
@@ -976,7 +976,7 @@ def promote_region_block(
     # Region-core element promotion: wrap each ``base[k]`` READ occurrence of a
     # fixed-size complex aggregate in an entry cast to ``complex_type`` so a promoted
     # dd operand no longer multiplies a caller-precision ``Kokkos::complex<double>``
-    # element (the STOP #CC ``complex<ddcomplex>`` form).  The array declaration is
+    # element (the STOP #CC ``complex<DoubleDoubleComplex>`` form).  The array declaration is
     # left untouched — no whole-array retype, so the d1 failure mode cannot recur.
     if use_complex and ebases:
         elem_edits, elem_spans = _element_read_edits(
@@ -1137,7 +1137,7 @@ def synthesize_boundary_patch(
     repo-relative path (drives the ``a/``,``b/`` diff labels), ``file_text`` the
     full original file, ``[line_start, line_end]`` the inclusive 1-based region,
     ``reads`` the characterizer's ``region_local_vars``, ``writes`` the Fix-C write
-    set, ``scalar_type`` the extended C++ spelling (e.g. ``quad::ffun::ffloat``),
+    set, ``scalar_type`` the extended C++ spelling (e.g. ``Kokkos::Experimental::FloatFloat``),
     ``caller_type`` the precision to demote back to, and ``shim_include`` the shim
     header basename to ``#include``.  ``two_limb`` selects the write-demotion idiom:
     two-limb reconstruction for an extended scalar (default), or a plain cast for a
@@ -1218,7 +1218,7 @@ def widen_return_type_line(
     token *starts* — the signature line, e.g. ``KOKKOS_INLINE_FUNCTION TOutput
     Li2omx2(...)``, NOT the ``return`` statement.  ``orig_type`` is the leading
     return-type token as source spells it (``TOutput``); ``dd_type`` the widened
-    replacement (``ddcomplex`` / ``quad::ddfun::ddouble``); ``function_name`` the
+    replacement (``DoubleDoubleComplex`` / ``Kokkos::Experimental::DoubleDouble``); ``function_name`` the
     variant name for diagnostics only (the rewrite operates on the source position,
     so the source may still carry the *original* function name at this point).
 

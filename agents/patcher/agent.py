@@ -37,11 +37,11 @@ from agents.state import PipelineState
 
 MAX_INTEGRATOR_RETRIES = 3      # P4b — single shared budget: integrator + build.
 # Reverted 6→3 (post Subtask 5): the 3→6 bump in Subtask 4 chased what we thought
-# was LLM variance on ql::Lnrat<ddouble>'s R4 #error "requires manual classification"
+# was LLM variance on ql::Lnrat<DoubleDouble>'s R4 #error "requires manual classification"
 # escape. Subtask 5 empirically proved the transform the LLM was refusing to emit is
-# STRUCTURALLY UNSOUND — any injected (ddouble,ddouble) forwarding overload of
+# STRUCTURALLY UNSOUND — any injected (DoubleDouble,DoubleDouble) forwarding overload of
 # Lnrat/ddilog self-recurses at runtime (C++ picks by arg types, not <...> list),
-# and no vendored quad::ddfun target exists. The R4 #error was arguably the LLM
+# and no vendored Kokkos::Experimental target exists. The R4 #error was arguably the LLM
 # correctly refusing an unsound overload, and design §2.4 already refuses Lnrat as
 # a chain_closure_escapes frontier. Extra attempts against an unsound transform are
 # wasted wall-clock; the real fix is a design revision (extend closure-scoped chains

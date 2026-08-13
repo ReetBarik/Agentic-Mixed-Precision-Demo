@@ -98,7 +98,7 @@ def _emit_lnrat_b10_clone() -> str:
 
     Built exactly as :func:`agents.patcher.chain_promote._materialize_leaf_variants`
     builds it: a verbatim clone of the @138 ``Lnrat`` overload with a rule-(c)-style
-    return widen to the box binding's dd complex container (``TOutput == ddcomplex``).
+    return widen to the box binding's dd complex container (``TOutput == DoubleDoubleComplex``).
     """
     spec = VariantSpec(
         variant_name="Lnrat_B10", orig_name="Lnrat",
@@ -106,7 +106,7 @@ def _emit_lnrat_b10_clone() -> str:
         orig_start=_LNRAT_TSCALE_EXTENT[0], orig_end=_LNRAT_TSCALE_EXTENT[1])
     spec.return_widen = ReturnWiden(
         return_line=139, orig_type="TOutput",
-        dd_type="quad::ddfun::ddcomplex", function_name="Lnrat_B10")
+        dd_type="Kokkos::Experimental::DoubleDoubleComplex", function_name="Lnrat_B10")
     return render_variant(spec)
 
 
@@ -122,7 +122,7 @@ def test_p2_resolution_a_leaf_clone_compiles_and_runs(tmp_path):
     # NO synth overlay — the exact Resolution-A configuration (Class-1 = source boundary).
     clone = _emit_lnrat_b10_clone()
     # sanity: the rendered clone is the @138 shallow body with a widened return.
-    assert "quad::ddfun::ddcomplex Lnrat_B10(TScale const& x, TScale const& y)" in clone
+    assert "Kokkos::Experimental::DoubleDoubleComplex Lnrat_B10(TScale const& x, TScale const& y)" in clone
     assert "ql::Lnrat" not in clone            # renamed: no self-recursion (Q1)
 
     src = tmp_path / "probe_resA.cpp"
@@ -131,8 +131,8 @@ def test_p2_resolution_a_leaf_clone_compiles_and_runs(tmp_path):
         '#include "kokkosMaths_dd.h"\n'
         '#include <dd_math.hpp>\n'
         '#include <dd_complex.hpp>\n'
-        'using quad::ddfun::ddouble;\n'
-        'using quad::ddfun::ddcomplex;\n'
+        'using Kokkos::Experimental::DoubleDouble;\n'
+        'using Kokkos::Experimental::DoubleDoubleComplex;\n'
         'namespace ql {\n'
         f'{clone}\n'
         '}\n'
@@ -140,8 +140,8 @@ def test_p2_resolution_a_leaf_clone_compiles_and_runs(tmp_path):
         '    Kokkos::initialize(argc, argv);\n'
         '    int bad = 0;\n'
         '    {\n'
-        '        ddouble v(1.5), x(2.5);\n'
-        '        auto r = ql::Lnrat_B10<ddcomplex, double, ddouble>(v, x);\n'
+        '        DoubleDouble v(1.5), x(2.5);\n'
+        '        auto r = ql::Lnrat_B10<DoubleDoubleComplex, double, DoubleDouble>(v, x);\n'
         '        Kokkos::printf("re=%.17g im=%.17g\\n", r.real().hi, r.imag().hi);\n'
         '    }\n'
         '    Kokkos::finalize();\n'
@@ -163,10 +163,10 @@ def test_p2_resolution_a_leaf_clone_compiles_and_runs(tmp_path):
 # RETROSPECTIVE INSTANTIATION AUDIT (STOP #A dispatch fix, 2026-07-28)         #
 #                                                                             #
 # The P2 test above instantiates the clone at the IDEALISED all-dd binding     #
-# ``<ddcomplex, double, ddouble>`` — which is NOT the binding the real build    #
+# ``<DoubleDoubleComplex, double, DoubleDouble>`` — which is NOT the binding the real build    #
 # uses.  The box instantiates ``ql::BO`` (and every clone it reaches) at the   #
 # REAL binding ``TOutput = Kokkos::complex<double>``, ``TScale = double``.  A   #
-# clone whose return is widened to ``ddcomplex`` then lands in a               #
+# clone whose return is widened to ``DoubleDoubleComplex`` then lands in a               #
 # ``const TOutput`` (== ``Kokkos::complex<double>``) receiver with no          #
 # narrowing — the Shape-1 exit-boundary defect that the STOP #A dispatch fix    #
 # uncovered.  These probes force the REAL binding so that false positive can    #
@@ -183,7 +183,7 @@ def _compile_clone_at_binding(tmp_path, toutput: str, main_body: str,
     # Include the base ``kokkosMaths.h`` (the double primary + Sign(double)/
     # Constants<double>) exactly as the real build's wrapper chain does — the box is
     # instantiated at ``TScale = double``, so the clone body resolves against the
-    # double overloads, and ONLY the widened return (ddcomplex) vs the double-computed
+    # double overloads, and ONLY the widened return (DoubleDoubleComplex) vs the double-computed
     # body value is the type conflict.  Including the all-dd ``kokkosMaths_dd.h`` here
     # instead would ODR-collide with the base and produce artifact errors the real
     # build never sees (it is the *reference* dd header, not layered on top).
@@ -192,8 +192,8 @@ def _compile_clone_at_binding(tmp_path, toutput: str, main_body: str,
         '#include "kokkosMaths.h"\n'
         '#include <dd_math.hpp>\n'
         '#include <dd_complex.hpp>\n'
-        'using quad::ddfun::ddouble;\n'
-        'using quad::ddfun::ddcomplex;\n'
+        'using Kokkos::Experimental::DoubleDouble;\n'
+        'using Kokkos::Experimental::DoubleDoubleComplex;\n'
         'namespace ql {\n'
         f'{clone}\n'
         '}\n'
@@ -218,7 +218,7 @@ def test_audit_real_box_binding_exposes_shape1_truncation(tmp_path):
     type-correct under the real instantiation, and that the classifier buckets it.
     Once the Shape-1 emission fix lands, the companion narrowing probe below compiles.
     """
-    # The exact real-build shape: clone return (ddcomplex) into a const TOutput local.
+    # The exact real-build shape: clone return (DoubleDoubleComplex) into a const TOutput local.
     body = (
         'double v = 1.5, x = 2.5;\n'
         '    const Kokkos::complex<double> r = '
@@ -244,7 +244,7 @@ def test_audit_explicit_narrowing_compiles_at_real_binding(tmp_path):
 
     This is the SHAPE-1 FIX in miniature, self-contained (independent of the leaf
     clone, whose verbatim body has its own rule-(d) instantiation issue): a
-    ``ddcomplex`` value narrowed to the caller ``Kokkos::complex<double>`` via
+    ``DoubleDoubleComplex`` value narrowed to the caller ``Kokkos::complex<double>`` via
     component ``.hi`` reconstruction is exactly what the boundary transform must emit
     at a designed exit.  Proves the fix DIRECTION is sound at the real binding (the
     same binding the box uses) — a dd value CAN be delivered into a
@@ -257,12 +257,12 @@ def test_audit_explicit_narrowing_compiles_at_real_binding(tmp_path):
         '#include "kokkosMaths.h"\n'
         '#include <dd_math.hpp>\n'
         '#include <dd_complex.hpp>\n'
-        'using quad::ddfun::ddouble;\n'
-        'using quad::ddfun::ddcomplex;\n'
+        'using Kokkos::Experimental::DoubleDouble;\n'
+        'using Kokkos::Experimental::DoubleDoubleComplex;\n'
         'int main(int argc, char** argv) {\n'
         '    Kokkos::initialize(argc, argv);\n'
         '    {\n'
-        '        ddcomplex dd(ddouble(-0.51082562376599072), ddouble(0.0));\n'
+        '        DoubleDoubleComplex dd(DoubleDouble(-0.51082562376599072), DoubleDouble(0.0));\n'
         # the exact narrowing the boundary transform must emit at a designed exit:
         '        const Kokkos::complex<double> r(dd.real().hi, dd.imag().hi);\n'
         '        Kokkos::printf("re=%.17g\\n", r.real());\n'
@@ -298,11 +298,11 @@ def test_p2_synth_overlay_collides_with_source(tmp_path):
         '#include "kokkosMaths_dd.h"\n'
         '#include <dd_math.hpp>\n'
         '#include <dd_complex.hpp>\n'
-        'using quad::ddfun::ddouble;\n'
-        'using quad::ddfun::ddcomplex;\n'
+        'using Kokkos::Experimental::DoubleDouble;\n'
+        'using Kokkos::Experimental::DoubleDoubleComplex;\n'
         'namespace ql {\n'
-        '  KOKKOS_INLINE_FUNCTION auto kLog(ddcomplex const& z){ return quad::ddfun::log(z); }\n'
-        '  KOKKOS_INLINE_FUNCTION auto kAbs(ddcomplex const& z){ return quad::ddfun::abs(z); }\n'
+        '  KOKKOS_INLINE_FUNCTION auto kLog(DoubleDoubleComplex const& z){ return Kokkos::Experimental::log(z); }\n'
+        '  KOKKOS_INLINE_FUNCTION auto kAbs(DoubleDoubleComplex const& z){ return Kokkos::Experimental::abs(z); }\n'
         '}\n'
         'int main(){ return 0; }\n')
     res = _nvcc_env_compile(src, tmp_path / "synth")

@@ -46,7 +46,7 @@ here (no dynamic-container support). See §4 and §7.
 ```python
 # Phase 2d (d1): names used as an array subscript BASE anywhere in the region
 # (``name[``) are aggregates/pointers, not promotable scalars — promoting one
-# yields ``ffloat[int]`` / ``operator[](ffloat,int)`` build failures (the
+# yields ``FloatFloat[int]`` / ``operator[](FloatFloat,int)`` build failures (the
 # xpi_in-style Kokkos::Array reads).  Exclude them from the derived reads.
 subscripted = _subscripted_names(toks, rs, re_)
 ...
@@ -59,8 +59,8 @@ across three sources:
 
 - **The guard comment itself:** a name used as a subscript base (`cxs[`) is an
   aggregate. If `region_reads_from_function` returned `cxs`, `promote_region_block`
-  would rename/retype the **whole name** → `ffloat cxs` (or `ffcomplex cxs`), and every
-  `cxs[k]` in the body becomes `ffloat[int]` / `operator[](ffloat,int)` — a hard build
+  would rename/retype the **whole name** → `FloatFloat cxs` (or `FloatFloatComplex cxs`), and every
+  `cxs[k]` in the body becomes `FloatFloat[int]` / `operator[](FloatFloat,int)` — a hard build
   failure. The motivating case is named: "xpi_in-style `Kokkos::Array` reads."
 - **`PHASE_2C_2026-07-24.md:89-92`:** `boxGPU.h:99-101, 114-115` were correctly reported
   as `promotion_no_op` because "those lines touch only `xpi[...]` (a `View`/array
@@ -73,17 +73,17 @@ across three sources:
   decl-site exclusion.
 
 **Why element-only reversal preserves the protection:** the d1 regression is caused by
-promoting the **whole array name**, which makes the *declaration* `ffloat cxs` and thus
+promoting the **whole array name**, which makes the *declaration* `FloatFloat cxs` and thus
 every `cxs[k]` ill-typed. Element promotion never touches the array name or its decl —
-it wraps the **read expression** `cxs[k]` in an entry cast (`ddcomplex(ddouble(cxs[k].real()),
-ddouble(cxs[k].imag()))`), leaving `cxs` typed `Kokkos::Array<TOutput,3>`. `ffloat[int]`
-can never arise because no `ffloat cxs` decl is ever emitted. The d1 whole-name
+it wraps the **read expression** `cxs[k]` in an entry cast (`DoubleDoubleComplex(DoubleDouble(cxs[k].real()),
+DoubleDouble(cxs[k].imag()))`), leaving `cxs` typed `Kokkos::Array<TOutput,3>`. `FloatFloat[int]`
+can never arise because no `FloatFloat cxs` decl is ever emitted. The d1 whole-name
 exclusion stays exactly as-is; the carve-out is strictly additive at the element
 read/write occurrence.
 
 ## 2. The defect and the narrow fix
 
-### 2.1 What forms `Kokkos::complex<quad::ddfun::ddcomplex>`
+### 2.1 What forms `Kokkos::complex<Kokkos::Experimental::DoubleDoubleComplex>`
 
 Ground truth (B14, `box/B2m.h`, function at 373-406; confirmed in
 `lmeasure_run/B14/.../iter_0_build.log`):
@@ -92,17 +92,17 @@ Ground truth (B14, `box/B2m.h`, function at 373-406; confirmed in
 Kokkos::Array<TOutput, 3> cxs;                       // B2m.h:391 — fixed-size complex aggregate
 ql::kfn<TOutput, TMass, TScale>(cxs, ieps, -si, m2, m4);
 ...
-TOutput fac;                                         // B2m.h:396 — closure carrier (widened → ddcomplex)
+TOutput fac;                                         // B2m.h:396 — closure carrier (widened → DoubleDoubleComplex)
 ...
 fac = TOutput(ql::Constants<TMass>::_two() / (m2 * m4 * ta)) * cxs[0] / (cxs[1] * cxs[2]) * xlog;
-//    ^-- region promotes m2/m4/ta/xlog to dd; TOutput(...) cast → ddcomplex(...)      ^-- B2m.h:401
-//        ddcomplex(...)  *  cxs[k]   →   Kokkos::complex<quad::ddfun::ddcomplex>
+//    ^-- region promotes m2/m4/ta/xlog to dd; TOutput(...) cast → DoubleDoubleComplex(...)      ^-- B2m.h:401
+//        DoubleDoubleComplex(...)  *  cxs[k]   →   Kokkos::complex<Kokkos::Experimental::DoubleDoubleComplex>
 ```
 
-The `TOutput(...)` functional cast is rewritten to `ddcomplex(...)` (existing
+The `TOutput(...)` functional cast is rewritten to `DoubleDoubleComplex(...)` (existing
 `_complex_cast_indices`), but `cxs[0]`, `cxs[1]`, `cxs[2]` stay `Kokkos::complex<double>`
 because `cxs` is excluded from `reads` (d1). Overload resolution promotes both operands
-of `ddcomplex(...) * cxs[0]` to the common `Kokkos::complex<ddcomplex>`, which fails
+of `DoubleDoubleComplex(...) * cxs[0]` to the common `Kokkos::complex<DoubleDoubleComplex>`, which fails
 `Kokkos::complex`'s floating-point `static_assert` (`Kokkos_Complex.hpp:35`) and poisons
 every downstream use, including the `res(i,k) = fac` stores (B14 errors 761 → 35 → 765).
 
@@ -151,10 +151,10 @@ Consequences, each well-defined:
 
 | context | emitted form | precision of the array |
 |---------|--------------|------------------------|
-| read in arithmetic `cxs[k] * dd` | `ddcomplex(ddouble(cxs[k].real()), ddouble(cxs[k].imag())) * dd` | unchanged (caller) |
+| read in arithmetic `cxs[k] * dd` | `DoubleDoubleComplex(DoubleDouble(cxs[k].real()), DoubleDouble(cxs[k].imag())) * dd` | unchanged (caller) |
 | whole-array pass `f(cxs)` | `f(cxs)` verbatim | unchanged (caller) — callee runs at caller precision, no dd leak |
 | element store `x4[1] = <dd expr>` | `x4[1] = <demote(dd expr) to element type>` | unchanged (caller) |
-| element read into scalar decl `TOutput xs = cxs[0]` | `ddcomplex xs = ddcomplex(ddouble(cxs[0].real()), …)` (decl retyped by existing decl path; **RHS wrapped by element read**) | unchanged (caller) |
+| element read into scalar decl `TOutput xs = cxs[0]` | `DoubleDoubleComplex xs = DoubleDoubleComplex(DoubleDouble(cxs[0].real()), …)` (decl retyped by existing decl path; **RHS wrapped by element read**) | unchanged (caller) |
 
 There is no "mixed-precision array" state to reason about — a `Kokkos::Array<TOutput,3>`
 is always uniformly `TOutput`. This is the single design decision that removes the
@@ -165,16 +165,16 @@ STOP #FF ambiguity; it is chosen deliberately over "promote all elements of an a
 
 Element-promoted reads still flow into a `res(i,k) = fac` store where the carrier `fac`
 is dd. That store is **Shape 1 designed-exit narrowing** (held deliverable b) — element
-promotion fixes the *interior* `complex<ddcomplex>` (761) but the *store* (764/765) still
+promotion fixes the *interior* `complex<DoubleDoubleComplex>` (761) but the *store* (764/765) still
 needs the designed-exit demote. **The two must land together** (§6): element promotion
 alone leaves 764/765; Shape-1 alone can't build because 761 still poisons the type. This
 is the STOP #CC entanglement, now with a concrete joint-landing plan.
 
 ### 3.4 Interaction with rule (a) closure_decls
 
-A closure carrier written from an element-promoted expression (`fac = ddcomplex(...) *
+A closure carrier written from an element-promoted expression (`fac = DoubleDoubleComplex(...) *
 cxs[k]...`) is already widened at its decl by the existing `ClosureDecl` path (carrier
-`fac` decl 396 → `ddcomplex`). Element promotion needs **no per-index carrier
+`fac` decl 396 → `DoubleDoubleComplex`). Element promotion needs **no per-index carrier
 tracking**: because the array is never retyped, "any element promoted → widen the
 *carrier* that receives the expression" is the existing rule-a behavior and suffices.
 The array itself is never a carrier. **Invariant: element promotion adds carriers only
@@ -239,7 +239,7 @@ not fire.**
 For each class in §4, the concrete regression surfaces:
 
 **(R1) Emission-granularity change — B14, B16, B15.** A `cxs[k]` read that was passed
-through verbatim now becomes a wrapped `ddcomplex(ddouble(cxs[k].real()), …)`
+through verbatim now becomes a wrapped `DoubleDoubleComplex(DoubleDouble(cxs[k].real()), …)`
 expression. *Semantics unchanged* (full caller precision is preserved into the wrap;
 `_promote_complex_entry` wraps each component in the extended **scalar** first, exactly
 as the existing read path does), but the **emitted variant text changes** for these
@@ -249,7 +249,7 @@ review showing only the intended wrap edits.
 **(R2) Carrier-widen interaction — B14, B16.** An element-promoted expression assigned
 to a carrier (`fac = … * cxs[k]`) relies on the carrier already being widened by rule-a.
 Risk: element promotion firing on a read whose result is assigned to a carrier that is
-*not* in the closure set → a new `ddcomplex`-valued expression stored into a
+*not* in the closure set → a new `DoubleDoubleComplex`-valued expression stored into a
 `Kokkos::complex<double>` carrier (a fresh Shape-1). Mitigation/contract: element
 promotion must fire **only** inside a region already selected for dd promotion, so the
 carrier is in scope for rule-a; enforced by the invariant in §3.4. Detected by: gate.
@@ -267,7 +267,7 @@ latent, not active. Contract: if a future run promotes an `x4` region, the store
 path activates; until then it is dead but specified.
 
 **(R5) d1-motivated regression re-opening — NONE.** The original d1 failure
-(`ffloat[int]` from whole-array promotion) cannot recur: the array decl is never
+(`FloatFloat[int]` from whole-array promotion) cannot recur: the array decl is never
 retyped (§2.1, §3.2). This is the load-bearing safety property. Detected by: the
 existing d1 regression test must stay green (§6), plus a new test asserting the array
 decl token is never in the edit set.
@@ -314,7 +314,7 @@ reports `0 unknown` on the new clean builds (a non-zero unknown = STOP #BB).
    `type_resolve` (§3). Fixed-size complex aggregates only.
 2. **Shape 1 store-narrowing (b) + Shape 2 / rule-c receiving-local widen (c)** — the
    previously-held emission fixes, now able to instantiation-validate because step 1
-   clears the interior `complex<ddcomplex>`.
+   clears the interior `complex<DoubleDoubleComplex>`.
 3. **Instantiation-gate validate on B14** (§6.1) — must build clean end-to-end.
 4. **Instantiation-gate sweep on all 21** (§6.4) — regression check; realize the
    measured table.

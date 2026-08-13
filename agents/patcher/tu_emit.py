@@ -70,7 +70,7 @@ class PrecisionProfile:
     A precision served by a static header uses ``shim_synthesis=False`` + its own
     ``maths_header``.  ``ff`` is such a precision as of the ``kokkosMaths_ff.h`` enrichment
     (commit d0f5b35): its header layers the ``ql::`` leaves on the custom
-    ``ql::ffun::ffcomplex`` container (not ``Kokkos::complex<ffloat>``, which fails the
+    ``ql::ffun::ffcomplex`` container (not ``Kokkos::complex<FloatFloat>``, which fails the
     ``is_floating_point`` static_assert — the original STOP #EEE), so it joins the dd/quad
     static-header ladder.  A precision with neither a static header nor a shim path stays
     ``available=False`` and fails loud rather than degrading to dd (reverse-STOP #SS).
@@ -94,7 +94,7 @@ class PrecisionProfile:
 # Phase-2 (shim synthesis — no static header, library-native leaves); FF is wired for
 # Phase-2 via its own **static enrichment header** ``kokkosMaths_ff.h`` (commit d0f5b35),
 # which layers the ``ql::`` leaves on the custom ``ql::ffun::ffcomplex`` container instead
-# of ``Kokkos::complex<ffloat>`` — sidestepping STOP #EEE at the container level.  FF joins
+# of ``Kokkos::complex<FloatFloat>`` — sidestepping STOP #EEE at the container level.  FF joins
 # the same static-header ladder as dd/quad (STOP #SS: the ladder branches on the profile's
 # ``maths_header`` value, never on a hard-coded precision name).
 PROFILES: dict[TargetPrecision, PrecisionProfile] = {
@@ -116,7 +116,7 @@ PROFILES: dict[TargetPrecision, PrecisionProfile] = {
         printer_name="FFPrinter",
         two_limb=True,
         available=True),           # enabled via kokkosMaths_ff.h enrichment (commit d0f5b35);
-                                   # static wrapper + custom ffcomplex container clears STOP #EEE
+                                   # static wrapper + custom FloatFloatComplex container clears STOP #EEE
     TargetPrecision.FLOAT: PrecisionProfile(
         precision=TargetPrecision.FLOAT,
         define_macro=None,                 # default arm (double reference) + generated shim

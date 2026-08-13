@@ -433,7 +433,7 @@ def _real_closure(graph, integral):
     man = ChainManifest(chain_id=f"cascade_{integral}", integral=integral,
                         entry_point="BO", lines=lines)
     return compute_value_closure(manifest=man, graph=graph,
-                                   scalar_type="quad::ddfun::ddouble")
+                                   scalar_type="Kokkos::Experimental::DoubleDouble")
 
 
 @requires_libclang
@@ -441,14 +441,14 @@ def _real_closure(graph, integral):
 def test_real_b10_finds_YSA_carriers_on_ddilog(qcdloop_full_graph):
     # The blocker's worked example: ddilog's `TMass Y, S, A;` at :157 — Y and A are
     # strict carriers (Y write :174/read :199; A write :177/read :212), so the whole
-    # multi-declarator (Y, S, A) is widened to ddouble at :157.
+    # multi-declarator (Y, S, A) is widened to DoubleDouble at :157.
     cc = _real_closure(qcdloop_full_graph, "B10")
     assert _widen_names(cc) == {"Y", "S", "A"}
     decl_lines = {ln for _f, ln, _n, _t in cc.widenable}
     files = {Path(f).name for f, _l, _n, _t in cc.widenable}
     assert decl_lines == {157}
     assert files == {"kokkosUtils.h"}
-    assert all(t == "quad::ddfun::ddouble" for _f, _l, _n, t in cc.widenable)
+    assert all(t == "Kokkos::Experimental::DoubleDouble" for _f, _l, _n, t in cc.widenable)
 
 
 @requires_libclang
@@ -557,7 +557,7 @@ def test_real_b10_closure_extends_across_li2omx2_return(qcdloop_full_graph):
     assert "Li2omx2" in rw_by_fn and "ddilog" in rw_by_fn
     assert (rw_by_fn["Li2omx2"].return_line, rw_by_fn["Li2omx2"].orig_type) == (688, "TOutput")
     assert (rw_by_fn["ddilog"].return_line, rw_by_fn["ddilog"].orig_type) == (149, "TMass")
-    assert all(rw.dd_type == "quad::ddfun::ddouble" for rw in cc.return_widens)
+    assert all(rw.dd_type == "Kokkos::Experimental::DoubleDouble" for rw in cc.return_widens)
     # the chain's designed exit is now B10's res(i,0) cancellation store, NOT Li2omx2's
     # return (which carries dd across, no truncation — clause (ii)).
     exit_kinds = {(ln, kind) for _f, ln, kind, _cv, _d in cc.designed_exits}

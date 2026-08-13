@@ -331,7 +331,7 @@ def test_unreachable_region_raises(chain_tree, chain_graph):
 # body promotions and the carrier decl-widen.
 # --------------------------------------------------------------------------- #
 
-DD = "quad::ddfun::ddouble"
+DD = "Kokkos::Experimental::DoubleDouble"
 
 CARRIER_CHAIN_H = """\
 #pragma once

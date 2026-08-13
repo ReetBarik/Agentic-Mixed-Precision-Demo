@@ -37,7 +37,7 @@ _COMPLEX_OPS = frozenset("abs conj sqrt exp log pow real imag".split())
 @pytest.fixture
 def surface():
     return surface_from_spelling(
-        "quad::ddfun::ddouble", "quad::ddfun::ddcomplex",
+        "Kokkos::Experimental::DoubleDouble", "Kokkos::Experimental::DoubleDoubleComplex",
         scalar_ops=_SCALAR_OPS, complex_ops=_COMPLEX_OPS)
 
 
@@ -85,7 +85,7 @@ def _kw(surface, bodies):
         is_class1_synthesizable=is_class1_synthesizable,
         source_instantiates_at_dd=_src_dd,
         resolve_primary_body=_resolver(bodies),
-        scalar_type="quad::ddfun::ddouble",
+        scalar_type="Kokkos::Experimental::DoubleDouble",
         type_tokens={"TOutput", "TMass", "TScale"})
 
 
@@ -138,7 +138,7 @@ def test_clause2_lnrat_is_clonable(surface):
 def test_clause2_vendored_and_math_ops_are_boundary(surface):
     # A body naming only a vendored quad:: op and a <cmath> op the surface provides.
     body = ("template<typename T> KOKKOS_INLINE_FUNCTION T Foo(T const& x)"
-            "{ return quad::ddfun::abs(x) + ql::sqrt(x); }")
+            "{ return Kokkos::Experimental::abs(x) + ql::sqrt(x); }")
     r = clonable_leaf("ql::Foo", body, None, **_kw(surface, {}))
     assert r.ok, r.reason
 
@@ -306,7 +306,7 @@ def test_is_dd_boundary_vendored_math_source_class1(surface):
               is_class1_synthesizable=is_class1_synthesizable,
               resolve_primary_body=_resolver(_CLASS1))
     # (i) vendored quad:: op
-    assert is_dd_boundary("quad::ddfun::abs", "abs", **kw)
+    assert is_dd_boundary("Kokkos::Experimental::abs", "abs", **kw)
     # (i') <cmath> op the surface provides
     assert is_dd_boundary("ql::log", "log", **kw)
     # (i') <cmath> op the surface LACKS -> not a boundary

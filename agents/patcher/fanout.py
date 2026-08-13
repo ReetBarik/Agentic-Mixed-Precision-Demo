@@ -254,8 +254,8 @@ class ClosureDecl:
     Coordinates are in ORIGINAL/file line numbers (1-based), scoped to the
     variant's ``file``.  ``orig_type`` is the leading (core) type token as the
     boundary bare-decl scanner spells it (last namespace segment of a qualified
-    type); ``dd_type`` the extended replacement (``quad::ddfun::ddouble`` /
-    ``ddcomplex``).  Rewriting the leading type token widens every same-type
+    type); ``dd_type`` the extended replacement (``Kokkos::Experimental::DoubleDouble`` /
+    ``DoubleDoubleComplex``).  Rewriting the leading type token widens every same-type
     sibling of a multi-declarator (``TMass Y, S, A;``) per the §2 conservative
     policy.  ``name`` is the carrier that motivated the record (a sibling may ride
     along); kept for forensics only.
@@ -282,7 +282,7 @@ class ReturnWiden:
     appears in the variant's function *declaration* (the signature line — the
     ``TOutput`` / ``ReturnType`` token, NOT the ``return`` statement).  ``orig_type``
     is the leading return-type token as source spells it; ``dd_type`` the widened
-    replacement (``ddcomplex`` / ``quad::ddfun::ddouble``).  ``function_name`` is the
+    replacement (``DoubleDoubleComplex`` / ``Kokkos::Experimental::DoubleDouble``).  ``function_name`` is the
     variant name (e.g. ``Li2omx2_B10``) for diagnostics and collision-check purposes.
     """
 
@@ -467,7 +467,7 @@ def fan_out_region(
     (from the ff/dd/float integrator).  ``complex_type`` (+ ``app_source_roots`` for
     the template-parameter binding) enables the Phase-2d complex-container promotion —
     a region operand whose type resolves to a complex container promotes to
-    ``complex_type`` (``ffcomplex`` / ``ddcomplex`` / ``Kokkos::complex<float>``)
+    ``complex_type`` (``FloatFloatComplex`` / ``DoubleDoubleComplex`` / ``Kokkos::complex<float>``)
     instead of the scalar.  Mutates the tree under ``tree_root`` in place and returns a
     :class:`FanoutResult`.  Raises :class:`FanoutError` when the region is not inside a
     known function or its function is unreachable from the entry point.
@@ -653,7 +653,7 @@ def _carrier_reconcile_edits(spec: VariantSpec,
 
     Region-core element promotion (2026-07-28), deliverables (b) designed-exit narrow +
     (c) receiving-local widen.  Once element promotion clears a region's interior
-    ``complex<ddcomplex>``, a widened complex carrier still breaks at two non-region body
+    ``complex<DoubleDoubleComplex>``, a widened complex carrier still breaks at two non-region body
     sites the region transform does not touch: a sibling assignment to the carrier
     (widen its caller-precision RHS) and a designed-exit store reading the carrier
     (demote the read to caller precision).  Each is a single-line rewrite keyed by the

@@ -577,11 +577,11 @@ def _is_already_dd(core_type: str, scalar_type: str,
                    complex_type: str | None) -> bool:
     """True when ``core_type`` already denotes a dd type — so widening it is a no-op.
 
-    Guards the double-widen (Shape 3, ``Kokkos::complex<quad::ddfun::ddcomplex>``):
+    Guards the double-widen (Shape 3, ``Kokkos::complex<Kokkos::Experimental::DoubleDoubleComplex>``):
     a carrier whose source token is *already* the dd scalar/complex spelling (or any
-    ``quad::ddfun::`` type, or a complex container wrapping one) must NOT be widened
+    ``Kokkos::Experimental::`` type, or a complex container wrapping one) must NOT be widened
     again.  Matched on the core token AND its last ``::`` segment so an
-    already-qualified ``quad::ddfun::ddcomplex`` and a bare ``ddcomplex`` both hit.
+    already-qualified ``Kokkos::Experimental::DoubleDoubleComplex`` and a bare ``DoubleDoubleComplex`` both hit.
     """
     if not core_type:
         return False
@@ -591,19 +591,19 @@ def _is_already_dd(core_type: str, scalar_type: str,
         dd_spellings |= {complex_type, complex_type.split("::")[-1]}
     if core_type in dd_spellings or last in dd_spellings:
         return True
-    # Any vendored dd type (quad::ddfun::*) is already extended precision.
-    return core_type.startswith("quad::ddfun::") or "quad::ddfun::" in core_type
+    # Any vendored dd type (Kokkos::Experimental::*) is already extended precision.
+    return core_type.startswith("Kokkos::Experimental::") or "Kokkos::Experimental::" in core_type
 
 
 def _carrier_dd_type(core_type: str, scalar_type: str,
                      complex_type: str | None, complex_tokens) -> str:
     """The chain-internal dd type a carrier decl widens to: the complex container
     when the carrier's core type is a complex-bound token, else the scalar dd type
-    (§7 — ``quad::ddfun::ddouble`` / ``ddcomplex``).
+    (§7 — ``Kokkos::Experimental::DoubleDouble`` / ``DoubleDoubleComplex``).
 
     Idempotence guard (Shape 3): if the core type is ALREADY a dd type, return it
-    unchanged — re-wrapping an already-``ddcomplex`` operand in the complex container
-    is what produces the nonsensical ``Kokkos::complex<quad::ddfun::ddcomplex>``."""
+    unchanged — re-wrapping an already-``DoubleDoubleComplex`` operand in the complex container
+    is what produces the nonsensical ``Kokkos::complex<Kokkos::Experimental::DoubleDoubleComplex>``."""
     if _is_already_dd(core_type, scalar_type, complex_type):
         return core_type
     if complex_type and core_type in complex_tokens:
@@ -1666,8 +1666,8 @@ def _select_leaf_overload(graph: CallGraph, name: str, arg_cores: set[str]):
     ``(TScale,TScale)`` shallow (:138) — and the B10 chain reaches only the LATTER:
     both ``Li2omx2``'s ``Lnrat(v,x)`` (``v,x`` ``TScale``) and ``B10``'s own direct
     ``Lnrat(si,mu2)`` etc. (``TScale`` / ``TMass`` locals) resolve to :138, because at
-    instantiation ``TScale == TMass == ddouble`` exact-matches ``(TScale,TScale)`` while
-    ``(TOutput,TOutput) == (ddcomplex,ddcomplex)`` would need a conversion.
+    instantiation ``TScale == TMass == DoubleDouble`` exact-matches ``(TScale,TScale)`` while
+    ``(TOutput,TOutput) == (DoubleDoubleComplex,DoubleDoubleComplex)`` would need a conversion.
     ``resolve_primary_body`` / ``_pick_def`` both return ``defs[0]`` (the :126 one),
     which is WRONG: cloning it and rerouting the ``TScale``-arg calls to it would corrupt
     the leaf body.  ``_pick_def``'s ``must_call`` cannot disambiguate either (both
@@ -1728,7 +1728,7 @@ def _materialize_leaf_variants(
        template instantiation), carrying a :class:`ReturnWiden` widening the return to the
        chain-consistent dd type.  That dd type is derived by :func:`_carrier_dd_type` with
        the SAME ``complex_tokens`` the closure used, so the clone returns EXACTLY the type
-       the caller's receiving local was widened to (``prod`` -> ``ddouble`` for B10) — the
+       the caller's receiving local was widened to (``prod`` -> ``DoubleDouble`` for B10) — the
        identical derivation rule (c) uses for ``Li2omx2``/``ddilog`` (line ~1422);
     3. add the caller-side reroute ``g -> g_clone`` to every variant of a calling frame
        (and, if the entry point itself calls ``g``, to ``root_reroutes``), so

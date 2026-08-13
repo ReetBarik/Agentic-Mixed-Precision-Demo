@@ -18,7 +18,7 @@ Inputs
 2. runs/qcdloop/strategy/<run_id>/report.json  ->  precision_assignment
    (authoritative per-(file,line) final precision; reduces last-wins to the
    266/134/86/2 distribution reported in CALIBRATION_v2).
-3. dd_math.hpp (ql::ddfun) / ff_math.hpp (quad::ffun)  ->  multiplier source
+3. dd_math.hpp (ql::ddfun) / ff_math.hpp (Kokkos::Experimental)  ->  multiplier source
    of truth (see MULT block below; counts done by hand from the header bodies).
 
 Sibling of analyze_calibration.py.  Re-runnable; ~30 s wall (streams 1.7 GB).

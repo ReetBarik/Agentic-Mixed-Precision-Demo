@@ -51,7 +51,7 @@ class _CannedLLM:
             "// SOURCE_HASH: PENDING\n"
             "#include <ff_math.hpp>\n"
             "#include <ff_complex.hpp>\n"
-            "// Rule 2: region computes in ffloat; vendored ops suffice\n"
+            "// Rule 2: region computes in FloatFloat; vendored ops suffice\n"
         )
 
 
@@ -87,9 +87,9 @@ def test_generates_shim_and_boundary(repo, tmp_path):
     # boundary patch: promote reads on entry, retype/rename local, demote on exit
     patch = res.boundary_patch
     assert patch is not None
-    assert "quad::ffun::ffloat a__ff = quad::ffun::ffloat(a);" in patch
-    assert "quad::ffun::ffloat b__ff = quad::ffun::ffloat(b);" in patch
-    assert "quad::ffun::ffloat r__ext = a__ff + b__ff;" in patch
+    assert "Kokkos::Experimental::FloatFloat a__ff = Kokkos::Experimental::FloatFloat(a);" in patch
+    assert "Kokkos::Experimental::FloatFloat b__ff = Kokkos::Experimental::FloatFloat(b);" in patch
+    assert "Kokkos::Experimental::FloatFloat r__ext = a__ff + b__ff;" in patch
     assert "double r = static_cast<double>(r__ext.hi) + static_cast<double>(r__ext.lo);" in patch
     assert '#include "ql_shim_ff.h"' in patch
 
@@ -124,8 +124,8 @@ def test_scalar_change_changes_cache_key(repo, tmp_path):
     # the ff key differs from a dd key over the same region (guards the tag).
     from agents.integrator_base import cache
     region = "    double r = a + b;"
-    k_ff = cache.compute_region_hash(region, ff._SYSTEM_PROMPT, "quad::ffun::ffloat", [])
-    k_dd = cache.compute_region_hash(region, ff._SYSTEM_PROMPT, "quad::ddfun::ddouble", [])
+    k_ff = cache.compute_region_hash(region, ff._SYSTEM_PROMPT, "Kokkos::Experimental::FloatFloat", [])
+    k_dd = cache.compute_region_hash(region, ff._SYSTEM_PROMPT, "Kokkos::Experimental::DoubleDouble", [])
     assert k_ff != k_dd
 
 
@@ -158,5 +158,5 @@ def test_real_llm_generates_parseable_shim(repo, tmp_path):
     shim = Path(res.shim_paths[0]).read_text()
     assert "#pragma once" in shim
     assert "ff_math.hpp" in shim
-    assert res.boundary_patch and "quad::ffun::ffloat" in res.boundary_patch
+    assert res.boundary_patch and "Kokkos::Experimental::FloatFloat" in res.boundary_patch
     assert res.llm_tokens > 0

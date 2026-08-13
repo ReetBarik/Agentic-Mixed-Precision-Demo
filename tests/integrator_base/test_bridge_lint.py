@@ -37,8 +37,8 @@ def test_detects_std_and_sycl_and_nested_cuda():
 
 
 def test_ignores_vendored_quad_namespace():
-    assert _calls("quad::ddfun::abs(x)") == []
-    assert _calls("quad::ffun::sqrt(x)") == []
+    assert _calls("Kokkos::Experimental::abs(x)") == []
+    assert _calls("Kokkos::Experimental::sqrt(x)") == []
 
 
 def test_ignores_call_without_promoted_arg():
@@ -72,7 +72,7 @@ _REGION = "y = Kokkos::fabs(x);"
 def test_lint_rejects_missing_bridge():
     shim = ("#pragma once\n#include <dd_math.hpp>\n"
             "namespace quad { namespace ddfun {\n"
-            "  ddouble myabs(ddouble v){ return abs(v); }\n} }\n")   # ADL-only, no Kokkos bridge
+            "  DoubleDouble myabs(DoubleDouble v){ return abs(v); }\n} }\n")   # ADL-only, no Kokkos bridge
     msg = r._lint_qualified_bridges(_REGION, shim, _PROMOTED)
     assert msg is not None
     assert "C3 bridge lint" in msg
@@ -81,20 +81,20 @@ def test_lint_rejects_missing_bridge():
 
 def test_lint_passes_with_namespace_injection_bridge():
     shim = ("#pragma once\n#include <dd_math.hpp>\n"
-            "namespace Kokkos { KOKKOS_INLINE_FUNCTION quad::ddfun::ddouble "
-            "fabs(quad::ddfun::ddouble x){ return quad::ddfun::abs(x); } }\n")
+            "namespace Kokkos { KOKKOS_INLINE_FUNCTION Kokkos::Experimental::DoubleDouble "
+            "fabs(Kokkos::Experimental::DoubleDouble x){ return Kokkos::Experimental::abs(x); } }\n")
     assert r._lint_qualified_bridges(_REGION, shim, _PROMOTED) is None
 
 
 def test_lint_passes_with_using_declaration_fallback():
     shim = ("#pragma once\n#include <dd_math.hpp>\n"
-            "using quad::ddfun::fabs;  // (b) fallback bridge\n")
+            "using Kokkos::Experimental::fabs;  // (b) fallback bridge\n")
     assert r._lint_qualified_bridges(_REGION, shim, _PROMOTED) is None
 
 
 def test_lint_passes_with_using_namespace_fallback():
     region = "y = std::sqrt(x);"
-    shim = "#pragma once\nnamespace std { using namespace quad::ddfun; }\n"
+    shim = "#pragma once\nnamespace std { using namespace Kokkos::Experimental; }\n"
     # using namespace std form
     shim2 = "#pragma once\nusing namespace std;\n"
     assert r._lint_qualified_bridges(region, shim2, _PROMOTED) is None

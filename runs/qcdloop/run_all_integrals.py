@@ -47,7 +47,7 @@ APP_CMAKE_DIR = HERE / "app"
 # classes (LEAF_CALLEE_PROMOTION_DESIGN.md §2): Class-1 shallow math wrappers the
 # pipeline synthesizes / the enriched source provides at dd, and Class-2 coefficient
 # tables + constants the source instantiates at dd.  ``source_instantiates_at_dd`` is
-# the qcdloop-specific Class-2 accessor set (the double primary at T=ddouble + the
+# the qcdloop-specific Class-2 accessor set (the double primary at T=DoubleDouble + the
 # enriched dd source's 43-coeff _C, dd _pi, dd tolerances — §2.3, probe P5).  It is a
 # structural leading-underscore accessor / known template-helper set, kept explicit
 # here (the harness is the qcdloop wiring layer) so no app identifier enters the
@@ -81,7 +81,7 @@ def _make_leaf_promotion_factory(integral: str, tree: Path):
     )
 
     srcs = [p.read_text() for p in sorted(Path(tree).glob("**/*.h"))]
-    surface = surface_from_spelling("quad::ddfun::ddouble", "quad::ddfun::ddcomplex")
+    surface = surface_from_spelling("Kokkos::Experimental::DoubleDouble", "Kokkos::Experimental::DoubleDoubleComplex")
 
     def resolve(name):
         defs = _find_primary_defs(name, srcs)

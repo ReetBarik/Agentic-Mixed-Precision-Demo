@@ -6,7 +6,7 @@ from agents.integrator_base import cache
 
 _SRC = "double r = a + b;\n"
 _RULES = "ruleset v1"
-_SCALAR = "quad::ffun::ffloat"
+_SCALAR = "Kokkos::Experimental::FloatFloat"
 
 
 def test_stable_for_identical_inputs():
@@ -36,7 +36,7 @@ def test_varies_with_ruleset_bytes():
 
 def test_varies_with_scalar_type():
     a = cache.compute_region_hash(_SRC, _RULES, _SCALAR, ["r"])
-    b = cache.compute_region_hash(_SRC, _RULES, "quad::ddfun::ddouble", ["r"])
+    b = cache.compute_region_hash(_SRC, _RULES, "Kokkos::Experimental::DoubleDouble", ["r"])
     assert a != b
 
 

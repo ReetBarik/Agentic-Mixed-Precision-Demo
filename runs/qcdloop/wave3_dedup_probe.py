@@ -5,16 +5,16 @@ Unlike ``wave3_probe.py`` (which landed each region off the PRISTINE base to pro
 the collision is sibling-context-dependent), this probe lands TWO C-COLL regions
 **sequentially against the same growing branch**: region A off the pristine base,
 then region B off region A's committed candidate. So region B is forced to merge
-into the ``Constants<ddouble>`` that region A already installed — the exact TU
+into the ``Constants<DoubleDouble>`` that region A already installed — the exact TU
 assembly that produced ``redefinition of 'struct ql::Constants<...>'`` in the 10k.
 
 Success criteria (task spec):
   1. Both attempts return status=ok.
   2. The emitted TU builds cleanly (status=ok ⇒ the vanilla-driver build gate
      passed — no redefinition error).
-  3. Exactly ONE ``template<> struct Constants<ddouble>`` in the assembled TU
+  3. Exactly ONE ``template<> struct Constants<DoubleDouble>`` in the assembled TU
      after both commits.
-  4. The single ``Constants<ddouble>`` contains members from BOTH regions.
+  4. The single ``Constants<DoubleDouble>`` contains members from BOTH regions.
   5. The user-visible call sites in both regions still reference
      ``Constants<...>::_ieps50()`` / ``_one()`` — no app-code rewrite.
 
@@ -39,7 +39,7 @@ sys.path.insert(0, str(HERE))
 from run_strategy_e2e import _build_headers_repo  # noqa: E402
 
 # Two C-COLL regions in the SAME file (B2m.h → same box TU), both touching the
-# _ieps50 / _one named-constant family, both `redefinition of Constants<ddouble>`
+# _ieps50 / _one named-constant family, both `redefinition of Constants<DoubleDouble>`
 # in the 10k (WAVE3 §Step-3 identifies B2m.h:64/65 as the identical-source
 # _ieps50+_one pair; :84 is the sibling C-COLL used in the step-4 probe).
 REGION_A = ("box/B2m.h", 64)
@@ -52,7 +52,7 @@ def _git(root, *args):
 
 
 def _count_dd_specs(text: str) -> int:
-    """Count ``template<> struct Constants<ddouble> {`` definitions.
+    """Count ``template<> struct Constants<DoubleDouble> {`` definitions.
 
     Whitespace- and ``::``-agnostic; the trailing ``{`` excludes the forward
     declaration ``struct Constants;`` and the primary template.
@@ -117,19 +117,19 @@ def main() -> int:
     print("\n----- ql_shim_dd.h (canonical merged shim) -----", flush=True)
     print(canonical, flush=True)
 
-    # criterion 3: exactly one Constants<ddouble> across ALL committed headers
+    # criterion 3: exactly one Constants<DoubleDouble> across ALL committed headers
     tree = _git(repo, "ls-tree", "-r", "--name-only", sha_b).splitlines()
     total_dd_specs = 0
     for f in tree:
         if f.endswith((".h", ".hpp", ".cpp")):
             total_dd_specs += _count_dd_specs(_git(repo, "show", f"{sha_b}:{f}"))
-    print(f"\n[criterion 3] Constants<ddouble> specs across whole TU: {total_dd_specs}",
+    print(f"\n[criterion 3] Constants<DoubleDouble> specs across whole TU: {total_dd_specs}",
           flush=True)
 
     # criterion 4: both regions' members present in the one spec
     members = [m for m in ("_ieps50", "_one", "_two", "_reps", "_zero")
                if re.search(r"\b" + m + r"\s*\(", canonical)]
-    print(f"[criterion 4] members in canonical Constants<ddouble>: {members}", flush=True)
+    print(f"[criterion 4] members in canonical Constants<DoubleDouble>: {members}", flush=True)
 
     # criterion 5: app call sites unchanged (still Constants<...>::_ieps50 / _one)
     b2m = _git(repo, "show", f"{sha_b}:box/B2m.h")

@@ -6,7 +6,7 @@ integrators are *whole-app* (instrument / DD-promote an entire library so it is
 callable with an instrumented / extended type), the ff integrator is
 *regional*: the Patcher hands it a specific code region — a file + line range and
 the set of variables in play — and it promotes **just that region** to a
-float-float (``quad::ffun::ffloat`` / ``quad::ffun::ffcomplex``) representation,
+float-float (``Kokkos::Experimental::FloatFloat`` / ``Kokkos::Experimental::FloatFloatComplex``) representation,
 producing a small shim plus a boundary patch that converts at the region's edges
 and leaves the rest of the app untouched.
 
@@ -18,7 +18,7 @@ Implementation.  :func:`integrate_region` is a thin wrapper over the shared
 engine :func:`agents.integrator_base.regional.run_integrate_region` (the ff/dd
 twins share everything but their ruleset + concrete C++ type spellings): it reads
 the region at the pinned SHA, recovers the write set (Fix C), asks the LLM for an
-``ffloat``/``ffcomplex`` shim (SOURCE_HASH-cached, ``attempt``-varied for the
+``FloatFloat``/``FloatFloatComplex`` shim (SOURCE_HASH-cached, ``attempt``-varied for the
 Patcher's N=3 retry), and pairs it with the deterministic boundary patch from
 :mod:`agents.integrator_base.boundary` (promote reads on entry, demote writes on
 exit).  The float-float type itself is *vendored* (``third_party/include/
@@ -52,8 +52,8 @@ _SYSTEM_PROMPT = (Path(__file__).parent / "system_prompt.txt").read_text(encodin
 
 _SPEC = regional.RegionalSpec(
     system_prompt=_SYSTEM_PROMPT,
-    cpp_scalar="quad::ffun::ffloat",
-    cpp_complex="quad::ffun::ffcomplex",
+    cpp_scalar="Kokkos::Experimental::FloatFloat",
+    cpp_complex="Kokkos::Experimental::FloatFloatComplex",
     vendored_headers=["ff_math.hpp", "ff_complex.hpp"],
     shim_prefix="ff",
 )
@@ -80,7 +80,7 @@ def integrate_region(
     line_end: int,
     variables: list[str],
     working_tree: str,
-    scalar_type: str = "ffloat",
+    scalar_type: str = "FloatFloat",
     caller_type: str = "double",
     direction: str = "in",
     out_dir: Path,
@@ -92,12 +92,12 @@ def integrate_region(
     """Regional float-float promotion (design §P4 call shape).
 
     Reads the region source at ``working_tree`` (a SHA), asks the LLM for a
-    ``quad::ffun::ffloat`` / ``quad::ffun::ffcomplex`` shim, and pairs it with a
+    ``Kokkos::Experimental::FloatFloat`` / ``Kokkos::Experimental::FloatFloatComplex`` shim, and pairs it with a
     deterministic boundary patch (promote reads on entry, demote writes on exit).
     Returns the shared :class:`RegionIntegrationResult` (shim path(s) + boundary
     patch + token count).
 
-    ``scalar_type`` is the Patcher's short tag (``"ffloat"``); the concrete C++
+    ``scalar_type`` is the Patcher's short tag (``"FloatFloat"``); the concrete C++
     spelling comes from :data:`_SPEC`.  ``llm_fn(system, user, attempt) -> str`` is
     a test seam (``None`` -> real streaming call via ``cfg`` /
     :class:`~agents.config.PipelineConfig`).  Never raises past the seam — failures

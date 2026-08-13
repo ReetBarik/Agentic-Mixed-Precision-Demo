@@ -14,8 +14,8 @@ from agents.integrator_base import boundary
 from agents.shared import region_scan
 from agents.shared import type_resolve
 
-_DD = "quad::ddfun::ddouble"
-_DDC = "quad::ddfun::ddcomplex"
+_DD = "Kokkos::Experimental::DoubleDouble"
+_DDC = "Kokkos::Experimental::DoubleDoubleComplex"
 _KC = "Kokkos::complex<double>"
 _TOK = frozenset({"TOutput", "complex"})
 
@@ -102,7 +102,7 @@ def test_array_element_type_rejects_dynamic_and_nonliteral():
 
 def test_element_read_is_wrapped_at_complex_type():
     # B14's shape: fac = <promoted> * cxs[k].  cxs[k] must enter the dd arithmetic as a
-    # ddcomplex so no complex<ddcomplex> forms; the array decl is left untouched.
+    # DoubleDoubleComplex so no complex<DoubleDoubleComplex> forms; the array decl is left untouched.
     region = "    TOutput fac = si * cxs[k];"
     block, promoted = boundary.promote_region_block(
         region, reads=["si"], writes=[], scalar_type=_DD,
@@ -114,7 +114,7 @@ def test_element_read_is_wrapped_at_complex_type():
     body = "\n".join(block)
     # element read wrapped component-wise, full precision preserved.
     assert f"{_DDC}({_DD}(cxs[k].real()), {_DD}(cxs[k].imag()))" in body
-    # the array declaration is NEVER retyped (no ``ddouble cxs`` / ``ddcomplex cxs``).
+    # the array declaration is NEVER retyped (no ``DoubleDouble cxs`` / ``DoubleDoubleComplex cxs``).
     assert "cxs;" not in body.replace(" ", "")  # no naked retyped decl slipped in
 
 
@@ -221,7 +221,7 @@ def test_carrier_sibling_cast_assign_widened():
     line = "        fac = TOutput(-xs / (m2 * m4 * ta));"
     out = boundary.widen_carrier_assign_line(
         line, frozenset({"fac"}), _DDC, _DD)
-    assert out == "        fac = quad::ddfun::ddcomplex(-xs / (m2 * m4 * ta));"
+    assert out == "        fac = Kokkos::Experimental::DoubleDoubleComplex(-xs / (m2 * m4 * ta));"
 
 
 def test_carrier_noncast_assign_reconstructed():

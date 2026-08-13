@@ -185,13 +185,13 @@ accept-rate levers.
   **wrong** — hi `0x34F0EE0B102B7182` (correct is `0x358DEE7A4AD4B81F`) plus a
   spurious low word — then honestly bailed to R4. But the value is not a mystery:
   a source double literal carries only double precision, so its faithful dd value
-  is `make_dd(<bits of the double>, 0x0)` — a zero low word.
-* **Gap A** — a promoted `ddouble` flowing into a **namespace-qualified** math
-  call `Ns::fn(x)` (e.g. `Kokkos::fabs`) skips ADL, so the vendored `quad::ddfun`
+  is `DoubleDouble::from_bits(<bits of the double>, 0x0)` — a zero low word.
+* **Gap A** — a promoted `DoubleDouble` flowing into a **namespace-qualified** math
+  call `Ns::fn(x)` (e.g. `Kokkos::fabs`) skips ADL, so the vendored `Kokkos::Experimental`
   overloads are never found and the value narrows to `double`
-  (`cannot convert 'quad::ddfun::ddouble' to 'const double'`). Intermittent (the
+  (`cannot convert 'Kokkos::Experimental::DoubleDouble' to 'const double'`). Intermittent (the
   model often bridges via the app's own `ql::kAbs`/`ql::Max` overloads, which
-  forward to `quad::ddfun::abs` and dodge Kokkos entirely).
+  forward to `Kokkos::Experimental::abs` and dodge Kokkos entirely).
 
 ## What landed
 
@@ -201,7 +201,7 @@ accept-rate levers.
   own definition (`#define` / `constexpr` / `const` / literal-returning accessor)
   and returns its RHS; `derive_from_rhs` runs the cascade — **(1)** vendored
   `dd_*()`/`ff_*()`, **(2)** known hex pair, **(3)** derive from source RHS (3a: a
-  source `double`/`float` literal → `make_dd(bits, 0)` with a *zero* low word —
+  source `double`/`float` literal → `DoubleDouble::from_bits(bits, 0)` with a *zero* low word —
   correct, not truncation; 3b: a closed form over a small **catalog** of
   mathematical constants π/2π/π-2/e/√2/ln2/ln10/γ computed at import via the Bailey
   split and verified bit-exact against the vendored `dd_*`/`ff_*` pairs), **(4)**
@@ -211,7 +211,7 @@ accept-rate levers.
 - `agents/integrator_base/regional.py`: scans the region for constant candidates
   (`derive_region_constants`), resolves + pre-derives them, and injects a
   **"Source-derivable constants"** section into the user turn with ready-made
-  `make_dd(...)`/`make_ff(...)` values to use verbatim. The dd/ff system prompts'
+  `DoubleDouble::from_bits(...)`/`FloatFloat::from_bits(...)` values to use verbatim. The dd/ff system prompts'
   R3 (and the dd `constant_note`) were rewritten as the ordered cascade.
 
 **Gap A — C3 refined + a deterministic bridge lint.**
@@ -245,7 +245,7 @@ accept-rate levers.
   different namespace) is documented and rare in practice.
 - **Gap B cascade / the "zero low word" subtlety.** Step 3a is the crux: a
   constant the *source* defines as a plain `double` literal has no precision below
-  that double, so `make_dd(bits, 0)` is the faithful promotion — this is explicitly
+  that double, so `DoubleDouble::from_bits(bits, 0)` is the faithful promotion — this is explicitly
   *not* the forbidden decimal-literal case (that rule guards π/e-style constants
   whose true value out-runs a double). The catalog exists only for step 3b closed
   forms, where taking the double bits *would* lose real precision. The helper
@@ -284,7 +284,7 @@ build-gate → commit):
 | `B0m.h:69`  | R4 on `_ieps50` → `llm_gen_failed` | **derives `_ieps50` correctly (no R4, correct bits)** — now blocked by a NEW, out-of-scope error (below) |
 
 **built (P2 ok): 2/4 → 3/4.** Gap B is demonstrably fixed on real regions (B2m
-promoted; B0m's shim now emits `make_dd(0x358dee7a4ad4b81fULL, 0x0)` instead of an
+promoted; B0m's shim now emits `DoubleDouble::from_bits(0x358dee7a4ad4b81fULL, 0x0)` instead of an
 R4 `#error`). LLM nondeterminism means an individual region's *before* status
 varies run-to-run; the R4-on-`_ieps50` mode is the consistent signature.
 
@@ -387,9 +387,9 @@ bugs and were previously masked by the include error firing first:
    regression — but it's a hard ceiling until `scripts/gen_dd_constants.cpp` emits
    those pairs (or they're added to the vendored table). Worth pre-generating the
    qcdloop constant set before the 50k run so these regions can actually promote.
-2. **Kokkos math overload gap** (`B0m.h:69`): a promoted `ddouble` flows into
-   `Kokkos::fabs` / `Kokkos_Complex.hpp` internals that have no `ddouble` overload
-   (`cannot convert 'quad::ddfun::ddouble' to 'const double'`). This is a
+2. **Kokkos math overload gap** (`B0m.h:69`): a promoted `DoubleDouble` flows into
+   `Kokkos::fabs` / `Kokkos_Complex.hpp` internals that have no `DoubleDouble` overload
+   (`cannot convert 'Kokkos::Experimental::DoubleDouble' to 'const double'`). This is a
    shim-completeness / C3 static-instantiation issue, orthogonal to includes —
    flagging as the next accept-rate lever after this one.
 
@@ -889,7 +889,7 @@ build + smoke + commit, through the real Patcher with **no injection**.
   the result carries `llm_tokens`.
 - **`agents/ff_integrator/{agent.py,system_prompt.txt}`** and
   **`agents/dd_integrator/{agent.py,system_prompt.txt}`** — `integrate_region` is
-  now a thin wrapper over the engine (`quad::ffun::ffloat` / `quad::ddfun::ddouble`).
+  now a thin wrapper over the engine (`Kokkos::Experimental::FloatFloat` / `Kokkos::Experimental::DoubleDouble`).
   `ff_integrator.integrate` (whole-app) and `dd_integrator.integrate` (whole-app
   qcdloop DD stub, Validator's ground truth) are **untouched**.
 - **Vendored `third_party/include/{ff_math.hpp,ff_complex.hpp}`** from
@@ -909,7 +909,7 @@ The tracked Rules 1–9 + C1–C7 are the ancestor set; regional promotion adds:
   retry re-rolls the shim while the patch machinery stays fixed.
 - **R2 — internals stay extended** (no mid-region round-trip through double/float).
 - **R3 — named constants keep name + precision.** ff routes through vendored
-  `ff_*()`; **DD must hex-encode** every constant as `make_dd(0x<hi>ULL,0x<lo>ULL)`
+  `ff_*()`; **DD must hex-encode** every constant as `DoubleDouble::from_bits(0x<hi>ULL,0x<lo>ULL)`
   — a decimal literal truncates the low word (ref `gen_dd_constants.cpp`). Codified
   in the DD prompt + reinforced in the DD `RegionalSpec.constant_note`.
 - **R4 — `#error` escape hatch** (mirrors Rule 9), including "don't guess a
@@ -921,8 +921,8 @@ The tracked Rules 1–9 + C1–C7 are the ancestor set; regional promotion adds:
    regional paths are near-identical; the whole-app tracked path is not. Putting the
    flow in `integrator_base/regional.py` keeps the two `agent.py` files to a spec +
    a one-line delegation (design §P7 "code reuse is the point").
-2. **Two-limb demotion, not `static_cast<caller>(x_extended)`.** Neither `ffloat`
-   nor `ddouble` defines `operator double`; the vendored types' own conversion-out
+2. **Two-limb demotion, not `static_cast<caller>(x_extended)`.** Neither `FloatFloat`
+   nor `DoubleDouble` defines `operator double`; the vendored types' own conversion-out
    idiom is `(double)x.hi + (double)x.lo`. The boundary emits
    `static_cast<T>(x.hi) + static_cast<T>(x.lo)`.
 3. **Dataflow-based local promotion, not a fixed `caller_type` token.** Real qcdloop
@@ -946,7 +946,7 @@ The tracked Rules 1–9 + C1–C7 are the ancestor set; regional promotion adds:
 one integrator attempt, **~3.37–3.39k tokens** (input+output) per shim generation,
 ~2.5 min wall including the Kokkos vanilla build. The generated shim was minimal and
 correct on the first attempt (no retry): `#pragma once` + vendored includes + a
-Rule-2/C3 comment noting the vendored `ffloat*ffloat` operator suffices. Real-LLM
+Rule-2/C3 comment noting the vendored `FloatFloat*FloatFloat` operator suffices. Real-LLM
 integration tests are marked `@pytest.mark.llm` (+`kokkos` for the e2e) and skip
 without `ANTHROPIC_AUTH_TOKEN`.
 
@@ -1042,7 +1042,7 @@ Patcher (real LLM) → Validator (real 3-build precision test)**, driven by
   `llm_gen_failed` (mislabeled log_tag `llm_capacity`). Region-dependent and
   non-deterministic (`B2m.h:64` succeeds, adjacent `B2m.h:65` fails both attempts).
   Needs prompt hardening ("emit no app-header includes; only vendored `dd_math.hpp`/
-  `dd_complex.hpp`; materialize constants inline via `make_dd`") and/or a misgen
+  `dd_complex.hpp`; materialize constants inline via `DoubleDouble::from_bits`") and/or a misgen
   classifier. This is the #1 thing to fix to raise the accept rate.
 - **Cascade chains not deduplicated across samples.** chain_ids embed the sample hash, so
   n=1000 → 53,603 chains; the tier-2 queue scales with samples×victims and

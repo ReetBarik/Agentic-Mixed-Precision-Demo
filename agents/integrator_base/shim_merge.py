@@ -6,7 +6,7 @@ free-function overloads in `namespace ql` (`ql::kAbs`, `ql::Max`, `ql::Real`,
 `ql::Lnrat`, `ql::iszero`, …) plus occasional bridges into other namespaces. C++
 allows exactly **one** definition of each such symbol per translation unit. All
 box headers compile into a single TU, so when the Patcher installs a *second*
-shim that also defines `Constants<ddouble>` (or re-defines a `ql::` helper with
+shim that also defines `Constants<DoubleDouble>` (or re-defines a `ql::` helper with
 the same signature) the build dies with `redefinition of 'struct
 ql::Constants<...>'`. That is the WAVE3 residual: 72 of 79 `llm_gen_failed` events
 (see ``runs/qcdloop/WAVE3_CHARACTERIZATION_2026-07-21.md``).
@@ -49,8 +49,8 @@ _SPEC_RE = re.compile(r'^template\s*<\s*>\s*(?:struct|class)\s+([A-Za-z_]\w*)\s*
 # --------------------------------------------------------------------------- #
 
 def _norm_type(s: str) -> str:
-    """Normalize a type spelling so ``::quad::ddfun::ddouble`` and
-    ``quad::ddfun::ddouble`` (and whitespace variants) compare equal."""
+    """Normalize a type spelling so ``::Kokkos::Experimental::DoubleDouble`` and
+    ``Kokkos::Experimental::DoubleDouble`` (and whitespace variants) compare equal."""
     s = re.sub(r'\s+', '', s.strip())
     while s.startswith('::'):
         s = s[2:]
@@ -85,8 +85,8 @@ def _split_commas_top(s: str) -> list[str]:
 def _strip_param_names(argstr: str) -> str:
     """Best-effort: drop parameter *names* and defaults, keep normalized types.
 
-    So ``Max(ddouble a, ddouble b)`` and ``Max(ddouble x, ddouble y)`` key alike,
-    while ``kAbs(const ddouble&)`` (unnamed) still normalizes stably.
+    So ``Max(DoubleDouble a, DoubleDouble b)`` and ``Max(DoubleDouble x, DoubleDouble y)`` key alike,
+    while ``kAbs(const DoubleDouble&)`` (unnamed) still normalizes stably.
     """
     out: list[str] = []
     for p in _split_commas_top(argstr):

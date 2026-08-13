@@ -12,7 +12,7 @@ predicate encoding ``LEAF_CALLEE_PROMOTION_DESIGN.md`` §1.2 clauses (1)–(4).
      ∧ (2) g's body, reads promoted to dd, calls ONLY:
              - another clonable_leaf callee (recurse), OR
              - a dd TERMINATION-BOUNDARY symbol (§2.6):
-                 (i)   a vendored ``quad::ddfun`` op (or a ``<cmath>`` op the Gap-A
+                 (i)   a vendored ``Kokkos::Experimental`` op (or a ``<cmath>`` op the Gap-A
                        bridge redirects onto the vendored surface),
                  (ii)  a Class-1 SYNTHESIZED wrapper (L1′ ``is_class1_synthesizable``),
                  (iii) a Class-2 / source symbol the source instantiates at dd;
@@ -93,7 +93,7 @@ def is_dd_boundary(qual: str, last: str, *, surface, source_instantiates_at_dd,
 
     The dd boundary kinds (§2.6):
 
-    * (i)  a vendored ``quad::ddfun`` op (qualifier root is a vendored namespace), or a
+    * (i)  a vendored ``Kokkos::Experimental`` op (qualifier root is a vendored namespace), or a
       ``<cmath>`` op the Gap-A bridge redirects onto the vendored surface;
     * (iii) a Class-2 / source symbol the source instantiates at dd (a constant or
       coefficient-table accessor — ``_ipio2`` / ``_half`` / ``_pi2o6`` / ``_C``);
@@ -249,7 +249,7 @@ def clonable_leaf(
         The L1′ Class-1 machinery (``VendoredSurface`` + the pure manifest query).
     source_instantiates_at_dd:
         ``name -> bool`` — does the source instantiate this Class-2 / accessor symbol
-        at dd (double primary at ``T=ddouble``, or the enriched dd source)?
+        at dd (double primary at ``T=DoubleDouble``, or the enriched dd source)?
     resolve_primary_body:
         ``name -> str | None`` — a callee's primary definition body text, for the
         Class-1 query and the clause-(2) recursion.  ``None`` result => body
@@ -363,7 +363,7 @@ def clonable_leaf(
         if "::" not in qual and last in cast_tokens:
             continue                       # functional cast ``T(x)``, not a callee
         root = _root_segment(qual)
-        # (i) vendored quad::ddfun op — resolves at dd, no cloning.
+        # (i) vendored Kokkos::Experimental op — resolves at dd, no cloning.
         if root in _VENDORED_NS_ROOTS:
             continue
         # (i') <cmath> op the Gap-A bridge redirects onto the vendored surface — a

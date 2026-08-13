@@ -253,7 +253,7 @@ seed              : {Li2omx2 body @704, ddilog body @{174,177,199,212}, B1m.h ca
 (a) in ddilog     : Y,S,A decl @157 widens          [Blocker A, now a special case]
 (a) in Li2omx2    : prod,Li2omx2 decl @691 widens   (Li2omx2 written @704, read @707)
 (b) in Li2omx2    : @707 `return Li2omx2` reads carried Li2omx2, writes RETURN -> join
-(c) f=B1m.h g=Li2omx2 : Li2omx2_B10 return type -> ddcomplex;
+(c) f=B1m.h g=Li2omx2 : Li2omx2_B10 return type -> DoubleDoubleComplex;
                         callers B1m.h:{236,237} produce dd -> dilog4,dilog5 decls widen (rule a in B1m.h)
       cancellation @240 : dilog4 - dilog5 now dd  [the point of the whole chain]
       exit @res(i,0)    : store to res(i,k) container -> DESIGNED EXIT (round to caller precision)
@@ -589,7 +589,7 @@ STOP-and-report.
 
 **"Closure-scoped chains work" =**
 
-* **B10 (the headline):** the emitted variant `Li2omx2_B10` **returns ddcomplex**,
+* **B10 (the headline):** the emitted variant `Li2omx2_B10` **returns DoubleDoubleComplex**,
   `B1m.h:{236,237}` `dilog4/dilog5` are **dd**, the cancellation at `:240` executes
   at dd, and B10 reaches the **positive-lift gate** with a measured
   `kernel_measured_lift > 0`. **Validation:** a lift toward Item 7's prediction —

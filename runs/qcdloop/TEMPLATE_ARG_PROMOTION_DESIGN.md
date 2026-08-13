@@ -20,7 +20,7 @@
 | STOP #RR (Phase-3 inner parametricity gap) | **PARTIAL FLAG** — B0m/B1m/B2m subtrees clean at every inner call site; **B3m/B4m carry int↔Tracked conversion crossings** (`boxGPU.h:25-29`) that Phase 3 must handle separately. |
 | STOP #Z (vendored snapshot pristine) | **clean** — read-only investigation, `third_party/` untouched |
 
-**The one load-bearing discovery that reshapes the mechanism:** the dispatch as literally worded ("emit a sibling `BO<ddcomplex,ddouble,ddouble>(...)` call *alongside* the `BO<complex<double>,double,double>(...)` call") **is not legal C++** in this codebase. `kokkosMaths.h` (double) and `kokkosMaths_dd.h` (dd) each define `ql::Constants<T>` as a **primary template**, a namespace-scope `using complex = …`, and primary `kAbs/kLog/kSqrt` templates. The two headers are **mutually exclusive within one translation unit** — `kokkosMaths_wrapper.h` selects exactly one via `USE_DD_COMPLEX`. Therefore `BO<dd,…>` and `BO<double,…>` cannot coexist in a single TU. The correct — and *already partially built* — mechanism is a **whole-TU precision flip per integral**, exactly the model the Validator's DD oracle (`boxGPU_dd.cpp`, `QL_MODE=dd`) already uses. This is good news: the emission surface shrinks from "synthesize dd shims into a double TU" (the source of every current boundary error) to "compile the flagged integral's TU at dd and narrow only at the app output boundary."
+**The one load-bearing discovery that reshapes the mechanism:** the dispatch as literally worded ("emit a sibling `BO<DoubleDoubleComplex,DoubleDouble,DoubleDouble>(...)` call *alongside* the `BO<complex<double>,double,double>(...)` call") **is not legal C++** in this codebase. `kokkosMaths.h` (double) and `kokkosMaths_dd.h` (dd) each define `ql::Constants<T>` as a **primary template**, a namespace-scope `using complex = …`, and primary `kAbs/kLog/kSqrt` templates. The two headers are **mutually exclusive within one translation unit** — `kokkosMaths_wrapper.h` selects exactly one via `USE_DD_COMPLEX`. Therefore `BO<dd,…>` and `BO<double,…>` cannot coexist in a single TU. The correct — and *already partially built* — mechanism is a **whole-TU precision flip per integral**, exactly the model the Validator's DD oracle (`boxGPU_dd.cpp`, `QL_MODE=dd`) already uses. This is good news: the emission surface shrinks from "synthesize dd shims into a double TU" (the source of every current boundary error) to "compile the flagged integral's TU at dd and narrow only at the app output boundary."
 
 ---
 
@@ -58,7 +58,7 @@ No frame in the chain hard-codes `double` or `complex<double>` in a way that blo
 
 These are the same fully-qualified name `ql::Constants<T>`. They can never appear in one TU (redefinition). This is the mechanism-defining fact of §1.4.
 
-**Numerical corollary (why this matters beyond ODR):** if you *could* instantiate `BO<ddcomplex,ddouble,ddouble>` against the *double* `kokkosMaths.h`, it would **compile** (every member is parametric on `T`) but silently return a 19-term-Chebyshev, `constexpr-double-π` result — i.e. ~16 significant digits wearing a dd type. The dd accuracy comes *specifically* from `kokkosMaths_dd.h`'s 43-term table and `dd_pi()`. So the whole-TU flip is mandatory for **correctness**, not merely to dodge the ODR error.
+**Numerical corollary (why this matters beyond ODR):** if you *could* instantiate `BO<DoubleDoubleComplex,DoubleDouble,DoubleDouble>` against the *double* `kokkosMaths.h`, it would **compile** (every member is parametric on `T`) but silently return a 19-term-Chebyshev, `constexpr-double-π` result — i.e. ~16 significant digits wearing a dd type. The dd accuracy comes *specifically* from `kokkosMaths_dd.h`'s 43-term table and `DoubleDouble_pi()`. So the whole-TU flip is mandatory for **correctness**, not merely to dodge the ODR error.
 
 ### 1.4 STOP #OO verdict: NOT fired
 
@@ -86,7 +86,7 @@ The existing chain_promote/fanout path emits **dd-typed source into a `double` T
 1. **Detection (chain_promote).** A region flagged by characterization for dd, whose enclosing subtree is fully template-parametric (the (a) check, evaluated per-integral), is routed to **template-arg promotion** rather than element/rule-d promotion. Phase-1 default: *any* dd-flagged region in a parametric subtree → whole-subtree template-arg. Element promotion (acc1482) becomes the reserved path for regions **not** inside a template-parametric subtree.
 
 2. **Emission = build-mode selection, not source rewrite.** The pipeline already has the two ingredients:
-   - `runs/qcdloop/src/boxGPU_dd.cpp` — `#define USE_DD_COMPLEX; run_app<ddcomplex,ddouble,ddouble,DDPrinter>(...)`, includes `boxGPU.h` which via `kokkosMaths_wrapper.h` pulls `kokkosMaths_dd.h`.
+   - `runs/qcdloop/src/boxGPU_dd.cpp` — `#define USE_DD_COMPLEX; run_app<DoubleDoubleComplex,DoubleDouble,DoubleDouble,DDPrinter>(...)`, includes `boxGPU.h` which via `kokkosMaths_wrapper.h` pulls `kokkosMaths_dd.h`.
    - `runs/qcdloop/app/CMakeLists.txt` — `QL_MODE=dd` selects that driver; `QL_HEADERS=<ddfun_enabled/src/qcdloop>` supplies the dd-capable headers.
 
    Phase-1 promotion of integral `X` = **build `X`'s TU at `QL_MODE=dd`** (against the promoted/master dd-capable tree) and route the caller's dispatch for `X` to that binary. No `BO<dd>` call is spliced next to a `BO<double>` call; the *whole* `BO` instantiation for `X` is dd because its TU selected the dd headers.
@@ -97,7 +97,7 @@ The existing chain_promote/fanout path emits **dd-typed source into a `double` T
 
    **Chosen: (2b) per-integral TU.** Justification: (i) it is the *only* ODR-legal way to have B10@dd and B1@double in one program; (ii) it is a direct generalization of the `QL_MODE=vanilla|dd` split the harness already drives (one configure per binary, `validator/runner.py:68`); (iii) it keeps the instantiation-gate validation trivial — each TU is a clean single-precision compile, so "does B10 build at dd?" is `QL_MODE=dd` restricted to B10's recipe, no shim classification needed; (iv) it makes each integral's precision independently selectable, which is exactly what Phase 2 (endpoint-lock) and Phase 3 (intra-integral) will need to vary.
 
-3. **Where the dd output lands.** The promoted TU produces `res` as `View<ddcomplex*[3]>`. The caller-facing contract is `View<complex<double>*[3]>`. **Land the dd output via a narrowing at the app boundary** — the point where `res_dd(i,k)` is read back for the caller — using acc1482's designed-exit transform:
+3. **Where the dd output lands.** The promoted TU produces `res` as `View<DoubleDoubleComplex*[3]>`. The caller-facing contract is `View<complex<double>*[3]>`. **Land the dd output via a narrowing at the app boundary** — the point where `res_dd(i,k)` is read back for the caller — using acc1482's designed-exit transform:
    - `demote_exit_carriers_line` (deliverable b of acc1482) demotes the dd read at the projection site to caller precision (`complex<double>(double(v.real().hi + …), …)` component reconstruction).
    - `widen_carrier_assign_line` (deliverable c) handles the mirror case where a caller-precision value must feed a dd carrier at the entry boundary.
 
@@ -130,7 +130,7 @@ Baseline gate outcomes for {B10,B12,B13,B14} are from measured Tier-B artifacts 
 | B9  | B1m | unmeasured; floor 11.53, STABLE_ALREADY | none | Y | unchanged |
 | **B10** | B1m | **`apply_failed`/build_failed** (measured) | out-of-scope region-core (`res(i,1)` View + `Constants<TOutput>` returns) + 71 rule-d clones | Y | **promoted-via-template-arg** |
 | B11 | B2m | unmeasured; floor 10.09, STABLE_ALREADY | none | Y | unchanged |
-| **B12** | B2m | **`apply_failed`/build_failed** (byte-identical pre/post landing) | rule-d `Lnrat` leaf + own `complex<ddcomplex>` | Y | **promoted-via-template-arg** |
+| **B12** | B2m | **`apply_failed`/build_failed** (byte-identical pre/post landing) | rule-d `Lnrat` leaf + own `complex<DoubleDoubleComplex>` | Y | **promoted-via-template-arg** |
 | **B13** | B2m | **`apply_failed`/`write_truncation`** (built OK, gate reject) | closure/chain promotion | Y | **promoted-via-template-arg** (uniform interior carrier retype removes truncation) |
 | B14 | B2m | `rejected`(`chain_no_lift`), clean build, lift 0.0, pred +16.66 | element (fixed-size aggregate) + chain — works | Y | unchanged (already-accurate; STOP #A) |
 | B15 | B2m | co-built clean in B14 run; floor 0.0, dd-INSUFFICIENT | element (shares B14 B2m chain) | Y | **at-risk** (dd-insufficient: cancellation > dd budget) |
@@ -157,27 +157,27 @@ The 71 clone errors (in the emitted `_B10` clone bodies of `kokkosUtils.h`) part
 
 | # | count | signature | dissolves at dd caller because |
 |---|---:|---|---|
-| C1 | 22 | `complex<double>::complex(ddouble)` | `complex<double>` is `TOutput` → becomes `ddcomplex`; `ddcomplex(ddouble)` well-formed |
-| C2 | 16 | `invalid cast ddouble → double` | `double` is `TScale`/`TMass` → becomes `ddouble`; dd→dd identity |
-| C3 | 8 | `cannot convert ddouble → const double init` | as C2 |
-| C4 | 6 | `complex<double>::complex(ddcomplex)` | as C1 |
-| C5 | 6 | `operator= ddcomplex = complex<ddcomplex>` (Shape-3) | `complex<ddcomplex>` forms only under *partial* promotion (dd local × `cxs[k]` caller-complex read); uniform dd makes `cxs` a `ddcomplex` array → never forms |
-| C6 | 6 | `operator= ddcomplex = complex<double>` | `complex<double>` is `TOutput` → `ddcomplex` |
-| C7 | 6 | `const double& ← ddouble` | `TScale` → `ddouble` |
-| C8 | 1 | `complex<double> → ddcomplex` | `TOutput` → `ddcomplex` |
+| C1 | 22 | `complex<double>::complex(DoubleDouble)` | `complex<double>` is `TOutput` → becomes `DoubleDoubleComplex`; `DoubleDoubleComplex(DoubleDouble)` well-formed |
+| C2 | 16 | `invalid cast DoubleDouble → double` | `double` is `TScale`/`TMass` → becomes `DoubleDouble`; dd→dd identity |
+| C3 | 8 | `cannot convert DoubleDouble → const double init` | as C2 |
+| C4 | 6 | `complex<double>::complex(DoubleDoubleComplex)` | as C1 |
+| C5 | 6 | `operator= DoubleDoubleComplex = complex<DoubleDoubleComplex>` (Shape-3) | `complex<DoubleDoubleComplex>` forms only under *partial* promotion (dd local × `cxs[k]` caller-complex read); uniform dd makes `cxs` a `DoubleDoubleComplex` array → never forms |
+| C6 | 6 | `operator= DoubleDoubleComplex = complex<double>` | `complex<double>` is `TOutput` → `DoubleDoubleComplex` |
+| C7 | 6 | `const double& ← DoubleDouble` | `TScale` → `DoubleDouble` |
+| C8 | 1 | `complex<double> → DoubleDoubleComplex` | `TOutput` → `DoubleDoubleComplex` |
 
-Sum = 71. **No residual, no source-enrichment gap** — the leaf templates exist unmodified in `runs/qcdloop_headers_full/kokkosUtils.h` (byte-identical to ddfun_enabled), dd primitives vendored in `third_party/include/`. The one clone-related item *outside* the 71 (Shape-4 `ddilog(ddouble)` shim) also dissolves: `ddilog<ddcomplex,ddouble,ddouble>` instantiates straight from source, no forwarding shim.
+Sum = 71. **No residual, no source-enrichment gap** — the leaf templates exist unmodified in `runs/qcdloop_headers_full/kokkosUtils.h` (byte-identical to ddfun_enabled), dd primitives vendored in `third_party/include/`. The one clone-related item *outside* the 71 (Shape-4 `ddilog(DoubleDouble)` shim) also dissolves: `ddilog<DoubleDoubleComplex,DoubleDouble,DoubleDouble>` instantiates straight from source, no forwarding shim.
 
 ### 4.2 B12 — 27/27 dissolve
 
 | count | signature | disposition |
 |---:|---|---|
-| 12 | `wrong number of template arguments (3, should be 2)` | **Removed, not fixed.** Caused by the rule-d `ql_shim_dd.h` forwarding overload `Lnrat(const ddouble&, const ddouble&)` (2 params) that the 3-arg site can't bind. `ql_shim_dd.h` does not exist in ddfun_enabled — it is a rule-d artifact. Template-arg promotion eliminates its cause. |
-| 12 | `Lnrat<complex<double>,double,double>(ddouble&, ddouble&)` no match | dissolves — at dd the TScale overload `Lnrat<ddcomplex,ddouble,ddouble>(ddouble,ddouble)` matches |
-| 2 | `complex<ddcomplex> → const ddcomplex` | dissolves — same partial-promotion artifact as B10 C5 |
-| 1 | `static_assert Kokkos::complex floating point` | dissolves — downstream of the `complex<ddcomplex>` above |
+| 12 | `wrong number of template arguments (3, should be 2)` | **Removed, not fixed.** Caused by the rule-d `ql_shim_dd.h` forwarding overload `Lnrat(const DoubleDouble&, const DoubleDouble&)` (2 params) that the 3-arg site can't bind. `ql_shim_dd.h` does not exist in ddfun_enabled — it is a rule-d artifact. Template-arg promotion eliminates its cause. |
+| 12 | `Lnrat<complex<double>,double,double>(DoubleDouble&, DoubleDouble&)` no match | dissolves — at dd the TScale overload `Lnrat<DoubleDoubleComplex,DoubleDouble,DoubleDouble>(DoubleDouble,DoubleDouble)` matches |
+| 2 | `complex<DoubleDoubleComplex> → const DoubleDoubleComplex` | dissolves — same partial-promotion artifact as B10 C5 |
+| 1 | `static_assert Kokkos::complex floating point` | dissolves — downstream of the `complex<DoubleDoubleComplex>` above |
 
-**No residual.** `boxGPU_test_dd_B12.cc:196` (`BO<ddcomplex,ddouble,ddouble>`) is the standing proof the B12 chain compiles + runs at dd.
+**No residual.** `boxGPU_test_dd_B12.cc:196` (`BO<DoubleDoubleComplex,DoubleDouble,DoubleDouble>`) is the standing proof the B12 chain compiles + runs at dd.
 
 ### 4.3 Consequence
 

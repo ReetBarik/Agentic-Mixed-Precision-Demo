@@ -56,7 +56,7 @@ def test_double_literal_dd_has_zero_low_word():
     d = cd.derive_from_rhs("_ieps50", "TScale(1e-50)", "dd")
     assert d is not None and d.how == "literal"
     hi = _dbits(1e-50)
-    assert d.expr == f"quad::ddfun::make_dd(0x{hi:016x}ULL, 0x0000000000000000ULL)"
+    assert d.expr == f"Kokkos::Experimental::DoubleDouble::from_bits(0x{hi:016x}ULL, 0x0000000000000000ULL)"
     # this is the value the model previously got wrong (0x34F0… + spurious lo)
     assert "358dee7a4ad4b81f" in d.expr
     assert "0x0000000000000000ULL" in d.expr
@@ -64,7 +64,7 @@ def test_double_literal_dd_has_zero_low_word():
 
 def test_double_literal_ff_splits_across_limbs():
     d = cd.derive_from_rhs("MY_TINY", "0.125", "ff")
-    assert d is not None and d.expr.startswith("quad::ffun::make_ff(0x")
+    assert d is not None and d.expr.startswith("Kokkos::Experimental::FloatFloat::from_bits(0x")
 
 
 # --------------------------------------------------------------------------- #
@@ -72,10 +72,10 @@ def test_double_literal_ff_splits_across_limbs():
 #
 # _ieps50 = TOutput{_zero(), TScale(1e-50)} is 0 + 1e-50·i.  Wave-1 surfaced only
 # the bare literal 1e-50 and the model collapsed the container to a REAL
-# ddouble(1e-50) — dropping the imaginary axis the iε prescription lives on, which
+# DoubleDouble(1e-50) — dropping the imaginary axis the iε prescription lives on, which
 # left B0m.h:68/69 & friends stuck at dd_untested.  The container is now derived
 # WHOLE (both limbs), bit-exact against the ddfun_enabled reference where
-#   ddouble(double h) : hi(h), lo(0.0)   →   dd_real(1e-50) == {1e-50, 0}.
+#   DoubleDouble(double h) : hi(h), lo(0.0)   →   dd_real(1e-50) == {1e-50, 0}.
 # --------------------------------------------------------------------------- #
 
 _IEPS50_RHS = "TOutput{Constants<TScale>::_zero(), TScale(1e-50)}"
@@ -93,9 +93,9 @@ def test_ieps50_dd_complex_is_bit_exact_imaginary():
     # imaginary part == dd_real(1e-50) == {bits(1e-50), 0} (bit-exact vs ddfun ref)
     hi = _dbits(1e-50)
     assert hi == 0x358DEE7A4AD4B81F                       # the correct hi word
-    assert d.imag == f"quad::ddfun::make_dd(0x{hi:016x}ULL, 0x0000000000000000ULL)"
+    assert d.imag == f"Kokkos::Experimental::DoubleDouble::from_bits(0x{hi:016x}ULL, 0x0000000000000000ULL)"
     # real part is exactly zero (the _zero() accessor resolved + derived)
-    assert d.real == "quad::ddfun::make_dd(0x0000000000000000ULL, 0x0000000000000000ULL)"
+    assert d.real == "Kokkos::Experimental::DoubleDouble::from_bits(0x0000000000000000ULL, 0x0000000000000000ULL)"
 
 
 def test_ieps50_scalar_derive_returns_none_container_needs_complex_path():

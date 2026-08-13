@@ -60,7 +60,7 @@ def test_regional_double_to_float_via_regional_uses_float_integrator(repo, make_
 
 
 def test_regional_double_to_float_passes_float_scalar_to_integrator(repo, make_ctx):
-    # The integrator is invoked with scalar_type="float" (not ffloat/ddouble).
+    # The integrator is invoked with scalar_type="float" (not FloatFloat/DoubleDouble).
     root, start = repo
     seen = {}
 

@@ -2,10 +2,10 @@
 
 The regional boundary transform must know which of a region's promoted operands are
 **complex** (``Kokkos::complex<double>``) vs real **scalars** (``double``): a complex
-operand promotes to the extended *container* (``ffcomplex`` / ``ddcomplex``), while a
-real scalar promotes to the extended *scalar* (``ffloat`` / ``ddouble``).  Promoting a
+operand promotes to the extended *container* (``FloatFloatComplex`` / ``DoubleDoubleComplex``), while a
+real scalar promotes to the extended *scalar* (``FloatFloat`` / ``DoubleDouble``).  Promoting a
 complex operand to the scalar type is the dominant Phase-2c ``llm_gen_failed`` cause —
-``ffloat(complex)`` / ``complex(ffloat)`` / ``complex /= ffloat`` never compile.
+``FloatFloat(complex)`` / ``complex(FloatFloat)`` / ``complex /= FloatFloat`` never compile.
 
 In a templated kernel the operand types are **template parameters** (``TOutput`` /
 ``TMass`` / ``TScale``) whose concrete binding lives ONLY at the driver's instantiation
@@ -190,8 +190,8 @@ def _select_instantiation(insts: list[list[str]], caller_type: str) -> list[str]
     """Pick the instantiation matching the baseline build the pass measures against.
 
     The vanilla build spells its numeric args as the caller type (``double``,
-    ``Kokkos::complex<double>``); a sibling dd build spells them ``ddouble`` /
-    ``ddcomplex``.  Score each instantiation by how many arguments name ``caller_type``
+    ``Kokkos::complex<double>``); a sibling dd build spells them ``DoubleDouble`` /
+    ``DoubleDoubleComplex``.  Score each instantiation by how many arguments name ``caller_type``
     (as a bare scalar or the real component of a ``complex<caller_type>``) and take the
     max — vanilla scores on its ``double`` args, dd scores zero.  Non-numeric class args
     (a ``Printer`` policy type) are ignored.  Ties (and single-build apps) keep the

@@ -8,7 +8,7 @@ types / operators / named constants the region needs), and (4) synthesize a
 deterministic **boundary patch** that promotes the region's reads to the extended
 scalar on entry and demotes its writes back on exit.  They differ only in their
 ruleset (system prompt), their concrete C++ scalar/complex spellings
-(``quad::ffun::ffloat`` vs ``quad::ddfun::ddouble``), and a per-type note in the
+(``Kokkos::Experimental::FloatFloat`` vs ``Kokkos::Experimental::DoubleDouble``), and a per-type note in the
 user turn (DD needs hex-encoded constant tables).  That common flow lives here;
 the two ``agent.py`` modules are thin wrappers that supply a :class:`RegionalSpec`.
 
@@ -69,12 +69,12 @@ _INCLUDE_RE = re.compile(r'^\s*#\s*include\s*[<"]([^>"]+)[>"]')
 # Gap A — namespace-qualified math bridge
 # --------------------------------------------------------------------------- #
 # A namespace-qualified call ``Ns::fn(x)`` skips ADL: name lookup only searches
-# ``Ns`` (and its enclosing scopes), NOT the vendored ``quad::ffun`` / ``quad::ddfun``
+# ``Ns`` (and its enclosing scopes), NOT the vendored ``Kokkos::Experimental`` / ``Kokkos::Experimental``
 # namespace where the shim's ADL overloads live.  So when a *promoted* (extended-
 # typed) value flows into ``Ns::fn(...)`` and ``Ns`` is not the vendored namespace,
 # the shim must inject a bridging overload into ``Ns`` (or a using-declaration) or
 # the call falls back to the primary, which tries to narrow the extended value to a
-# built-in float and dies with ``cannot convert 'quad::ddfun::ddouble' to 'const
+# built-in float and dies with ``cannot convert 'Kokkos::Experimental::DoubleDouble' to 'const
 # double'`` (the 2026-07-18 B0m.h:69 symptom).
 
 # Root namespaces the shim already reaches via ADL — never need a bridge.
@@ -211,7 +211,7 @@ def _lint_qualified_bridges(region_text: str, shim_body: str,
 # named constant with neither fell through to the Rule R4 #error even when its own
 # source definition made it trivially derivable (``_ieps50 = TScale(1e-50)``).  We
 # resolve such constants deterministically (agents.shared.constant_derive) and hand
-# the model the ready-made ``make_dd(...)`` / ``make_ff(...)`` value so it never
+# the model the ready-made ``DoubleDouble::from_bits(...)`` / ``FloatFloat::from_bits(...)`` value so it never
 # guesses bits or bails to R4.
 
 # A name read as a member/namespace accessor that leads a call or template-id:
@@ -350,7 +350,7 @@ def derive_region_constants(region_text: str, sources: list[str], scalar: str,
     """Resolve + derive every source-derivable constant the region reads (Gap B).
 
     ``scalar`` is ``"dd"`` or ``"ff"``; ``complex_type`` is the concrete C++ complex
-    spelling (``quad::ddfun::ddcomplex`` / ``quad::ffun::ffcomplex``) used to
+    spelling (``Kokkos::Experimental::DoubleDoubleComplex`` / ``Kokkos::Experimental::FloatFloatComplex``) used to
     assemble a *complex-container* constant into a complete value.  Each entry is a
     dict with the constant ``name``, the resolved source ``rhs``, and one of:
 
@@ -400,8 +400,8 @@ class RegionalSpec:
     """The per-integrator surface the shared engine needs (ff vs dd)."""
 
     system_prompt: str            # the LLM ruleset (bytes feed SOURCE_HASH)
-    cpp_scalar: str               # e.g. "quad::ffun::ffloat"
-    cpp_complex: str              # e.g. "quad::ffun::ffcomplex"
+    cpp_scalar: str               # e.g. "Kokkos::Experimental::FloatFloat"
+    cpp_complex: str              # e.g. "Kokkos::Experimental::FloatFloatComplex"
     vendored_headers: list[str]   # e.g. ["ff_math.hpp", "ff_complex.hpp"]
     shim_prefix: str              # "ff" | "dd" — filename tag
     constant_note: str = ""       # extra user-turn guidance (DD hex constants)
@@ -409,7 +409,7 @@ class RegionalSpec:
     # ``vendored_headers`` ∪ the standard-library set; set explicitly to override.
     allowed_includes: list[str] | None = None
     # --- target-kind knobs -------------------------------------------------- #
-    # A two-limb extended scalar ({hi, lo}: ffloat / ddouble) demotes writes back
+    # A two-limb extended scalar ({hi, lo}: FloatFloat / DoubleDouble) demotes writes back
     # to the caller via two-limb reconstruction; a *native* single-limb scalar
     # (plain ``float``) has no ``.hi``/``.lo`` and demotes with a plain cast.
     two_limb: bool = True
@@ -442,8 +442,8 @@ def run_integrate_region(
 ) -> RegionIntegrationResult:
     """Generate a regional ff/dd shim + boundary patch for one region.
 
-    ``scalar_type`` is the short tag the Patcher passes (``"ffloat"`` /
-    ``"ddouble"``); the concrete C++ spelling used in the shim and boundary patch
+    ``scalar_type`` is the short tag the Patcher passes (``"FloatFloat"`` /
+    ``"DoubleDouble"``); the concrete C++ spelling used in the shim and boundary patch
     comes from ``spec.cpp_scalar``.  ``llm_fn(system, user, attempt) -> str`` is a
     test seam — when ``None`` the real streaming call is used (built from ``cfg``,
     defaulting to :class:`~agents.config.PipelineConfig`).  Never raises past the
@@ -504,7 +504,7 @@ def run_integrate_region(
     #     - promoted-name set (shared with the boundary patch dataflow) tells us
     #       which qualified math calls land on an extended-typed operand (Gap A);
     #     - source-derivable constants are resolved + pre-derived so the model gets
-    #       ready-made make_dd/make_ff values instead of hitting Rule R4 (Gap B).
+    #       ready-made DoubleDouble::from_bits/FloatFloat::from_bits values instead of hitting Rule R4 (Gap B).
     promoted = frozenset(boundary.compute_promoted_names(region_src, list(variables),
                                                          list(writes)))
     qualified_calls = find_qualified_math_calls(region_src, promoted) if spec.emit_bridges else []
@@ -570,7 +570,7 @@ def run_integrate_region(
 
     # 5c. Deterministic complex anti-pattern lint (Phase 2d, bucket (a) insurance).
     #     A shim must never wrap the extended scalar in a std/Kokkos complex; the
-    #     vendored ffcomplex/ddcomplex is the container.  Retryable misgen.
+    #     vendored FloatFloatComplex/DoubleDoubleComplex is the container.  Retryable misgen.
     bad_complex = _lint_complex_antipattern(shim_body, spec.cpp_scalar)
     if bad_complex is not None:
         return RegionIntegrationResult.failed(bad_complex, llm_tokens=tokens)
@@ -645,9 +645,9 @@ def _lint_complex_antipattern(shim_body: str, cpp_scalar: str) -> str | None:
     scalar (Phase 2d, bucket (a) regression insurance).
 
     ``Kokkos::complex<T>`` / ``std::complex<T>`` require a cv-unqualified built-in
-    floating-point ``T``; a two-limb class scalar (``ffloat`` / ``ddouble``) trips the
+    floating-point ``T``; a two-limb class scalar (``FloatFloat`` / ``DoubleDouble``) trips the
     ``static_assert`` (``complex can only be instantiated for a cv-unqualified floating
-    point type``) or finds no ctor.  The vendored ``ffcomplex`` / ``ddcomplex`` standalone
+    point type``) or finds no ctor.  The vendored ``FloatFloatComplex`` / ``DoubleDoubleComplex`` standalone
     types are the correct complex container (SPEC Rule 3).  A *native* ``float`` is
     exempt — ``Kokkos::complex<float>`` is a legal instantiation and is in fact the
     float rung's own complex spelling — so the guard fires only for the extended
@@ -655,7 +655,7 @@ def _lint_complex_antipattern(shim_body: str, cpp_scalar: str) -> str | None:
     the Phase-2c runs (the LLM is Rule-3 compliant); the lint keeps it that way.
     """
     core = cpp_scalar.rsplit("::", 1)[-1]
-    if core not in ("ffloat", "ddouble"):
+    if core not in ("FloatFloat", "DoubleDouble"):
         return None
     pat = re.compile(r"\bcomplex\s*<\s*[^>]*\b" + re.escape(core) + r"\b")
     hits = [m.group(0) for m in pat.finditer(shim_body)]
@@ -758,7 +758,7 @@ def _build_user_message(spec: RegionalSpec, file: str, region_src: str,
 
     ``qualified_calls`` (Gap A) and ``derived_constants`` (Gap B) are deterministic
     region-analysis hints: the former lists namespace-qualified math calls that
-    need a bridge overload, the latter hands the model ready-made make_dd/make_ff
+    need a bridge overload, the latter hands the model ready-made DoubleDouble::from_bits/FloatFloat::from_bits
     values for source-derivable constants so they never reach Rule R4.
     """
     parts: list[str] = []
@@ -818,7 +818,7 @@ def _format_qualified_calls(spec: RegionalSpec, qualified_calls) -> str:
     """Gap-A hint: namespace-qualified math calls that need a bridge overload."""
     if not qualified_calls:
         return ""
-    vendored_ns = spec.cpp_scalar.rsplit("::", 1)[0]   # e.g. quad::ddfun
+    vendored_ns = spec.cpp_scalar.rsplit("::", 1)[0]   # e.g. Kokkos::Experimental
     lines = [
         "## Namespace-qualified calls needing a bridge (C3)",
         "These calls in the region are **namespace-qualified**, so they skip ADL "
@@ -838,14 +838,14 @@ def _format_qualified_calls(spec: RegionalSpec, qualified_calls) -> str:
 
 
 def _format_derived_constants(spec: RegionalSpec, derived_constants) -> str:
-    """Gap-B hint: source-derivable constants pre-derived to make_dd/make_ff.
+    """Gap-B hint: source-derivable constants pre-derived to DoubleDouble::from_bits/FloatFloat::from_bits.
 
     Surfaces the resolved source RHS and the exact bit-pair value so the model
     uses it verbatim instead of guessing hex or bailing to Rule R4.
     """
     if not derived_constants:
         return ""
-    factory = "make_dd" if spec.shim_prefix == "dd" else "make_ff"
+    factory = "DoubleDouble::from_bits" if spec.shim_prefix == "dd" else "FloatFloat::from_bits"
     lines = [
         "## Source-derivable constants (Rule R3, step 3)",
         "The constants below were resolved from their source definitions and "

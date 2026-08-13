@@ -148,7 +148,7 @@ min-depth skip.
 - `render_variant(spec)` applies carrier decl-widening in the SAME descending
   line-order pass as `promotes` (descending by line so earlier edits don't shift
   later line numbers), rewriting the type token on the decl line to the chain's
-  internal dd type (`quad::ddfun::ddouble` / `ddcomplex`).
+  internal dd type (`Kokkos::Experimental::DoubleDouble` / `DoubleDoubleComplex`).
 - Multi-declarator bare decls (`TMass Y, S, A;`) rewrite the leading type token,
   widening all same-type siblings (§2 conservative policy). A dedicated scanner is
   needed because the existing `_scan_decls` requires `<type> <name> =` and misses
@@ -194,10 +194,10 @@ Both added to the STATUSES frozenset and given `err.kind` entries. Wired in
 
 > **C10 (carrier-widening invariant).** A carrier variable — declared outside the
 > chain's line set but written by one chain link and read by another — is widened
-> to ddouble at its declaration by the boundary/emission layer. Your shim MUST
-> treat such a variable as ddouble end-to-end: never re-narrow it to double at an
+> to DoubleDouble at its declaration by the boundary/emission layer. Your shim MUST
+> treat such a variable as DoubleDouble end-to-end: never re-narrow it to double at an
 > assignment or overload return. If a value produced by one link is consumed by a
-> later link, it stays ddouble across the whole chain.
+> later link, it stays DoubleDouble across the whole chain.
 
 ## 11. Files touched
 

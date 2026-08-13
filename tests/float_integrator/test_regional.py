@@ -7,7 +7,7 @@ from the ff/dd twins are:
 * the boundary patch widens region writes with a PLAIN cast (``static_cast<T>(w)``)
   — NOT two-limb ``.hi``/``.lo`` reconstruction (a plain ``float`` has no limbs);
 * the shim uses builtin ``float`` / ``std::complex<float>`` (no vendored header,
-  no ``make_ff``);
+  no ``FloatFloat::from_bits``);
 * the escape hatch (Rule 6 / R4): an un-classifiable float-vs-double narrowing is
   surfaced as a hard-build-failure ``#error`` rather than a silent slip.
 """
@@ -106,7 +106,7 @@ def test_template_region_generates_float_shim_and_boundary(repo, tmp_path):
     # never two-limb reconstruction for a native float
     assert ".hi" not in patch and ".lo" not in patch
     # never promoted to an extended type
-    assert "ffloat" not in patch and "ddouble" not in patch
+    assert "FloatFloat" not in patch and "DoubleDouble" not in patch
     assert '#include "ql_shim_float.h"' in patch
 
 
@@ -191,7 +191,7 @@ def test_float_scalar_distinct_cache_key_from_ff_dd():
     from agents.integrator_base import cache
     region = "    T r = a * b;"
     k_float = cache.compute_region_hash(region, fl._SYSTEM_PROMPT, "float", [])
-    k_ff = cache.compute_region_hash(region, fl._SYSTEM_PROMPT, "quad::ffun::ffloat", [])
+    k_ff = cache.compute_region_hash(region, fl._SYSTEM_PROMPT, "Kokkos::Experimental::FloatFloat", [])
     assert k_float != k_ff
 
 

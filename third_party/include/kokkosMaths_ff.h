@@ -26,12 +26,32 @@
 #include "ff_math.hpp"
 #include "ff_complex.hpp"
 
-// Namespace shim (Agentic pipeline vendored snapshot, 2026-07-29).
-// The ff primitives live under `quad::ffun` in third_party/include/ff_*.hpp
-// (byte-identical to ReetBarik/kokkos-extended-precision-demo@fffunKokkos).
-// Alias `ql::ffun` to `quad::ffun` so this header mirrors kokkosMaths_dd.h's
-// alias pattern (`ql::ddfun` → `quad::ddfun`) exactly.
-namespace ql { namespace ffun = ::quad::ffun; }
+// Namespace shim (Agentic pipeline vendored snapshot; headers refreshed from
+// ReetBarik/kokkos-extended-precision-demo@5ae2f80, 2026-08-09).
+// The ff primitives live in third_party/include/ff_*.hpp and now sit under
+// `Kokkos::Experimental`, with the types renamed to FloatFloat /
+// FloatFloatComplex and the free make_ff() replaced by the static factory
+// FloatFloat::from_bits().
+//
+// Mirrors kokkosMaths_dd.h's shim exactly: a real namespace rather than a
+// namespace alias, because an alias cannot host the using-declarations or the
+// make_ff/ff_pi compatibility wrappers that this header's ql:: call sites
+// still use. See the longer rationale in kokkosMaths_dd.h.
+namespace ql {
+namespace ffun {
+
+using namespace ::Kokkos::Experimental;
+
+using ffloat    = ::Kokkos::Experimental::FloatFloat;
+using ffcomplex = ::Kokkos::Experimental::FloatFloatComplex;
+
+KOKKOS_INLINE_FUNCTION ffloat make_ff(uint32_t hi_bits, uint32_t lo_bits) {
+    return ::Kokkos::Experimental::FloatFloat::from_bits(hi_bits, lo_bits);
+}
+KOKKOS_INLINE_FUNCTION ffloat ff_pi() { return ::Kokkos::Experimental::FloatFloat_pi(); }
+
+}  // namespace ffun
+}  // namespace ql
 
 namespace ql
 {

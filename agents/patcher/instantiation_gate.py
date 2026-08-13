@@ -22,15 +22,15 @@ Deterministic, no LLM: every classification is a fixed pattern match on the g++
 error text.  The four shapes (taxonomy: ``STOP_A_DISPATCH_FIX_2026-07-28.md`` §6):
 
 * **Shape 1 — exit-boundary narrowing** (``dd_to_caller_complex``): a promoted dd
-  value (``ddcomplex``/``ddouble``) flows into an un-narrowed caller-precision
+  value (``DoubleDoubleComplex``/``DoubleDouble``) flows into an un-narrowed caller-precision
   ``Kokkos::complex<double>`` local / store / return, emitted as a raw
   assignment / construction g++ rejects.
 * **Shape 2 — missing interior widen** (``dd_to_double``): a dd value bound to a
   ``double`` / ``const double&`` decl or parameter inside a variant — a closure
   decl or callee parameter the emission left at caller precision.
 * **Shape 3 — nested complex** (``nested_complex``): ``Kokkos::complex<...
-  ddcomplex>`` — a complex container widened twice (the complex-container
-  promotion applied on top of an already-``ddcomplex`` operand).
+  DoubleDoubleComplex>`` — a complex container widened twice (the complex-container
+  promotion applied on top of an already-``DoubleDoubleComplex`` operand).
 * **Shape 4 — unclassified shim** (``shim_unclassified``): a synthesized shim the
   emission left as a Rule-R4 ``#error "... requires manual classification"``.
 
@@ -50,7 +50,7 @@ INSTANTIATION_BINDING = "instantiation_binding"
 # The four known emission-binding error shapes + the unknown sentinel.
 SHAPE_1_EXIT_NARROW = "shape1_dd_to_caller_complex"     # designed-exit narrowing hole
 SHAPE_2_INTERIOR_WIDEN = "shape2_dd_to_double"          # missing interior/callee widen
-SHAPE_3_NESTED_COMPLEX = "shape3_nested_complex"        # complex<ddcomplex> double-widen
+SHAPE_3_NESTED_COMPLEX = "shape3_nested_complex"        # complex<DoubleDoubleComplex> double-widen
 SHAPE_4_SHIM = "shape4_shim_unclassified"              # #error manual classification
 SHAPE_UNKNOWN = "unknown"                               # STOP #BB
 
@@ -64,10 +64,34 @@ KNOWN_SHAPES = frozenset({
 _CURLY = {"‘": "'", "’": "'", "“": '"', "”": '"'}
 
 # The dd type spellings the chain integrator emits (agents/chain_integrator/agent.py).
-_DD_SCALAR = "quad::ddfun::ddouble"
-_DD_COMPLEX = "quad::ddfun::ddcomplex"
+_DD_SCALAR = "Kokkos::Experimental::DoubleDouble"
+_DD_COMPLEX = "Kokkos::Experimental::DoubleDoubleComplex"
+
+# Pre-refresh spellings. This module classifies COMPILER DIAGNOSTIC TEXT, and
+# build logs captured before third_party/include was refreshed from
+# kokkos-extended-precision-demo@5ae2f80 name the old types — including the
+# B10/B14 ground-truth corpus the tests classify. Those logs are frozen
+# historical artifacts, so the gate has to read both vocabularies; a new build
+# emits the Kokkos::Experimental spelling, an archived one the quad::ddfun
+# spelling, and both describe the same defect shapes.
+_DD_SCALAR_LEGACY = "quad::ddfun::ddouble"
+_DD_COMPLEX_LEGACY = "quad::ddfun::ddcomplex"
+
+_DD_SCALARS = (_DD_SCALAR, _DD_SCALAR_LEGACY)
+_DD_COMPLEXES = (_DD_COMPLEX, _DD_COMPLEX_LEGACY)
+
+
+def _alt(*names: str) -> str:
+    """Regex alternation over the accepted spellings of a type."""
+    return "(?:" + "|".join(re.escape(n) for n in names) + ")"
+
+
+def _has(message: str, *names: str) -> bool:
+    return any(n in message for n in names)
+
+
 # Any Kokkos/std complex container wrapping the dd complex — the double-widen symptom.
-_NESTED_RE = re.compile(r"(?:Kokkos|std)::complex<\s*quad::ddfun::ddcomplex\s*>")
+_NESTED_RE = re.compile(r"(?:Kokkos|std)::complex<\s*" + _alt(*_DD_COMPLEXES) + r"\s*>")
 
 
 def _normalise(text: str) -> str:
@@ -80,7 +104,7 @@ def classify_error(message: str) -> str:
     """Bucket a single g++ ``error:`` message into a shape (or :data:`SHAPE_UNKNOWN`).
 
     Order matters: Shape 3 (nested complex) is tested FIRST because a doubly-widened
-    ``Kokkos::complex<quad::ddfun::ddcomplex>`` operand also matches the raw-assignment
+    ``Kokkos::complex<Kokkos::Experimental::DoubleDoubleComplex>`` operand also matches the raw-assignment
     / static-assert signatures of the other shapes; the nested container is the root
     cause and the more specific bucket.  Shape 4 (the ``#error``) is unambiguous.
     Shapes 1 and 2 are then distinguished by the *target* precision — a dd value
@@ -88,11 +112,11 @@ def classify_error(message: str) -> str:
     """
     m = _normalise(message)
 
-    # --- Shape 3: nested complex<ddcomplex> (double-widened container) --------
+    # --- Shape 3: nested complex<DoubleDoubleComplex> (double-widened container) --------
     if _NESTED_RE.search(m):
         return SHAPE_3_NESTED_COMPLEX
     # The Kokkos::complex static_assert fires only when instantiated on a non-FP type,
-    # i.e. on ddcomplex — the same double-widen root cause seen from the library side.
+    # i.e. on DoubleDoubleComplex — the same double-widen root cause seen from the library side.
     if ("Kokkos::complex can only be instantiated for a cv-unqualified floating point"
             in m):
         return SHAPE_3_NESTED_COMPLEX
@@ -102,32 +126,34 @@ def classify_error(message: str) -> str:
         return SHAPE_4_SHIM
 
     # --- Shape 1: dd value -> caller-precision complex<double> ---------------
-    # construction: Kokkos::complex<double>::complex(quad::ddfun::dd{ouble,complex})
-    if re.search(r"complex<double>::complex\(\s*quad::ddfun::dd(?:ouble|complex)\s*\)", m):
+    # construction: Kokkos::complex<double>::complex(<dd scalar or dd complex>)
+    if re.search(r"complex<double>::complex\(\s*" +
+                 _alt(*_DD_SCALARS, *_DD_COMPLEXES) + r"\s*\)", m):
         return SHAPE_1_EXIT_NARROW
-    # decl/return conversion: ddcomplex/ddouble -> (const) Kokkos::complex<double>
-    if (("conversion from '" + _DD_COMPLEX) in m or
-            ("conversion from '" + _DD_SCALAR) in m) and "Kokkos::complex<double>" in m:
+    # decl/return conversion: DoubleDoubleComplex/DoubleDouble -> (const) Kokkos::complex<double>
+    if _has(m, *("conversion from '" + t for t in (*_DD_COMPLEXES, *_DD_SCALARS))) \
+            and "Kokkos::complex<double>" in m:
         return SHAPE_1_EXIT_NARROW
-    # assignment either direction between ddcomplex/ddouble and complex<double>
-    if "operator=" in m and "Kokkos::complex<double>" in m and (
-            _DD_COMPLEX in m or _DD_SCALAR in m):
+    # assignment either direction between DoubleDoubleComplex/DoubleDouble and complex<double>
+    if "operator=" in m and "Kokkos::complex<double>" in m and \
+            _has(m, *_DD_COMPLEXES, *_DD_SCALARS):
         return SHAPE_1_EXIT_NARROW
-    # could-not-convert complex<double> -> ddcomplex (a caller value into a dd sink at
+    # could-not-convert complex<double> -> DoubleDoubleComplex (a caller value into a dd sink at
     # the exit line — the mirror of the narrowing hole, still an exit-boundary defect)
-    if "could not convert" in m and "Kokkos::complex<double>" in m and _DD_COMPLEX in m:
+    if "could not convert" in m and "Kokkos::complex<double>" in m and \
+            _has(m, *_DD_COMPLEXES):
         return SHAPE_1_EXIT_NARROW
 
     # --- Shape 2: dd value -> bare double (missing interior/callee widen) -----
-    if re.search(r"invalid cast from type '" + re.escape(_DD_SCALAR) +
+    if re.search(r"invalid cast from type '" + _alt(*_DD_SCALARS) +
                  r"' to type 'double'", m):
         return SHAPE_2_INTERIOR_WIDEN
-    if re.search(r"cannot convert '" + re.escape(_DD_SCALAR) +
+    if re.search(r"cannot convert '" + _alt(*_DD_SCALARS) +
                  r"' to 'const double'", m):
         return SHAPE_2_INTERIOR_WIDEN
-    if re.search(r"reference of type 'const double&'.*'" + re.escape(_DD_SCALAR) + r"'", m):
+    if re.search(r"reference of type 'const double&'.*'" + _alt(*_DD_SCALARS) + r"'", m):
         return SHAPE_2_INTERIOR_WIDEN
-    if ("cannot convert '" + _DD_SCALAR) in m and "'double'" in m:
+    if _has(m, *("cannot convert '" + t for t in _DD_SCALARS)) and "'double'" in m:
         return SHAPE_2_INTERIOR_WIDEN
 
     return SHAPE_UNKNOWN

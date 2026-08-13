@@ -21,7 +21,7 @@ from agents.patcher.fanout import (
     ClosureDecl, Promote, VariantSpec, render_variant,
 )
 
-DD = "quad::ddfun::ddouble"
+DD = "Kokkos::Experimental::DoubleDouble"
 
 # A function whose body declares carriers outside a promotable region.  Lines are
 # 1-based file-absolute; the function spans lines 2..12 here.

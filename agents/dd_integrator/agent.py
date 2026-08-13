@@ -36,7 +36,7 @@ The real dd_integrator will mirror :mod:`agents.tracked_integrator`: an
 LLM-driven generation pass, reusing the shared machinery in
 :mod:`agents.integrator_base` (SOURCE_HASH cache, streaming shim, bounded retry
 loop, C8 boundary patcher parameterized on the DD scalar type name, e.g.
-``quad::ddfun::ddouble``).  It would target the canonical vendored DD headers at
+``Kokkos::Experimental::DoubleDouble``).  It would target the canonical vendored DD headers at
 ``third_party/include/{dd_math.hpp, dd_complex.hpp}`` and generate a
 ``<app>_dd.h``-style shim (``ql::Constants`` specializations + math overloads for
 the DD complex/real types) for an arbitrary app.
@@ -46,7 +46,7 @@ The one DD-specific wrinkle beyond the tracked integrator: the DD constant table
 ``(hi, lo)`` double pairs**, because a decimal literal only carries ~16 digits and
 would silently truncate the low word.  qcdloop's ``ddfun_enabled`` branch does
 this offline via ``scripts/gen_dd_constants.cpp`` (splits a quad-precision literal
-into the two doubles and emits ``make_dd(0x…, 0x…)`` lines pasted into
+into the two doubles and emits ``DoubleDouble::from_bits(0x…, 0x…)`` lines pasted into
 ``kokkosMaths_dd.h``).  The real dd_integrator must drive an equivalent codegen
 step so constants survive at full DD precision — not emit decimal literals.
 """
@@ -68,8 +68,8 @@ _SYSTEM_PROMPT = (Path(__file__).parent / "system_prompt.txt").read_text(encodin
 
 _SPEC = regional.RegionalSpec(
     system_prompt=_SYSTEM_PROMPT,
-    cpp_scalar="quad::ddfun::ddouble",
-    cpp_complex="quad::ddfun::ddcomplex",
+    cpp_scalar="Kokkos::Experimental::DoubleDouble",
+    cpp_complex="Kokkos::Experimental::DoubleDoubleComplex",
     vendored_headers=["dd_math.hpp", "dd_complex.hpp"],
     shim_prefix="dd",
     constant_note=(
@@ -77,9 +77,9 @@ _SPEC = regional.RegionalSpec(
         "Any double-double constant this region needs MUST be materialized at full "
         "precision — never as a decimal literal (it truncates the low word). Resolve "
         "each via the Rule R3 cascade IN ORDER: (1) a vendored `dd_*()` free function; "
-        "(2) a known `make_dd(0x<hi>ULL, 0x<lo>ULL)` hex pair; (3) derive from the "
+        "(2) a known `DoubleDouble::from_bits(0x<hi>ULL, 0x<lo>ULL)` hex pair; (3) derive from the "
         "constant's own source definition — a source `double` literal (e.g. "
-        "`TScale(1e-50)`) promotes to `make_dd(<bits of that double>, 0x0)` with a ZERO "
+        "`TScale(1e-50)`) promotes to `DoubleDouble::from_bits(<bits of that double>, 0x0)` with a ZERO "
         "low word (correct — a source literal has only double precision), and a "
         "closed form over catalog constants composes from their known pairs; "
         "(4) only if none apply, the Rule R4 #error. Any values pre-derived for you "
@@ -192,7 +192,7 @@ def integrate_region(
     line_end: int,
     variables: list[str],
     working_tree: str,
-    scalar_type: str = "ddouble",
+    scalar_type: str = "DoubleDouble",
     caller_type: str = "double",
     direction: str = "in",
     out_dir: Path,
@@ -204,11 +204,11 @@ def integrate_region(
     """Regional double-double promotion (P7) — sibling of :func:`integrate`.
 
     Signature mirrors ``ff_integrator.integrate_region`` exactly, with
-    ``scalar_type="ddouble"`` (design §P7 "one module, two functions"); the concrete
-    C++ spelling (``quad::ddfun::ddouble`` / ``ddcomplex``) comes from :data:`_SPEC`.
+    ``scalar_type="DoubleDouble"`` (design §P7 "one module, two functions"); the concrete
+    C++ spelling (``Kokkos::Experimental::DoubleDouble`` / ``DoubleDoubleComplex``) comes from :data:`_SPEC`.
     Thin wrapper over the shared engine
     :func:`agents.integrator_base.regional.run_integrate_region` — reads the region
-    at ``working_tree``, recovers writes (Fix C), LLM-generates a ddouble shim
+    at ``working_tree``, recovers writes (Fix C), LLM-generates a DoubleDouble shim
     (SOURCE_HASH-cached, ``attempt``-varied), and pairs it with a deterministic
     boundary patch.  The DD-specific wrinkle beyond the ff twin — hex-encoded
     ``(hi, lo)`` constant tables — is codified in the ruleset (Rule R3) and the

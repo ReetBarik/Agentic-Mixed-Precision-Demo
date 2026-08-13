@@ -19,17 +19,17 @@ and run (Subtask-5-style single-TU); nothing else moved.
 > oracle-only knowledge. It is exactly parallel to how the mainline
 > `scarrazza/qcdloop:tools.cc` publishes both the 19-double and the 43-quadmath `_C` tables
 > side by side. A one-line namespace shim at the top
-> (`namespace ql { namespace ddfun = ::quad::ddfun; }`) aliases the fork's `ql::ddfun` to
-> this repo's vendored `quad::ddfun` primitives (`third_party/include/dd_math.hpp` etc.);
+> (`namespace ql { namespace ddfun = ::Kokkos::Experimental; }`) aliases the fork's `ql::ddfun` to
+> this repo's vendored `Kokkos::Experimental` primitives (`third_party/include/dd_math.hpp` etc.);
 > the body is otherwise verbatim upstream. `kokkosMaths.h` (the double primary) is
 > **byte-identical to before** — the double build path is unchanged.
 >
 > **What this gives the pipeline (proven by §6 probe P5, `probe_constants_dd43.cpp`):**
 >
-> * `ql::Constants<quad::ddfun::ddouble>::_num_C()` = **43** (not 19).
+> * `ql::Constants<Kokkos::Experimental::DoubleDouble>::_num_C()` = **43** (not 19).
 > * `_C(i)` returns **bit-exact** dd Chebyshev coefficients from the source table
->   (`_C(0)/_C(18)/_C(42)` bit-verified against the header's `make_dd()` literals).
-> * `_pi()` returns `ddfun::dd_pi()` — **bit-exact dd π**, not `T(M_PI)`.
+>   (`_C(0)/_C(18)/_C(42)` bit-verified against the header's `DoubleDouble::from_bits()` literals).
+> * `_pi()` returns `ddfun::DoubleDouble_pi()` — **bit-exact dd π**, not `T(M_PI)`.
 > * dd-appropriate scalar tolerances (`_eps=1e-12`, `_reps=1e-30`, `_neglig=1e-28`,
 >   `_qlonshellcutoff=1e-20`, `_ieps50`, …) and a 25-term Bernoulli `_B` table, all as source.
 >
@@ -133,7 +133,7 @@ lines fall inside them (`kokkosUtils.h:702-704` in `Li2omx2`; `:174,177,199,212`
 It is a **leaf callee** — called *from* a chain line (`Li2omx2:701,706`) but its own
 body is never selected. Today rule (b)/(2.4) hits the `Lnrat` call, sees a callee ∉ `F`,
 and **refuses** (`chain_closure_escapes`). That refusal is what blocks B10: `Li2omx2_B10`
-promoted to dd needs `ql::Lnrat<ddcomplex,…>(dd,dd)` to exist, and it does not.
+promoted to dd needs `ql::Lnrat<DoubleDoubleComplex,…>(dd,dd)` to exist, and it does not.
 
 **This design grows `F`.** It adds a fourth rule to the closure fixed point:
 
@@ -159,11 +159,11 @@ clonable_leaf(g) :=
  ∧ (2) g's body, with reads promoted to dd, calls ONLY:
          - other clonable_leaf callees (recurse), OR
          - symbols the dd TERMINATION BOUNDARY resolves at dd (§2.6):
-             (i)   vendored quad::ddfun ops (abs/log/…, ddcomplex ops),
+             (i)   vendored Kokkos::Experimental ops (abs/log/…, DoubleDoubleComplex ops),
              (ii)  a Class-1 SYNTHESIZED wrapper (§2.2) — pipeline-emittable
                    mechanically from that wrapper's own primary + (i),
              (iii) a Class-2 data accessor the SOURCE instantiates at dd
-                   (§2.3): the double primary at T=ddouble, OR the enriched
+                   (§2.3): the double primary at T=DoubleDouble, OR the enriched
                    dd source `kokkosMaths_dd.h` (43-coeff _C, dd _pi, …),
        i.e. rule (d)'s transitive closure over g terminates at the boundary;
                                                              # body instantiable at dd
@@ -181,7 +181,7 @@ a vendored primitive header**. A leaf is clonable iff every dd symbol its promot
 names is (i) vendored, (ii) a Class-1 wrapper the extended Gap-A machinery **can
 synthesize** (predicate: primary body is a straight-line delegation to a vendored/ADL
 op or a member accessor — §2.2), or (iii) a Class-2 accessor the **source instantiates at
-dd** (§2.3 — either the double primary at `T=ddouble`, or, for coefficient tables, the
+dd** (§2.3 — either the double primary at `T=DoubleDouble`, or, for coefficient tables, the
 enriched dd source `kokkosMaths_dd.h`). Anything else → the leaf is **not** clonable →
 `chain_closure_escapes` (honest terminal, not a doomed emission). This keeps the
 conservative-parser contract: false-negative (refuse a clonable leaf) is safe;
@@ -199,7 +199,7 @@ For the Group-A chains, rule (d) makes exactly these leaves eligible:
 
 So for **B10** specifically, rule (d) is needed for **`Lnrat` only** — `ddilog`/`Li2omx2`
 are already cloned frames. This narrows the headline case to a single leaf whose entire
-support surface is Class-1 wrappers plus the source's own `Constants<ddouble>::_ipio2`
+support surface is Class-1 wrappers plus the source's own `Constants<DoubleDouble>::_ipio2`
 (no `_C` — Lnrat has no series). **The B10 unblock therefore needs no Class-2 coefficient
 work at all.** Class 2 becomes relevant only when `ddilog` is itself a rule-(d) leaf
 (B12/B13), where under v3 it is served by the **43-coeff source table** (§2.3).
@@ -225,17 +225,17 @@ primitives only.
 
 | symbol (at dd) | used by | vendored? | source primary at dd? | **class** |
 |---|---|---|---|---|
-| `ddadd/sub/mul/div`, `ddouble`/`ddcomplex` ops | all | ✅ `dd_math`/`dd_complex` | — | boundary (vendored) |
-| `abs/log/sqrt/exp/pow` on dd | ddilog, Lnrat | ✅ `quad::ddfun::*` | — | boundary (vendored) |
-| `ql::kAbs(ddouble/ddcomplex)` | Lnrat, Li2omx2 | ❌ | primary `T kAbs(T){Kokkos::abs(x)}` — redirect | **Class 1** (§2.2) |
-| `ql::kLog(ddouble/ddcomplex)` | Lnrat, ddilog, Li2omx2 | ❌ | primary `T kLog(T){Kokkos::log(x)}` — redirect | **Class 1** |
+| `ddadd/sub/mul/div`, `DoubleDouble`/`DoubleDoubleComplex` ops | all | ✅ `dd_math`/`dd_complex` | — | boundary (vendored) |
+| `abs/log/sqrt/exp/pow` on dd | ddilog, Lnrat | ✅ `Kokkos::Experimental::*` | — | boundary (vendored) |
+| `ql::kAbs(DoubleDouble/DoubleDoubleComplex)` | Lnrat, Li2omx2 | ❌ | primary `T kAbs(T){Kokkos::abs(x)}` — redirect | **Class 1** (§2.2) |
+| `ql::kLog(DoubleDouble/DoubleDoubleComplex)` | Lnrat, ddilog, Li2omx2 | ❌ | primary `T kLog(T){Kokkos::log(x)}` — redirect | **Class 1** |
 | `ql::kSqrt/kConj(dd)` | (Group A: not on chain) | ❌ | primary `T kSqrt(T){Kokkos::sqrt(x)}` — redirect | **Class 1** |
-| `ql::Real/Imag(ddcomplex)` | ddilog, Lnrat | ❌ | primary is `.real()/.imag()` accessor | **Class 1** |
-| `ql::Sign(ddouble)` | Lnrat, ddilog | ❌ | primary `(0<x)-(x<0)`, T-generic ±1/0 | **Class 1** |
-| `ql::iszero<…>(ddouble)` | ddilog (`:116`) | ❌ | template; body = `kAbs(x)<_qlonshellcutoff` | **Class 1** (transitive: `kAbs` + source cutoff) |
-| `ql::kPow<…>(ddouble,int)` | ddilog (`:117…`) | ❌ | template `TOutput(1.0); temp*=base` — clean at dd | **source (already instantiates)** |
-| `_pi2o6/_ipio2/_half/_pi/_zero/_one` at dd | ddilog, Lnrat, Li2omx2 | partial (`dd_pi()`) | double primary at dd; **or dd source (`_pi()`=`dd_pi()` bit-exact)** | **Class 2 / source** (§2.3) |
-| `Constants<ddouble>::_C(i)`, `_num_C()` | ddilog | ❌ | **enriched dd source: 43 coeffs, bit-exact** (P5) | **Class 2 / source** (§2.3, v3) |
+| `ql::Real/Imag(DoubleDoubleComplex)` | ddilog, Lnrat | ❌ | primary is `.real()/.imag()` accessor | **Class 1** |
+| `ql::Sign(DoubleDouble)` | Lnrat, ddilog | ❌ | primary `(0<x)-(x<0)`, T-generic ±1/0 | **Class 1** |
+| `ql::iszero<…>(DoubleDouble)` | ddilog (`:116`) | ❌ | template; body = `kAbs(x)<_qlonshellcutoff` | **Class 1** (transitive: `kAbs` + source cutoff) |
+| `ql::kPow<…>(DoubleDouble,int)` | ddilog (`:117…`) | ❌ | template `TOutput(1.0); temp*=base` — clean at dd | **source (already instantiates)** |
+| `_pi2o6/_ipio2/_half/_pi/_zero/_one` at dd | ddilog, Lnrat, Li2omx2 | partial (`DoubleDouble_pi()`) | double primary at dd; **or dd source (`_pi()`=`DoubleDouble_pi()` bit-exact)** | **Class 2 / source** (§2.3) |
+| `Constants<DoubleDouble>::_C(i)`, `_num_C()` | ddilog | ❌ | **enriched dd source: 43 coeffs, bit-exact** (P5) | **Class 2 / source** (§2.3, v3) |
 
 **Only the Class-1 wrappers are not vendored-boundary or already-in-source.** The Class-2
 coefficient table `_C` — v2's one genuine capability question — is now **source-resident at
@@ -258,11 +258,11 @@ transform** of that primary body.
 
 | wrapper | primary (src/kokkosMaths.h) | mechanical dd transform | current Gap-A reach? |
 |---|---|---|---|
-| `ql::kAbs` | `:271` `T kAbs(T x){ return Kokkos::abs(x); }` (+`:279/285` double/cplx overloads) | emit `ddouble kAbs(ddouble){ return quad::ddfun::abs(x); }` + `ddouble kAbs(ddcomplex){ return quad::ddfun::abs(z); }` — redirect `Kokkos::abs`→`quad::ddfun::abs` | **needs extension** (see below) |
-| `ql::kLog` | `:289` `T kLog(T x){ return Kokkos::log(x); }` | `ddouble kLog(ddouble){ quad::ddfun::log }`, `ddcomplex kLog(ddcomplex){ quad::ddfun::log }` | **needs extension** |
-| `ql::kSqrt`/`kConj` | `:295/301` `Kokkos::sqrt/conj` | analogous redirect to `quad::ddfun::sqrt/conj` | **needs extension** |
-| `ql::Real`/`Imag` | `:320-326` `.real()/.imag()` accessors on `complex<double>` | emit `ddouble Real(ddcomplex z){ return z.real(); }` etc. | **needs extension** (accessor form) |
-| `ql::Sign` | `:328` `int Sign(double x){ return (0<x)-(x<0); }` | re-emit with dd operands: `int Sign(ddouble x){ return (ddouble(0.0)<x)-(x<ddouble(0.0)); }` | **needs extension** (scalar-expr form) |
+| `ql::kAbs` | `:271` `T kAbs(T x){ return Kokkos::abs(x); }` (+`:279/285` double/cplx overloads) | emit `DoubleDouble kAbs(DoubleDouble){ return Kokkos::Experimental::abs(x); }` + `DoubleDouble kAbs(DoubleDoubleComplex){ return Kokkos::Experimental::abs(z); }` — redirect `Kokkos::abs`→`Kokkos::Experimental::abs` | **needs extension** (see below) |
+| `ql::kLog` | `:289` `T kLog(T x){ return Kokkos::log(x); }` | `DoubleDouble kLog(DoubleDouble){ Kokkos::Experimental::log }`, `DoubleDoubleComplex kLog(DoubleDoubleComplex){ Kokkos::Experimental::log }` | **needs extension** |
+| `ql::kSqrt`/`kConj` | `:295/301` `Kokkos::sqrt/conj` | analogous redirect to `Kokkos::Experimental::sqrt/conj` | **needs extension** |
+| `ql::Real`/`Imag` | `:320-326` `.real()/.imag()` accessors on `complex<double>` | emit `DoubleDouble Real(DoubleDoubleComplex z){ return z.real(); }` etc. | **needs extension** (accessor form) |
+| `ql::Sign` | `:328` `int Sign(double x){ return (0<x)-(x<0); }` | re-emit with dd operands: `int Sign(DoubleDouble x){ return (DoubleDouble(0.0)<x)-(x<DoubleDouble(0.0)); }` | **needs extension** (scalar-expr form) |
 | `ql::iszero` | `:307` template, body `kAbs(x)<_qlonshellcutoff` | already a template — instantiates at dd once `kAbs(dd)` exists + `_qlonshellcutoff` (source literal) | **transitive** (falls out once the above land) |
 
 **Why this is an *extension* of Gap-A, not a new capability.** The existing Gap-A bridge
@@ -281,7 +281,7 @@ pattern one delegation-hop removed**: `ql::kAbs`'s *body* is `Kokkos::abs(x)`, a
    (already reachable via `region_scan`/`CallGraph`) and classifies it as Class-1 iff the
    body is a single `return <delegation>;` where `<delegation>` is one of:
    * `Kokkos::fn(arg)` / `quad::…::fn(arg)` with `fn ∈ _MATH_FN_NAMES` → **redirect** the
-     inner call to `quad::ddfun::fn` (the transform the bridge already knows);
+     inner call to `Kokkos::Experimental::fn` (the transform the bridge already knows);
    * `arg.real()` / `arg.imag()` / other member accessor → **accessor passthrough**;
    * a scalar comparison/arithmetic expression over the parameter with no non-boundary call
      → **re-emit verbatim at dd** (the parameter's type widens; the operators are vendored).
@@ -314,14 +314,14 @@ ignored, so the two paths never collide (per-region shim vs source header; §4).
 **Empirical proof (§6 P2).** Probe `probe_clone_synth.cpp` build B compiles and runs
 `Lnrat_B10` with a `WITH_SYNTH` overlay that is **only** these mechanical Class-1 overloads
 (no hand-written `Constants`, and NOT the fork's wrappers), against the source
-`Constants<ddouble>` primary. `|diff| = 0` vs the double primary. This is the exact surface
+`Constants<DoubleDouble>` primary. `|diff| = 0` vs the double primary. This is the exact surface
 the extended Gap-A machinery would emit.
 
 ### 2.3 Class 2 — coefficient tables, resolved via source enrichment (v3)
 
 **Definition.** Class-2 data is a value the primary template **cannot derive from its own
 body** — precision-target-specific *data*, not code. The load-bearing example is
-`Constants<ddouble>::_C`, the Chebyshev series for Li₂: a dd-accurate ddilog wants **43**
+`Constants<DoubleDouble>::_C`, the Chebyshev series for Li₂: a dd-accurate ddilog wants **43**
 coefficients (the DCT of Li₂ sampled at 43 Chebyshev nodes), which cannot be invented from a
 19-coeff double table.
 
@@ -332,10 +332,10 @@ is qcdloop-authored **library data**, exactly parallel to how the mainline
 `scarrazza/qcdloop:tools.cc` publishes both the 19-double and the 43-quadmath `_C` tables
 side by side. **The pipeline consumes it as source, no synthesis needed** — the same way it
 consumes the double primary `kokkosMaths.h`. The namespace shim
-(`namespace ql { namespace ddfun = ::quad::ddfun; }`) lets the fork-authored header resolve
-against this repo's vendored `quad::ddfun` primitives unchanged (§4).
+(`namespace ql { namespace ddfun = ::Kokkos::Experimental; }`) lets the fork-authored header resolve
+against this repo's vendored `Kokkos::Experimental` primitives unchanged (§4).
 
-**Decisive discovery (probe `probe_constants_dd43.cpp`, P5).** `ql::Constants<ddouble>`
+**Decisive discovery (probe `probe_constants_dd43.cpp`, P5).** `ql::Constants<DoubleDouble>`
 instantiated from the enriched source:
 
 ```
@@ -343,13 +343,13 @@ num_C = 43  (expect 43)
 C[0]  hi=0.42996693560813698   lo=-7.726e-18  bit-exact=1
 C[18] hi=-1.4226020855112447e-16 lo=4.699e-33 bit-exact=1
 C[42] hi=-1.11772e-35          lo=4.466e-52   bit-exact=1
-_pi() hi=3.1415926535897931    lo=1.225e-16   bit-exact dd_pi=1
+_pi() hi=3.1415926535897931    lo=1.225e-16   bit-exact DoubleDouble_pi=1
 sum_C(43) hi=0.8224670334241132  lo=1.520e-17
 P5 PASS: enriched source provides 43-coeff dd table
 ```
 
-`_num_C()=43`; `_C(0)/_C(18)/_C(42)` are **bit-exact** vs the source table's `make_dd()`
-literals; `_pi()` is bit-exact `dd_pi()` (not `T(M_PI)`). The 43-coeff sum
+`_num_C()=43`; `_C(0)/_C(18)/_C(42)` are **bit-exact** vs the source table's `DoubleDouble::from_bits()`
+literals; `_pi()` is bit-exact `DoubleDouble_pi()` (not `T(M_PI)`). The 43-coeff sum
 `0.8224670334241132` matches the v2 19-coeff sum's `hi` (both → π²/12) with a *refined* `lo`
 tail — the "same value, more accurate" signature of the extra coefficients. **STOP #E
 (source doesn't provide what the design claims) is discharged.**
@@ -359,12 +359,12 @@ trail — these describe *what we would have done if the library did not publish
 
 * **~~Option A — pipeline computes the 43-coeff table offline (chebfun-style DCT).~~**
   *(No longer needed for Group A.)* A real capability extension: sample Li₂ at 43 dd
-  Chebyshev nodes, DCT, emit a `Constants<ddouble>::_C` specialisation, run once per
+  Chebyshev nodes, DCT, emit a `Constants<DoubleDouble>::_C` specialisation, run once per
   (function, precision) pair offline. **Superseded by source enrichment** — the library
   already ships the table. Retained only as the contingency an unspecified *future*
   library-under-test would trigger via STOP #O (§5).
 * **~~Option B — accept the 19-coeff series at dd.~~** *(v2's choice; no longer applies.)*
-  The double primary at `T=ddouble` gives 19 coeffs; v2 measured the truncation ceiling this
+  The double primary at `T=DoubleDouble` gives 19 coeffs; v2 measured the truncation ceiling this
   forfeits (v2 §2.4). **Superseded** — with 43 coeffs in source there is no truncation
   concession to bound.
 * **~~Option C — declare precision-target tables an out-of-scope library-author
@@ -416,31 +416,31 @@ plumbing, which is the far more actionable diagnosis.
 > history and the v2 probe P4 output for the trail, but is SUPERSEDED and does not govern
 > the v3 prediction.**
 
-### 2.5 Does B10's read flow through `ddcomplex` or `Kokkos::complex<ddouble>`?
+### 2.5 Does B10's read flow through `DoubleDoubleComplex` or `Kokkos::complex<DoubleDouble>`?
 
 Unchanged from v1/v2 (this was correct). The chain's `TOutput` is `Kokkos::complex<double>`;
-the existing pipeline promotes complex containers to `quad::ddfun::ddcomplex`
+the existing pipeline promotes complex containers to `Kokkos::Experimental::DoubleDoubleComplex`
 (`dispatch.py:308`, `fanout.py:243/271`, `shim_normalise.py:60-63`), and the
 `ddilog`/`Li2omx2` clones already do this (B12 built + executed, Subtask 3). So B10's reads
-flow through **`quad::ddfun::ddcomplex` directly**, via vendored `dd_complex.hpp` — no
-`Kokkos::complex<ddouble>`, no container-axis bridging. The §6 probe confirms:
-`Lnrat_B10<ddcomplex,double,ddouble>` compiles and runs with `ddcomplex` as `TOutput`.
+flow through **`Kokkos::Experimental::DoubleDoubleComplex` directly**, via vendored `dd_complex.hpp` — no
+`Kokkos::complex<DoubleDouble>`, no container-axis bridging. The §6 probe confirms:
+`Lnrat_B10<DoubleDoubleComplex,double,DoubleDouble>` compiles and runs with `DoubleDoubleComplex` as `TOutput`.
 
 ### 2.6 The termination boundary (updated for v3)
 
 Rule (d) recurses; it terminates because every call in a promoted body resolves to exactly
 one of four **boundary** kinds, none re-entering rule (d):
 
-1. **Vendored `quad::ddfun` math** — `abs/sqrt/log/exp/pow/…` on `ddouble`/`ddcomplex`
+1. **Vendored `Kokkos::Experimental` math** — `abs/sqrt/log/exp/pow/…` on `DoubleDouble`/`DoubleDoubleComplex`
    (`dd_math.hpp`, `dd_complex.hpp`). Resolve at dd, no cloning. **Boundary.**
 2. **Class-2 / source constants** — `_pi2o6`, `_ipio2`, `_C`, `_num_C` at dd, instantiated
-   **from source**: either the double primary `Constants<T>` at `T=ddouble`, or (for the
+   **from source**: either the double primary `Constants<T>` at `T=DoubleDouble`, or (for the
    coefficient tables and bit-exact dd π) the enriched dd source `kokkosMaths_dd.h`
    (§2.3, proven by `probe_constants_dd43.cpp`). **Boundary — a value, not a frame.**
 3. **Class-1 synthesized wrappers** — `ql::{kAbs,kLog,kSqrt,Real,Imag,Sign,iszero}` at dd,
    **emitted by the extended Gap-A machinery** (§2.2), not vendored. Once emitted they are
    ordinary overloads that bottom out in boundary 1. **Boundary.**
-4. **Vendored `ddcomplex` container ops** — `+,−,*,/`, `.real()`, `.imag()`
+4. **Vendored `DoubleDoubleComplex` container ops** — `+,−,*,/`, `.real()`, `.imag()`
    (`dd_complex.hpp`). **Boundary.**
 
 Rule (d) adds a frame only for **none-of-the-above** = an app template whose body is
@@ -479,7 +479,7 @@ depth-1, 3 frames). Graceful degradation, not a scope choice.
 ### 3.1 Why the forwarding overload recursed, and why the clone does not
 
 STOP #K's recursion was structural: an injected **same-name** overload
-`ql::Lnrat(ddouble,ddouble)` whose body calls `ql::Lnrat(ddouble,ddouble)` — C++ selects by
+`ql::Lnrat(DoubleDouble,DoubleDouble)` whose body calls `ql::Lnrat(DoubleDouble,DoubleDouble)` — C++ selects by
 *argument type*, ignoring the explicit `<…>`, so it re-selects itself forever.
 
 A **clone** breaks every link:
@@ -489,7 +489,7 @@ A **clone** breaks every link:
 * the call site `Li2omx2_B10:706` is **rerouted** to `Lnrat_B10` by the existing
   topological callee-before-caller reroute (`_reroute_in_function`).
 
-The §6 probes are the empirical proof: `Lnrat_B10<ddcomplex,double,ddouble>(1.5,2.5)`
+The §6 probes are the empirical proof: `Lnrat_B10<DoubleDoubleComplex,double,DoubleDouble>(1.5,2.5)`
 **builds and runs to completion (exit 0), no segfault**, on the exact inputs that made the
 Subtask-5 forwarding overload stack-overflow — under both the v1 hand overlay and the v2
 synthesized-surface overlay.
@@ -531,7 +531,7 @@ verbatim upstream mirrors (modulo the documented shim) and states explicitly tha
 support the tables *don't* cover (e.g. the Class-1 `ql::kAbs`/`ql::kLog` wrappers at dd) is
 **synthesized by the pipeline, not written into the snapshot** — i.e. the §2.2 Class-1
 machinery, not the fork's wrapper code (§2.2 v3 subtlety). `third_party/include/` remains
-**app-independent** vendored primitives (`quad::ddfun`), untouched by this change; the
+**app-independent** vendored primitives (`Kokkos::Experimental`), untouched by this change; the
 namespace shim in `kokkosMaths_dd.h` bridges the fork's `ql::ddfun` authorship onto it.
 
 ### 4.2 Component-by-component
@@ -542,11 +542,11 @@ namespace shim in `kokkosMaths_dd.h` bridges the fork's `ql::ddfun` authorship o
 | **rule (a)** (`_expand_value_closure`) | eligible-frame set grows to include rule-(d) frames; decl-widen logic unchanged, applied inside `Lnrat_B10`/`ddilog_B10` too. |
 | **NEW rule (d)** (`chain_promote`) | frame-discovery fixed point: walk promoted-body calls, test `clonable_leaf`, add clones to `F`, seed bodies, record reroutes. Reuses `CallGraph` + `region_scan`. |
 | **Gap-A bridge** (`regional.py`) | **EXTENDED (L1′)** — shallow-wrapper recognizer + synthesized-overload emitter (§2.2). This is where Class-1 support is *produced*. Lives in the agents tree as synthesis; no vendored primitive header. |
-| **π-family catalog** (`constant_derive.py`) | **optional** — both the double primary and the enriched dd source supply `_pi2o6/_ipio2` at dd; the dd source's `_pi()` is bit-exact `dd_pi()`. Catalog is an *optional* bit-exactness refinement, not a requirement (§2.6 boundary 2). |
-| **`Constants<ddouble>`** | **NOT specialised by the pipeline, NOT vendored as a primitive** — instantiates from **source**: coefficient tables + dd π from the enriched `kokkosMaths_dd.h` (43 coeffs, §2.3, P5); the rest from the double primary at `T=ddouble`. |
+| **π-family catalog** (`constant_derive.py`) | **optional** — both the double primary and the enriched dd source supply `_pi2o6/_ipio2` at dd; the dd source's `_pi()` is bit-exact `DoubleDouble_pi()`. Catalog is an *optional* bit-exactness refinement, not a requirement (§2.6 boundary 2). |
+| **`Constants<DoubleDouble>`** | **NOT specialised by the pipeline, NOT vendored as a primitive** — instantiates from **source**: coefficient tables + dd π from the enriched `kokkosMaths_dd.h` (43 coeffs, §2.3, P5); the rest from the double primary at `T=DoubleDouble`. |
 | **enriched dd source** (`runs/qcdloop_headers_full/kokkosMaths_dd.h`) | **NEW source input** — consumed for its 43-coeff `_C`, 25-term `_B`, dd `_pi()`, dd tolerances. Its hand-written Class-1 wrapper *code* is NOT consumed (pipeline synthesizes its own, §2.2 v3 subtlety). |
 | **shim normaliser** (`shim_normalise.py`) | **used more** (more clone bodies → more shims). No logic change. |
-| **fanout manifest** (`fanout.py`) | **grows** — `Lnrat_B10` becomes a new `VariantSpec` with a `return_widen` (TOutput→ddcomplex). First time `Lnrat` appears in a manifest. No schema change. |
+| **fanout manifest** (`fanout.py`) | **grows** — `Lnrat_B10` becomes a new `VariantSpec` with a `return_widen` (TOutput→DoubleDoubleComplex). First time `Lnrat` appears in a manifest. No schema change. |
 | **clonable-leaf predicate** | **new predicate**, evaluated against the §2.2 synthesis manifest + the §2.3 source-instantiation check (double primary at dd + enriched dd source). The false-positive guard. |
 | **`chain_closure_escapes`** (`result.py`) | **still fires** — for leaves failing `clonable_leaf` (body not a synthesizable shape, or demands inward param widening). Now a *smaller* set. |
 | **support surface** (`third_party/include`) | **NO new primitive header.** v1's `dd_ql_support.hpp` stays deleted from the plan. Class-1 is synthesized into the per-region shim; Class-2 is source-resident in the vendored snapshot. |
@@ -561,7 +561,7 @@ namespace shim in `kokkosMaths_dd.h` bridges the fork's `ql::ddfun` authorship o
     `Li2omx2`; **non**-clonable leaf whose body is not a synthesizable shape → refuse);
   * Class-1 **shallow-wrapper recognizer + emitter** unit tests (kAbs/kLog redirect;
     Real/Imag accessor; Sign scalar-expr; a non-delegating body → not Class-1);
-  * a **source-instantiation** test for Class-2 (`Constants<ddouble>::_num_C()==43`,
+  * a **source-instantiation** test for Class-2 (`Constants<DoubleDouble>::_num_C()==43`,
     `_C(i)` bit-exact from the enriched dd source — the §6 P5 probe made permanent);
   * rule-(d) frame-discovery + termination test (B10 frontier = `{Lnrat_B10}`, depth 1);
   * a synthesized-shim compile test (the §6 P2 `probe_clone_synth.cpp` made permanent);
@@ -606,7 +606,7 @@ records that it **does not fire** under the current source:
 > vendored snapshot publishes as a dd source table, **and (b)** the leaf's dd accuracy is
 > consequently bounded by data the pipeline cannot synthesize, then **STOP and decide:**
 > fund **Option A** (build the offline DCT coefficient generator — sample the special
-> function at N dd Chebyshev nodes → DCT → emit `Constants<ddouble>::_C`, with a drift gate
+> function at N dd Chebyshev nodes → DCT → emit `Constants<DoubleDouble>::_C`, with a drift gate
 > vs the oracle *for validation only*) or fall back to **Option C** (declare the table a
 > library-author pre-condition). **Do not vendor a primitive support header.**
 
@@ -647,7 +647,7 @@ The exact surface the extended Gap-A machinery would emit + the source coefficie
 is sufficient to compile and run the clone. **No vendored qcdloop-specific primitive header.**
 
 **(P3) `probe_constants_dd.cpp` (v2) — the double-primary source-instantiation proof.**
-Instantiates `ql::Constants<ddouble>` from the *double* primary (`kokkosMaths.h`):
+Instantiates `ql::Constants<DoubleDouble>` from the *double* primary (`kokkosMaths.h`):
 
 ```
 num_C=19  sum_C.hi=0.8224670334241132  sum_C.lo=-4.971e-17
@@ -670,7 +670,7 @@ Under v3 the 43-coeff table drives the truncation floor to ~1e-35 (P5's `C[42]`)
 ~1e-32 arithmetic floor, so the P4 "band" no longer governs. Retained for the trail.
 
 **(P5) `probe_constants_dd43.cpp` (v3, NEW) — enriched-source 43-coeff dd table.**
-Instantiates `ql::Constants<ddouble>` from the enriched dd source
+Instantiates `ql::Constants<DoubleDouble>` from the enriched dd source
 (`runs/qcdloop_headers_full/kokkosMaths_dd.h`):
 
 ```
@@ -678,12 +678,12 @@ num_C = 43  (expect 43)
 C[0]  hi=0.42996693560813698   lo=-7.726e-18  bit-exact=1
 C[18] hi=-1.4226020855112447e-16 lo=4.699e-33 bit-exact=1
 C[42] hi=-1.11772e-35          lo=4.466e-52   bit-exact=1
-_pi() hi=3.1415926535897931    lo=1.225e-16   bit-exact dd_pi=1
+_pi() hi=3.1415926535897931    lo=1.225e-16   bit-exact DoubleDouble_pi=1
 sum_C(43) hi=0.8224670334241132  lo=1.520e-17
 P5 PASS: enriched source provides 43-coeff dd table
 ```
 
-`_num_C()=43`; `_C(0)/_C(18)/_C(42)` bit-exact vs the source literals; `_pi()`=`dd_pi()`
+`_num_C()=43`; `_C(0)/_C(18)/_C(42)` bit-exact vs the source literals; `_pi()`=`DoubleDouble_pi()`
 bit-exact. **Discharges STOP #E** — the source provides exactly the 43-coeff dd table the v3
 design claims, with no synthesis and no vendored primitive header.
 
@@ -797,7 +797,7 @@ are already in source).
   (Class-2 coefficient tables) from the **vendored snapshot of the library under test**
   (`runs/qcdloop_headers_full/`, including `kokkosMaths_dd.h`). It **vendors nothing
   qcdloop-specific into the app-independent primitive layer** — `third_party/include/`
-  (`quad::ddfun`) stays app-independent; the namespace shim bridges the fork's `ql::ddfun`
+  (`Kokkos::Experimental`) stays app-independent; the namespace shim bridges the fork's `ql::ddfun`
   authorship onto it. The oracle `qcdloop@ddfun_enabled` is consulted for **validation
   drift only**, never for generation — with the single, documented exception of the one
   header the snapshot now vendors verbatim as source input (`kokkosMaths_dd.h`, commit

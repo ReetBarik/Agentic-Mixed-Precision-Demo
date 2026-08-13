@@ -89,7 +89,7 @@ def test_gapa_user_message_lists_qualified_call(tmp_path):
 
 
 def test_gapa_missing_bridge_rejected_as_misgen(tmp_path):
-    # shim provides only ADL overloads in quad::ddfun -> no std:: bridge -> reject
+    # shim provides only ADL overloads in Kokkos::Experimental -> no std:: bridge -> reject
     bad = _CLEAN_SHIM + "namespace quad { namespace ddfun { } }\n"
     res, _ = _run_gapa(tmp_path, bad)
     assert not res.ok and res.status == "llm_failed"
@@ -102,7 +102,7 @@ def test_gapa_missing_bridge_rejected_as_misgen(tmp_path):
 def test_gapa_with_bridge_accepted(tmp_path):
     good = _CLEAN_SHIM + (
         "namespace std {\n"
-        "  quad::ddfun::ddouble sqrt(quad::ddfun::ddouble x){ return quad::ddfun::sqrt(x); }\n"
+        "  Kokkos::Experimental::DoubleDouble sqrt(Kokkos::Experimental::DoubleDouble x){ return Kokkos::Experimental::sqrt(x); }\n"
         "}\n")
     res, _ = _run_gapa(tmp_path, good)
     assert res.ok, res.error
@@ -136,8 +136,8 @@ def test_gapb_user_message_carries_derived_constant(tmp_path):
     assert "## Source-derivable constants (Rule R3, step 3)" in user
     assert "MY_TINY" in user
     assert "1e-40" in user
-    # the derived value is a real make_dd pair with a zero low word (source literal)
-    assert "quad::ddfun::make_dd(0x" in user
+    # the derived value is a real DoubleDouble::from_bits pair with a zero low word (source literal)
+    assert "Kokkos::Experimental::DoubleDouble::from_bits(0x" in user
     assert "0x0000000000000000ULL" in user
 
 
@@ -188,16 +188,16 @@ _SHIM_ONE = (
     "#pragma once\n// SOURCE_HASH: PENDING\n#include <dd_math.hpp>\n"
     "namespace ql {\n"
     "template <class T> struct Constants;\n"
-    "template <>\nstruct Constants< ::quad::ddfun::ddouble > {\n"
-    "    static inline ::quad::ddfun::ddouble _one() { return ::quad::ddfun::ddouble(1.0); }\n"
+    "template <>\nstruct Constants< ::Kokkos::Experimental::DoubleDouble > {\n"
+    "    static inline ::Kokkos::Experimental::DoubleDouble _one() { return ::Kokkos::Experimental::DoubleDouble(1.0); }\n"
     "};\n} // namespace ql\n"
 )
 _SHIM_TWO = (
     "#pragma once\n// SOURCE_HASH: PENDING\n#include <dd_math.hpp>\n"
     "namespace ql {\n"
     "template <class T> struct Constants;\n"
-    "template <>\nstruct Constants<quad::ddfun::ddouble> {\n"   # no leading :: — same type
-    "    static inline ::quad::ddfun::ddouble _two() { return ::quad::ddfun::ddouble(2.0); }\n"
+    "template <>\nstruct Constants<Kokkos::Experimental::DoubleDouble> {\n"   # no leading :: — same type
+    "    static inline ::Kokkos::Experimental::DoubleDouble _two() { return ::Kokkos::Experimental::DoubleDouble(2.0); }\n"
     "};\n} // namespace ql\n"
 )
 
@@ -213,7 +213,7 @@ def test_two_regions_merge_into_one_canonical_dd_shim(tmp_path):
                              **common)
     assert ra.ok, ra.error
     # Region B lands against the tree carrying A's canonical shim → must MERGE, not
-    # emit a second Constants<ddouble> (the WAVE3 collision).
+    # emit a second Constants<DoubleDouble> (the WAVE3 collision).
     rb = dd.integrate_region(line_start=6, line_end=6, llm_fn=_CapturingLLM(_SHIM_TWO),
                              **common)
     assert rb.ok, rb.error
@@ -221,7 +221,7 @@ def test_two_regions_merge_into_one_canonical_dd_shim(tmp_path):
     canonical = (root / "ql_shim_dd.h").read_text()
     # exactly ONE specialization, both members present (::-agnostic count)
     assert re.sub(r"\s+", "", canonical).replace("::", "").count(
-        "structConstants<quad::ddfun::ddouble>".replace("::", "")) == 1
+        "structConstants<Kokkos::Experimental::DoubleDouble>".replace("::", "")) == 1
     assert canonical.count("_one()") == 1
     assert canonical.count("_two()") == 1
     # no per-region shim leaked into the tree; both boundaries include the canonical
@@ -240,16 +240,16 @@ def test_derive_region_constants_composite_complex_legacy_literals():
 
 def test_derive_region_constants_assembles_full_complex_value():
     # Wave 2: with the complex type, the imaginary iε regulator is derived WHOLE —
-    # a ready-made ddcomplex(re, im) the model uses verbatim (no collapse to real).
+    # a ready-made DoubleDoubleComplex(re, im) the model uses verbatim (no collapse to real).
     got = regional.derive_region_constants(
-        _IEPS50_REGION, _IEPS50_SOURCES, "dd", "quad::ddfun::ddcomplex")
+        _IEPS50_REGION, _IEPS50_SOURCES, "dd", "Kokkos::Experimental::DoubleDoubleComplex")
     entry = next(c for c in got if c["name"] == "_ieps50")
     assert entry["how"] == "complex"
     assert entry["literals"] == []          # not the fallback literals hint
     assert entry["expr"] == (
-        "quad::ddfun::ddcomplex("
-        "quad::ddfun::make_dd(0x0000000000000000ULL, 0x0000000000000000ULL), "
-        "quad::ddfun::make_dd(0x358dee7a4ad4b81fULL, 0x0000000000000000ULL))"
+        "Kokkos::Experimental::DoubleDoubleComplex("
+        "Kokkos::Experimental::DoubleDouble::from_bits(0x0000000000000000ULL, 0x0000000000000000ULL), "
+        "Kokkos::Experimental::DoubleDouble::from_bits(0x358dee7a4ad4b81fULL, 0x0000000000000000ULL))"
     )
 
 
@@ -275,7 +275,7 @@ def test_dd_integrate_region_hint_carries_full_complex_value(tmp_path):
         working_tree=sha, out_dir=tmp_path / "shims", repo_path=str(root), llm_fn=llm,
     )
     user = llm.calls[0][1]
-    assert "quad::ddfun::ddcomplex(" in user
+    assert "Kokkos::Experimental::DoubleDoubleComplex(" in user
     assert "0x358dee7a4ad4b81fULL" in user           # imaginary limb = 1e-50
     assert "COMPLEX container" in user                # the preserve-imaginary note
     assert "do NOT collapse it to a real scalar" in user

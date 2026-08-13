@@ -4,7 +4,7 @@ companion to the regional integrators' Rule R3 constant cascade.
 Motivation
 ----------
 A regional ff/dd shim must materialize any named constant the promoted region
-reads as a *two-limb* ``make_dd(0x<hi>, 0x<lo>)`` / ``make_ff(0x<hi>, 0x<lo>)``
+reads as a *two-limb* ``DoubleDouble::from_bits(0x<hi>, 0x<lo>)`` / ``FloatFloat::from_bits(0x<hi>, 0x<lo>)``
 pair — a decimal literal truncates the low word (Rule R3).  The original R3 gave
 the model only two ways to get those bits: a vendored ``dd_*()`` / ``ff_*()``
 factory, or a hex pair it already knew.  Everything else fell through to the
@@ -17,7 +17,7 @@ box region, because the model had no vendored factory and no memorized hex pair 
 and when it *guessed*, it guessed wrong (a spurious low word, and even a wrong hi
 word).  But the constant's faithful extended value is not a mystery: a source
 ``double`` literal carries **exactly** double precision by construction, so its
-honest double-double promotion is ``make_dd(<bits of the double>, 0x0)`` — there
+honest double-double promotion is ``DoubleDouble::from_bits(<bits of the double>, 0x0)`` — there
 is no hidden low word to recover.  This module computes those bits deterministically.
 
 What it does
@@ -40,8 +40,8 @@ Two capabilities, both framework-agnostic (no app symbols anywhere):
 :func:`resolve_constant_rhs` walks scan-reachable source to the *definition* of a
 named constant and returns its right-hand side text; :func:`derive_from_rhs`
 classifies that RHS through the cascade (literal → catalog closed-form → give up).
-The regional engine uses these to hand the model ready-made ``make_dd(...)`` /
-``make_ff(...)`` values so a derivable constant never reaches R4.
+The regional engine uses these to hand the model ready-made ``DoubleDouble::from_bits(...)`` /
+``FloatFloat::from_bits(...)`` values so a derivable constant never reaches R4.
 
 Nothing here is qcdloop-specific: the catalog holds only standard mathematical
 values, and the source walk reads generic C++ ``constexpr`` / ``const`` /
@@ -189,7 +189,7 @@ def dd_bits_from_double(x: float) -> tuple[int, int]:
     """(hi, lo) bits for a value that is *already a double literal* — lo is 0.
 
     A source ``double`` literal has no precision below the double it denotes, so
-    its faithful double-double promotion is ``make_dd(bits(x), 0x0)``.  This is
+    its faithful double-double promotion is ``DoubleDouble::from_bits(bits(x), 0x0)``.  This is
     the point of Gap B: do NOT invent a low word for a source literal.
     """
     return _f64_bits(x), 0
@@ -221,22 +221,22 @@ KNOWN_CONSTANTS: dict[str, dict[str, tuple[int, int]]] = {
 class Derivation:
     """A derived extended-precision constant value ready to paste into a shim.
 
-    ``expr`` is the ``make_dd(...)`` / ``make_ff(...)`` call; ``how`` records which
+    ``expr`` is the ``DoubleDouble::from_bits(...)`` / ``FloatFloat::from_bits(...)`` call; ``how`` records which
     cascade step produced it (for the rule-justification comment and telemetry).
     """
 
     name: str            # source identifier the constant is read by
     scalar: str          # "dd" | "ff"
-    expr: str            # e.g. "quad::ddfun::make_dd(0x358dee7a4ad4b81fULL, 0x0ULL)"
+    expr: str            # e.g. "Kokkos::Experimental::DoubleDouble::from_bits(0x358dee7a4ad4b81fULL, 0x0ULL)"
     how: str             # "literal" | "catalog:pi" | ...
     rhs: str = ""        # the source RHS the derivation came from (provenance)
 
 
 def _make_call(scalar: str, hi: int, lo: int) -> str:
     if scalar == "dd":
-        return f"quad::ddfun::make_dd(0x{hi:016x}ULL, 0x{lo:016x}ULL)"
+        return f"Kokkos::Experimental::DoubleDouble::from_bits(0x{hi:016x}ULL, 0x{lo:016x}ULL)"
     if scalar == "ff":
-        return f"quad::ffun::make_ff(0x{hi:08x}U, 0x{lo:08x}U)"
+        return f"Kokkos::Experimental::FloatFloat::from_bits(0x{hi:08x}U, 0x{lo:08x}U)"
     raise ValueError(f"unknown scalar {scalar!r} (expected 'dd' or 'ff')")
 
 
@@ -548,7 +548,7 @@ def derive_from_rhs(name: str, rhs: str, scalar: str,
 # ``_2ipi`` / ``_ipi`` / ``_ipio2``.  The earlier cascade surfaced only the bare
 # scalar literal (``1e-50``) as a "composite" hint and left the model to assemble
 # the container itself — which it botched, collapsing ``{0, 1e-50}`` to a *real*
-# ``ddouble(1e-50)`` (dropping the imaginary axis the iε prescription lives on) or
+# ``DoubleDouble(1e-50)`` (dropping the imaginary axis the iε prescription lives on) or
 # returning the wrong container type.  This derives BOTH limbs of the container so
 # the engine can hand the model the complete complex value.
 
@@ -558,7 +558,7 @@ class ComplexDerivation:
     """A derived complex-container constant: the two component ``make_*`` exprs.
 
     ``real``/``imag`` are the derived scalar component expressions (a
-    ``make_dd(...)`` / ``make_ff(...)`` call each); the regional engine wraps them
+    ``DoubleDouble::from_bits(...)`` / ``FloatFloat::from_bits(...)`` call each); the regional engine wraps them
     in the concrete complex type spelling it owns.  ``how`` records the component
     provenance for the rule-justification comment.
     """
@@ -598,7 +598,7 @@ _ACCESSOR_CALL_RE = re.compile(r"(?:::\s*)?(?:template\s+)?([A-Za-z_]\w*)\s*\(")
 
 def _derive_component(text: str, scalar: str, sources: list[str],
                       depth: int = 0) -> str | None:
-    """Derive one container component to a ``make_dd``/``make_ff`` expr.
+    """Derive one container component to a ``DoubleDouble::from_bits``/``FloatFloat::from_bits`` expr.
 
     Handles a literal / cast-wrapped literal / catalog constant directly, and a
     named accessor (``Constants<T>::_zero()``) by resolving its own source RHS and

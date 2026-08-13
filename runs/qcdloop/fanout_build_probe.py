@@ -74,7 +74,7 @@ def main() -> int:
     res = mod.integrate_region(
         file=rel, line_start=args.line, line_end=args.line, variables=[],
         working_tree=sha, repo_path=str(tree),
-        scalar_type={"ff": "ffloat", "dd": "ddouble", "float": "float"}[args.which],
+        scalar_type={"ff": "FloatFloat", "dd": "DoubleDouble", "float": "float"}[args.which],
         caller_type="double", direction="in", out_dir=out / "shims", attempt=0,
         cfg=PipelineConfig())
     print(f"[probe] integrator ok={res.ok} tokens={res.llm_tokens} "

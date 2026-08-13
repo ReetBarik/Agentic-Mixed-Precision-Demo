@@ -54,7 +54,7 @@ class _CannedLLM:
             "// SOURCE_HASH: PENDING\n"
             "#include <dd_math.hpp>\n"
             "#include <dd_complex.hpp>\n"
-            "// Rule 2: region computes in ddouble; vendored ops suffice\n"
+            "// Rule 2: region computes in DoubleDouble; vendored ops suffice\n"
         )
 
 
@@ -84,8 +84,8 @@ def test_generates_dd_shim_and_boundary(repo, tmp_path):
     assert '#include "ql_shim_dd.h"' in res.boundary_patch
 
     patch = res.boundary_patch
-    assert "quad::ddfun::ddouble a__ff = quad::ddfun::ddouble(a);" in patch
-    assert "quad::ddfun::ddouble r__ext = a__ff * b__ff;" in patch
+    assert "Kokkos::Experimental::DoubleDouble a__ff = Kokkos::Experimental::DoubleDouble(a);" in patch
+    assert "Kokkos::Experimental::DoubleDouble r__ext = a__ff * b__ff;" in patch
     assert "double r = static_cast<double>(r__ext.hi) + static_cast<double>(r__ext.lo);" in patch
 
 
@@ -93,9 +93,9 @@ def test_user_message_carries_hex_constant_note(repo, tmp_path):
     llm = _CannedLLM()
     _call(repo, tmp_path / "shims", llm)
     user = llm.calls[0][1]
-    assert "make_dd(0x" in user
-    assert "quad::ddfun::ddouble" in user
-    assert "quad::ddfun::ddcomplex" in user
+    assert "DoubleDouble::from_bits(0x" in user
+    assert "Kokkos::Experimental::DoubleDouble" in user
+    assert "Kokkos::Experimental::DoubleDoubleComplex" in user
 
 
 def test_cache_hit_skips_llm(repo, tmp_path):
@@ -117,7 +117,7 @@ def test_retry_bypasses_cache(repo, tmp_path):
 
 def test_ruleset_forbids_decimal_constants():
     # The DD ruleset must codify the hex-encoding requirement (Rule R3).
-    assert "make_dd(0x" in dd._SYSTEM_PROMPT
+    assert "DoubleDouble::from_bits(0x" in dd._SYSTEM_PROMPT
     assert "decimal literal" in dd._SYSTEM_PROMPT
 
 
@@ -142,7 +142,7 @@ class _BadIncludeLLM:
             "#include <dd_math.hpp>\n"
             "#include <dd_complex.hpp>\n"
             '#include "ql/constants.h"\n'   # <-- forbidden app-source header
-            "// Rule 5: Constants<ddouble> specialization\n"
+            "// Rule 5: Constants<DoubleDouble> specialization\n"
         )
 
 
@@ -193,7 +193,7 @@ def test_real_llm_generates_parseable_dd_shim(repo, tmp_path):
     shim = Path(res.shim_paths[0]).read_text()
     assert "#pragma once" in shim
     assert "dd_math.hpp" in shim
-    assert res.boundary_patch and "quad::ddfun::ddouble" in res.boundary_patch
+    assert res.boundary_patch and "Kokkos::Experimental::DoubleDouble" in res.boundary_patch
     assert res.llm_tokens > 0
 
 

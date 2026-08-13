@@ -3,15 +3,15 @@
 Peer of :mod:`agents.dd_integrator`.  A cancellation-cascade *chain* is widened to
 double-double as a coordinated envelope by :mod:`agents.patcher.chain_promote`; that
 deterministic core inserts the variants, reroutes, and boundary casts.  This agent
-supplies the LLM half — the per-region ddouble shim (types, operators, named
+supplies the LLM half — the per-region DoubleDouble shim (types, operators, named
 constants) each chain link needs to compile — exactly as ``dd_integrator`` does for a
 lone region, but under a ruleset carrying the extra **C9 (chain-boundary
 coordination)** rule: a value a link produces that is read by the next link stays
-ddouble (chain-internal contract), and only the chain's outermost read/write converts
+DoubleDouble (chain-internal contract), and only the chain's outermost read/write converts
 to caller precision (chain-boundary contract, owned by the boundary patch).
 
 Because the target is the same vendored double-double type as ``dd_integrator``
-(``quad::ddfun::ddouble`` / ``ddcomplex`` from ``third_party/include/``), the shim
+(``Kokkos::Experimental::DoubleDouble`` / ``DoubleDoubleComplex`` from ``third_party/include/``), the shim
 merges into the SAME canonical per-family header ``ql_shim_dd.h`` (``shim_prefix="dd"``).
 The C9-augmented system prompt gives this integrator its own SOURCE_HASH silo, so a
 chain link's shim is cached independently of a lone dd region's — both coexist in
@@ -36,8 +36,8 @@ _SYSTEM_PROMPT = (Path(__file__).parent / "system_prompt.txt").read_text(encodin
 
 _SPEC = regional.RegionalSpec(
     system_prompt=_SYSTEM_PROMPT,
-    cpp_scalar="quad::ddfun::ddouble",
-    cpp_complex="quad::ddfun::ddcomplex",
+    cpp_scalar="Kokkos::Experimental::DoubleDouble",
+    cpp_complex="Kokkos::Experimental::DoubleDoubleComplex",
     vendored_headers=["dd_math.hpp", "dd_complex.hpp"],
     shim_prefix="dd",                 # merge into the shared ql_shim_dd.h
     constant_note=(
@@ -45,27 +45,27 @@ _SPEC = regional.RegionalSpec(
         "Any double-double constant this region needs MUST be materialized at full "
         "precision — never as a decimal literal (it truncates the low word). Resolve "
         "each via the Rule R3 cascade IN ORDER: (1) a vendored `dd_*()` free function; "
-        "(2) a known `make_dd(0x<hi>ULL, 0x<lo>ULL)` hex pair; (3) derive from the "
+        "(2) a known `DoubleDouble::from_bits(0x<hi>ULL, 0x<lo>ULL)` hex pair; (3) derive from the "
         "constant's own source definition — a source `double` literal (e.g. "
-        "`TScale(1e-50)`) promotes to `make_dd(<bits of that double>, 0x0)` with a ZERO "
+        "`TScale(1e-50)`) promotes to `DoubleDouble::from_bits(<bits of that double>, 0x0)` with a ZERO "
         "low word (correct — a source literal has only double precision), and a "
         "closed form over catalog constants composes from their known pairs; "
         "(4) only if none apply, the Rule R4 #error. Any values pre-derived for you "
         "appear under 'Source-derivable constants' — use them verbatim.\n"
         "## Chain-boundary contract (C9)\n"
         "This region is one link of a promoted chain: values it produces that are read "
-        "by another link stay ddouble (do not truncate at the region exit); only the "
+        "by another link stay DoubleDouble (do not truncate at the region exit); only the "
         "chain's outermost read/write converts to caller precision (the boundary patch "
         "does that). Any overload you supply for a function that is itself on the chain "
-        "MUST return ddouble, never a value narrowed to double.\n"
+        "MUST return DoubleDouble, never a value narrowed to double.\n"
         "## Carrier-widening invariant (C10)\n"
         "A carrier variable — declared outside the chain's line set but written by one "
-        "chain link and read by another — is widened to ddouble at its declaration by "
-        "the boundary/emission layer. Treat such a variable as ddouble end-to-end: "
+        "chain link and read by another — is widened to DoubleDouble at its declaration by "
+        "the boundary/emission layer. Treat such a variable as DoubleDouble end-to-end: "
         "never re-narrow it to double at an assignment or overload return. A value one "
-        "link produces and a later link consumes stays ddouble across the whole chain, "
+        "link produces and a later link consumes stays DoubleDouble across the whole chain, "
         "so any overload/operator that assigns to or returns through a carrier must "
-        "produce ddouble, or the widened storage truncates at the write and undoes the "
+        "produce DoubleDouble, or the widened storage truncates at the write and undoes the "
         "carrier fix."
     ),
 )
@@ -92,7 +92,7 @@ def integrate_region(
     line_end: int,
     variables: list[str],
     working_tree: str,
-    scalar_type: str = "ddouble",
+    scalar_type: str = "DoubleDouble",
     caller_type: str = "double",
     direction: str = "in",
     out_dir: Path,
@@ -101,12 +101,12 @@ def integrate_region(
     cfg=None,
     llm_fn=None,
 ) -> RegionIntegrationResult:
-    """Generate the ddouble shim for one chain-link region (P7 / C9).
+    """Generate the DoubleDouble shim for one chain-link region (P7 / C9).
 
     Signature mirrors ``dd_integrator.integrate_region`` exactly; the only difference
     is the C9-augmented ruleset carried on :data:`_SPEC`.  Thin wrapper over the shared
     engine :func:`agents.integrator_base.regional.run_integrate_region` — reads the
-    region at ``working_tree``, recovers writes, LLM-generates a ddouble shim
+    region at ``working_tree``, recovers writes, LLM-generates a DoubleDouble shim
     (SOURCE_HASH-cached, ``attempt``-varied), and pairs it with a deterministic
     boundary patch.  Returns the shared :class:`RegionIntegrationResult`; never raises
     past the seam.

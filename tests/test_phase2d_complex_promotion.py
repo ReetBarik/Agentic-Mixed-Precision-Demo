@@ -65,7 +65,7 @@ def test_resolve_bindings_picks_vanilla(tmp_path):
 def test_resolve_bindings_picks_dd_for_dd_caller(tmp_path):
     roots = _write_app(tmp_path)
     b = type_resolve.resolve_bindings(roots, caller_type="ql::ddfun::ddouble")
-    # the dd caller selects the dd instantiation (its scalar args are ddouble)
+    # the dd caller selects the dd instantiation (its scalar args are DoubleDouble)
     assert b["TMass"] == "ql::ddfun::ddouble"
 
 
@@ -113,8 +113,8 @@ def test_name_core_types():
 # boundary — complex promotion
 # --------------------------------------------------------------------------- #
 
-FF = "quad::ffun::ffloat"
-FFC = "quad::ffun::ffcomplex"
+FF = "Kokkos::Experimental::FloatFloat"
+FFC = "Kokkos::Experimental::FloatFloatComplex"
 TOK = frozenset({"TOutput", "complex"})
 
 
@@ -135,7 +135,7 @@ def test_complex_decl_promotes_to_container():
     # exit reconstructs the caller complex from the two limbs of each component
     assert "TOutput fac = TOutput(static_cast<double>(fac__ext.re.hi)" in text
     assert "fac__ext.im.hi" in text
-    # NEVER a scalar cast on a complex, NEVER Kokkos::complex<ffloat>
+    # NEVER a scalar cast on a complex, NEVER Kokkos::complex<FloatFloat>
     assert f"{FF}(TOutput" not in text
     assert f"complex<{FF}" not in text and f"complex< {FF}" not in text
 
@@ -324,14 +324,14 @@ def test_dedup_inline():
 # --------------------------------------------------------------------------- #
 
 def test_complex_antipattern_lint_flags_extended():
-    bad = "Kokkos::complex<quad::ffun::ffloat> z;"
+    bad = "Kokkos::complex<Kokkos::Experimental::FloatFloat> z;"
     assert _lint_complex_antipattern(bad, FF) is not None
-    bad_dd = "std::complex<quad::ddfun::ddouble> z;"
-    assert _lint_complex_antipattern(bad_dd, "quad::ddfun::ddouble") is not None
+    bad_dd = "std::complex<Kokkos::Experimental::DoubleDouble> z;"
+    assert _lint_complex_antipattern(bad_dd, "Kokkos::Experimental::DoubleDouble") is not None
 
 
 def test_complex_antipattern_lint_allows_ffcomplex_and_float():
-    assert _lint_complex_antipattern("quad::ffun::ffcomplex z;", FF) is None
+    assert _lint_complex_antipattern("Kokkos::Experimental::FloatFloatComplex z;", FF) is None
     # float rung: Kokkos::complex<float> is legal and must NOT be flagged
     assert _lint_complex_antipattern("Kokkos::complex<float> z;", "float") is None
 

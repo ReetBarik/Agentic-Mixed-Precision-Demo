@@ -34,11 +34,11 @@ from run_strategy_e2e import _build_headers_repo  # noqa: E402
 
 # (file, line, 10k_failure_class, prediction)
 REGIONS = [
-    ("box/B1m.h", 63,  "collision (redefinition Constants<ddouble>)", "ACCEPT (structural, not intrinsic)"),
-    ("box/B2m.h", 84,  "collision (redefinition Constants<ddouble>)", "ACCEPT (structural, not intrinsic)"),
+    ("box/B1m.h", 63,  "collision (redefinition Constants<DoubleDouble>)", "ACCEPT (structural, not intrinsic)"),
+    ("box/B2m.h", 84,  "collision (redefinition Constants<DoubleDouble>)", "ACCEPT (structural, not intrinsic)"),
     ("box/B1m.h", 62,  "codegen defect (duplicate 'inline')",          "?? tests postprocess/prompt"),
     ("box/B4m.h", 184, "R4 escape (ql::cLn manual classification)",    "REPRODUCE (intrinsic transcendental)"),
-    ("box/B3m.h", 105, "template-id mismatch (Real<ddouble>)",         "?? intrinsic ADL-bridge"),
+    ("box/B3m.h", 105, "template-id mismatch (Real<DoubleDouble>)",         "?? intrinsic ADL-bridge"),
 ]
 
 

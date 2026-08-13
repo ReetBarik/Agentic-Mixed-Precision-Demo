@@ -201,7 +201,7 @@ def _gen_regional(intent: RemediationIntent, deps: PatchDeps, attempt: int) -> G
     # target routed here only when Strategy tagged the intent ``via="regional"``
     # (a template-typed region — dispatch_path made that call); ff/dd are the
     # extended promotion/demotion targets.
-    scalar = {"ff": "ffloat", "dd": "ddouble"}.get(to, "float")
+    scalar = {"ff": "FloatFloat", "dd": "DoubleDouble"}.get(to, "float")
     which = {"ff": "ff", "dd": "dd"}.get(to, "float")
     # Caller precision to demote/widen region writes back to on exit.  Only
     # float-to-ff promotes from float; every other regional transition converts
@@ -304,8 +304,8 @@ def _precision_cpp(which: str) -> tuple[str, bool, str]:
     """Concrete C++ scalar spelling + two-limb flag + complex spelling for ``which``.
 
     Read from the integrator ``SPEC`` objects so type spellings have one source of
-    truth (no duplication of ``quad::ffun::ffloat`` etc. in the Patcher).  The complex
-    spelling (``quad::ffun::ffcomplex`` / ``quad::ddfun::ddcomplex`` /
+    truth (no duplication of ``Kokkos::Experimental::FloatFloat`` etc. in the Patcher).  The complex
+    spelling (``Kokkos::Experimental::FloatFloatComplex`` / ``Kokkos::Experimental::DoubleDoubleComplex`` /
     ``Kokkos::complex<float>``) drives the Phase-2d complex-container promotion."""
     from agents.chain_integrator.agent import SPEC as _CH
     from agents.dd_integrator.agent import SPEC as _DD
@@ -330,7 +330,7 @@ def _gen_regional_fanout(intent: RemediationIntent, deps: PatchDeps, attempt: in
     from agents.shared.region_scan import extract_region_writes
 
     to = intent.kind.split("-to-")[-1]
-    scalar = {"ff": "ffloat", "dd": "ddouble"}.get(to, "float")
+    scalar = {"ff": "FloatFloat", "dd": "DoubleDouble"}.get(to, "float")
     which = {"ff": "ff", "dd": "dd"}.get(to, "float")
     caller_type = "float" if intent.kind == "float-to-ff" else "double"
     integrator = deps.integrators.get(which)
@@ -446,7 +446,7 @@ def _gen_regional_fanout(intent: RemediationIntent, deps: PatchDeps, attempt: in
 def _gen_chain(intent: RemediationIntent, deps: PatchDeps, attempt: int) -> Gen:
     """Realize a chain-scoped dd promotion as a coordinated multi-region envelope.
 
-    Generates a ddouble shim for EACH chain region via the chain integrator (all
+    Generates a DoubleDouble shim for EACH chain region via the chain integrator (all
     merge into the one ``ql_shim_dd.h``), then hands the whole ``chain_lines`` set to
     :func:`agents.patcher.chain_promote.chain_promote`, which splices per-integral
     variants + reroutes the chain-internal calls bottom-up.  The chain-scope 2c/2d
@@ -462,7 +462,7 @@ def _gen_chain(intent: RemediationIntent, deps: PatchDeps, attempt: int) -> Gen:
     if fanout is None:
         return Gen(False, R.LLM_GEN_FAILED, R.ERR_INTEGRATOR,
                    "chain path requires fan-out settings (entry_point / integral)")
-    # Prefer the chain integrator; fall back to the dd integrator (same ddouble target).
+    # Prefer the chain integrator; fall back to the dd integrator (same DoubleDouble target).
     integrator = deps.integrators.get("chain_dd") or deps.integrators.get("dd")
     if integrator is None:
         return Gen(False, R.LLM_GEN_FAILED, R.ERR_INTEGRATOR,
@@ -483,7 +483,7 @@ def _gen_chain(intent: RemediationIntent, deps: PatchDeps, attempt: int) -> Gen:
     shim_include = "ql_shim_dd.h"                 # regional.canonical_shim_name(dd)
     app_roots = list(getattr(fanout, "app_source_roots", []) or [])
 
-    # 1. Generate a ddouble shim for each chain region (LLM, retryable); the boundary
+    # 1. Generate a DoubleDouble shim for each chain region (LLM, retryable); the boundary
     #    patches are ignored — chain_promote splices the promotion into variant copies.
     total_tokens = 0
     all_shims: list[str] = []
@@ -503,7 +503,7 @@ def _gen_chain(intent: RemediationIntent, deps: PatchDeps, attempt: int) -> Gen:
             res: RegionIntegrationResult = integrator(
                 file=rel_file, line_start=cls, line_end=cle, variables=[],
                 working_tree=deps.parent_sha, repo_path=str(deps.repo_root),
-                scalar_type="ddouble", caller_type="double", direction="in",
+                scalar_type="DoubleDouble", caller_type="double", direction="in",
                 out_dir=deps.shims_dir, attempt=attempt)
         except NotImplementedError as exc:
             return Gen(False, R.LLM_GEN_FAILED, R.ERR_INTEGRATOR, str(exc))

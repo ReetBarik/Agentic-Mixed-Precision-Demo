@@ -154,7 +154,7 @@ def region_reads_from_function(func_source: str, func_line_start: int,
 
     # Phase 2d (d1): names used as an array subscript BASE anywhere in the region
     # (``name[``) are aggregates/pointers, not promotable scalars — promoting one
-    # yields ``ffloat[int]`` / ``operator[](ffloat,int)`` build failures (the
+    # yields ``FloatFloat[int]`` / ``operator[](FloatFloat,int)`` build failures (the
     # xpi_in-style Kokkos::Array reads).  Exclude them from the derived reads.
     subscripted = _subscripted_names(toks, rs, re_)
 
@@ -254,7 +254,7 @@ def region_complex_read_names(func_source: str, complex_tokens) -> set[str]:
     """Names (params or body locals) declared with a complex-container type.
 
     Phase 2d: the boundary transform promotes a complex-typed read to the extended
-    *complex* container (``ffcomplex`` / ``ddcomplex``) rather than the scalar.  A read
+    *complex* container (``FloatFloatComplex`` / ``DoubleDoubleComplex``) rather than the scalar.  A read
     is complex when its core declared type token is in ``complex_tokens`` — the
     complex-bound template-parameter names (``TOutput``) plus the literal ``complex``
     (from :func:`agents.shared.type_resolve.complex_type_tokens`).  Pure token scan
@@ -278,9 +278,9 @@ def region_element_bases(func_source: str, complex_tokens) -> dict[str, str]:
     Region-core element promotion (design ``REGION_CORE_ELEMENT_PROMOTION_DESIGN.md``).
     The d1 guard in :func:`region_reads_from_function` (lines 155-170) deliberately
     drops any array-subscript base ``cxs[k]`` from the promotable reads — promoting the
-    *whole array* yields ``ffloat[int]`` build failures.  That leaves a promoted dd
+    *whole array* yields ``FloatFloat[int]`` build failures.  That leaves a promoted dd
     operand multiplied by an un-promoted ``cxs[k]`` (a ``Kokkos::complex<double>``),
-    forming an illegal ``Kokkos::complex<ddcomplex>`` (STOP #CC).
+    forming an illegal ``Kokkos::complex<DoubleDoubleComplex>`` (STOP #CC).
 
     The fix promotes the element *occurrence* (never the array decl); this returns the
     base names it may fire on — the fixed-size complex aggregates declared anywhere in

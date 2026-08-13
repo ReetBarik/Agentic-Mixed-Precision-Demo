@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from agents.integrator_base import boundary
 
-_SCALAR = "quad::ffun::ffloat"
+_SCALAR = "Kokkos::Experimental::FloatFloat"
 
 
 def _apply(file_text: str, diff: str) -> str:
@@ -390,7 +390,7 @@ def test_integer_local_not_promoted():
 # and a carrier write counts as a landing for the no-op guard.
 # --------------------------------------------------------------------------- #
 
-_DD = "quad::ddfun::ddouble"
+_DD = "Kokkos::Experimental::DoubleDouble"
 
 
 def test_carrier_write_only_region_is_not_a_no_op():

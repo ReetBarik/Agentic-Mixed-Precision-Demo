@@ -3,7 +3,7 @@
 Sibling of :mod:`agents.ff_integrator` and :mod:`agents.dd_integrator`, and the
 first extension of the regional integrator ruleset to a NEW target type since ff
 and dd.  Where the ff/dd integrators *promote* a hot region to a foreign extended
-scalar (``quad::ffun::ffloat`` / ``quad::ddfun::ddouble``) to recover precision,
+scalar (``Kokkos::Experimental::FloatFloat`` / ``Kokkos::Experimental::DoubleDouble``) to recover precision,
 the float integrator *demotes* the region to the native builtin ``float`` for
 speedup — fewer bytes moved, wider SIMD, faster transcendentals — leaving the rest
 of the app at ``double``.

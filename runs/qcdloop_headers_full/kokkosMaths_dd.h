@@ -15,14 +15,39 @@
 #include "dd_math.hpp"
 #include "dd_complex.hpp"
 
-// Namespace shim (Agentic pipeline vendored snapshot, 2026-07-26).
+// Namespace shim (Agentic pipeline vendored snapshot; headers refreshed from
+// ReetBarik/kokkos-extended-precision-demo@5ae2f80, 2026-08-09).
 // The upstream ReetBarik/qcdloop@ddfun_enabled fork authored the dd primitives
-// under `ql::ddfun`. The Agentic repo vendors the same primitives under
-// `quad::ddfun` (see third_party/include/dd_math.hpp,
-// ReetBarik/kokkos-extended-precision-demo@ddfunKokkos commit 8e34425f).
-// Alias `ql::ddfun` to `quad::ddfun` so this header — copied verbatim from the
-// fork — resolves against the vendored surface unchanged.
-namespace ql { namespace ddfun = ::quad::ddfun; }
+// under `ql::ddfun`. The Agentic repo vendors the same primitives, which now
+// live under `Kokkos::Experimental` with the types renamed to DoubleDouble /
+// DoubleDoubleComplex and the free make_dd() replaced by the static factory
+// DoubleDouble::from_bits() (see third_party/include/dd_math.hpp).
+//
+// This is a real namespace, NOT `namespace ddfun = ::Kokkos::Experimental;`:
+// a namespace alias cannot host using-declarations or the two compatibility
+// wrappers below, and this header — copied verbatim from the fork — calls
+// ql::ddfun::make_dd (68 sites) and ql::ddfun::dd_pi, neither of which
+// upstream still spells that way. Keeping the old names here is what lets
+// every ql:: call site in the fork's headers and sources compile unchanged.
+//
+// The using-directive re-exposes the free functions the fork reaches through
+// this namespace (abs, log, sqrt, conj, …): qualified lookup in a namespace
+// also searches the namespaces nominated by its using-directives.
+namespace ql {
+namespace ddfun {
+
+using namespace ::Kokkos::Experimental;
+
+using ddouble   = ::Kokkos::Experimental::DoubleDouble;
+using ddcomplex = ::Kokkos::Experimental::DoubleDoubleComplex;
+
+KOKKOS_INLINE_FUNCTION ddouble make_dd(uint64_t hi_bits, uint64_t lo_bits) {
+    return ::Kokkos::Experimental::DoubleDouble::from_bits(hi_bits, lo_bits);
+}
+KOKKOS_INLINE_FUNCTION ddouble dd_pi() { return ::Kokkos::Experimental::DoubleDouble_pi(); }
+
+}  // namespace ddfun
+}  // namespace ql
 
 namespace ql
 {

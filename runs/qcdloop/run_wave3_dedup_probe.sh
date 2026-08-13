@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # WAVE3 DEDUP pre-flight probe launcher — land two C-COLL regions sequentially so
-# the second must merge into the first's Constants<ddouble>, then build the TU.
+# the second must merge into the first's Constants<DoubleDouble>, then build the TU.
 #
 # Detached tmux (survives the controlling terminal dying):
 #     tmux new-session -d -s wave3-dedup \

@@ -31,55 +31,55 @@ _B14_LOG = (_ROOT / "runs" / "qcdloop" / "tier_b_stage2_leaf_promotion"
 
 def test_shape1_construct():
     msg = ("no matching function for call to "
-           "‘Kokkos::complex<double>::complex(quad::ddfun::ddouble)’")
+           "‘Kokkos::complex<double>::complex(Kokkos::Experimental::DoubleDouble)’")
     assert ig.classify_error(msg) == ig.SHAPE_1_EXIT_NARROW
 
 
 def test_shape1_construct_ddcomplex():
     msg = ("no matching function for call to "
-           "‘Kokkos::complex<double>::complex(quad::ddfun::ddcomplex)’")
+           "‘Kokkos::complex<double>::complex(Kokkos::Experimental::DoubleDoubleComplex)’")
     assert ig.classify_error(msg) == ig.SHAPE_1_EXIT_NARROW
 
 
 def test_shape1_decl_conversion():
-    msg = ("conversion from ‘quad::ddfun::ddcomplex’ to non-scalar type "
+    msg = ("conversion from ‘Kokkos::Experimental::DoubleDoubleComplex’ to non-scalar type "
            "‘const Kokkos::complex<double>’ requested")
     assert ig.classify_error(msg) == ig.SHAPE_1_EXIT_NARROW
 
 
 def test_shape1_store_assign():
     msg = ("no match for ‘operator=’ (operand types are "
-           "‘quad::ddfun::ddcomplex’ and ‘Kokkos::complex<double>’)")
+           "‘Kokkos::Experimental::DoubleDoubleComplex’ and ‘Kokkos::complex<double>’)")
     assert ig.classify_error(msg) == ig.SHAPE_1_EXIT_NARROW
 
 
 def test_shape1_could_not_convert():
     msg = ("could not convert 'Kokkos::operator-<double, double>(...)' from "
-           "'Kokkos::complex<double>' to 'quad::ddfun::ddcomplex'")
+           "'Kokkos::complex<double>' to 'Kokkos::Experimental::DoubleDoubleComplex'")
     assert ig.classify_error(msg) == ig.SHAPE_1_EXIT_NARROW
 
 
 def test_shape2_invalid_cast():
-    msg = "invalid cast from type ‘quad::ddfun::ddouble’ to type ‘double’"
+    msg = "invalid cast from type ‘Kokkos::Experimental::DoubleDouble’ to type ‘double’"
     assert ig.classify_error(msg) == ig.SHAPE_2_INTERIOR_WIDEN
 
 
 def test_shape2_const_double_init():
-    msg = ("cannot convert ‘quad::ddfun::ddouble’ to ‘const double’ "
+    msg = ("cannot convert ‘Kokkos::Experimental::DoubleDouble’ to ‘const double’ "
            "in initialization")
     assert ig.classify_error(msg) == ig.SHAPE_2_INTERIOR_WIDEN
 
 
 def test_shape2_const_ref_init():
     msg = ("invalid initialization of reference of type ‘const double&’ from "
-           "expression of type ‘quad::ddfun::ddouble’")
+           "expression of type ‘Kokkos::Experimental::DoubleDouble’")
     assert ig.classify_error(msg) == ig.SHAPE_2_INTERIOR_WIDEN
 
 
 def test_shape3_nested_complex():
     msg = ("no match for ‘operator=’ (operand types are "
-           "‘quad::ddfun::ddcomplex’ and "
-           "‘Kokkos::complex<quad::ddfun::ddcomplex>’)")
+           "‘Kokkos::Experimental::DoubleDoubleComplex’ and "
+           "‘Kokkos::complex<Kokkos::Experimental::DoubleDoubleComplex>’)")
     assert ig.classify_error(msg) == ig.SHAPE_3_NESTED_COMPLEX
 
 
@@ -90,14 +90,14 @@ def test_shape3_static_assert():
 
 
 def test_shape4_shim():
-    msg = ('#error "DD Chain Integrator: ql::ddilog(ddouble) requires manual '
+    msg = ('#error "DD Chain Integrator: ql::ddilog(DoubleDouble) requires manual '
            'classification"')
     assert ig.classify_error(msg) == ig.SHAPE_4_SHIM
 
 
 def test_ascii_quotes_also_match():
     # g++ can emit ASCII quotes (-fno-diagnostics-fancy / older locales).
-    msg = "invalid cast from type 'quad::ddfun::ddouble' to type 'double'"
+    msg = "invalid cast from type 'Kokkos::Experimental::DoubleDouble' to type 'double'"
     assert ig.classify_error(msg) == ig.SHAPE_2_INTERIOR_WIDEN
 
 
@@ -113,7 +113,7 @@ def test_unknown_error_is_unknown():
 def test_unrelated_dd_shape_is_unknown():
     # A dd/dd binding the four shapes do not cover — must STOP, not degrade.
     msg = ("no match for ‘operator+’ (operand types are "
-           "‘quad::ddfun::ddouble’ and ‘std::vector<int>’)")
+           "‘Kokkos::Experimental::DoubleDouble’ and ‘std::vector<int>’)")
     assert ig.classify_error(msg) == ig.SHAPE_UNKNOWN
 
 
@@ -125,9 +125,9 @@ def test_classify_synthetic_log():
     log = (
         "foo.h:1:1: note: some note\n"
         "foo.h:10:5: error: invalid cast from type "
-        "‘quad::ddfun::ddouble’ to type ‘double’\n"
+        "‘Kokkos::Experimental::DoubleDouble’ to type ‘double’\n"
         "foo.h:20:5: error: no matching function for call to "
-        "‘Kokkos::complex<double>::complex(quad::ddfun::ddouble)’\n"
+        "‘Kokkos::complex<double>::complex(Kokkos::Experimental::DoubleDouble)’\n"
     )
     r = ig.classify_build_log(log)
     assert r.total == 2

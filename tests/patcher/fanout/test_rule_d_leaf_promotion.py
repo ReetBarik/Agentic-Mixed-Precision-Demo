@@ -46,7 +46,7 @@ _REAL_CHAINS = {
 }
 
 # Constants<T> accessors + template helpers the source instantiates at dd (the double
-# primary at T=ddouble and the enriched dd source, §2.3).  A structural set (a leading
+# primary at T=DoubleDouble and the enriched dd source, §2.3).  A structural set (a leading
 # ``_`` accessor / a known template helper) — the test's stand-in for the pipeline's
 # real source-instantiation query, kept deliberately explicit for the trail.
 _SOURCE_DD = frozenset(
@@ -68,7 +68,7 @@ def _make_ctx(graph, integral, *, max_frames=8, max_depth=3):
     def src_dd(name):
         return name in _SOURCE_DD
 
-    surface = surface_from_spelling("quad::ddfun::ddouble", "quad::ddfun::ddcomplex")
+    surface = surface_from_spelling("Kokkos::Experimental::DoubleDouble", "Kokkos::Experimental::DoubleDoubleComplex")
     return LeafPromotionContext(
         graph=graph, surface=surface,
         is_class1_synthesizable=is_class1_synthesizable,
@@ -82,8 +82,8 @@ def _closure(graph, integral, *, leaf_ctx=None):
     man = ChainManifest(chain_id=f"cascade_{integral}", integral=integral,
                         entry_point="BO", lines=lines)
     return compute_value_closure(
-        manifest=man, graph=graph, scalar_type="quad::ddfun::ddouble",
-        complex_type="quad::ddfun::ddcomplex", leaf_ctx=leaf_ctx)
+        manifest=man, graph=graph, scalar_type="Kokkos::Experimental::DoubleDouble",
+        complex_type="Kokkos::Experimental::DoubleDoubleComplex", leaf_ctx=leaf_ctx)
 
 
 # --------------------------------------------------------------------------- #
@@ -208,8 +208,8 @@ def test_chain_promote_oversized_terminal(tmp_path, qcdloop_full_graph):
     ctx = _make_ctx(qcdloop_full_graph, "B10", max_frames=3)
     res = chain_promote(
         manifest=man, graph=qcdloop_full_graph, tree_root=tmp_path,
-        scalar_type="quad::ddfun::ddouble", two_limb=True, shim_include=None,
-        complex_type="quad::ddfun::ddcomplex", leaf_ctx=ctx)
+        scalar_type="Kokkos::Experimental::DoubleDouble", two_limb=True, shim_include=None,
+        complex_type="Kokkos::Experimental::DoubleDoubleComplex", leaf_ctx=ctx)
     assert res.chain_closure_oversized is True
     assert res.declared_variants == []
     assert res.files_touched == []
@@ -249,7 +249,7 @@ def _emit_over_tmp(tmp_path, integral, *, leaf_ctx_integral=None, complex_type=N
             return defs[0] if defs else None
 
         surface = surface_from_spelling(
-            "quad::ddfun::ddouble", "quad::ddfun::ddcomplex")
+            "Kokkos::Experimental::DoubleDouble", "Kokkos::Experimental::DoubleDoubleComplex")
         leaf_ctx = LeafPromotionContext(
             graph=graph, surface=surface,
             is_class1_synthesizable=is_class1_synthesizable,
@@ -262,7 +262,7 @@ def _emit_over_tmp(tmp_path, integral, *, leaf_ctx_integral=None, complex_type=N
                         entry_point="BO", lines=lines)
     res = chain_promote(
         manifest=man, graph=graph, tree_root=tree,
-        scalar_type="quad::ddfun::ddouble", two_limb=True, shim_include=None,
+        scalar_type="Kokkos::Experimental::DoubleDouble", two_limb=True, shim_include=None,
         complex_type=complex_type, leaf_ctx=leaf_ctx)
     return res, tree
 
@@ -274,7 +274,7 @@ def test_l3_emits_lnrat_clone_and_reroutes_callers(tmp_path):
     # the discovered leaf clone (Lnrat_B10) as its own variant and reroutes every chain
     # caller's Lnrat call to it.
     res, tree = _emit_over_tmp(tmp_path, "B10", leaf_ctx_integral="B10",
-                               complex_type="quad::ddfun::ddcomplex")
+                               complex_type="Kokkos::Experimental::DoubleDoubleComplex")
     assert res.chain_closure_oversized is False
     assert res.leaf_reroutes == {"Lnrat": "Lnrat_B10"}
     assert "Lnrat_B10" in res.declared_variants
@@ -300,7 +300,7 @@ def test_l3_no_leaf_ctx_emits_no_clone(tmp_path):
     # STOP #B at the emission layer: without the opt-in, _materialize_leaf_variants is
     # inert — no Lnrat_B10 anywhere, and leaf_reroutes stays empty.
     res, tree = _emit_over_tmp(tmp_path, "B10", leaf_ctx_integral=None,
-                               complex_type="quad::ddfun::ddcomplex")
+                               complex_type="Kokkos::Experimental::DoubleDoubleComplex")
     assert res.leaf_reroutes == {}
     assert "Lnrat_B10" not in res.declared_variants
     assert "Lnrat_B10" not in (tree / "kokkosUtils.h").read_text()
@@ -314,7 +314,7 @@ def test_l3_leaves_vendored_snapshot_pristine(tmp_path):
     before = {p.name: p.read_bytes()
               for p in sorted(_QCDLOOP_FULL.glob("**/*.h"))}
     _emit_over_tmp(tmp_path, "B10", leaf_ctx_integral="B10",
-                   complex_type="quad::ddfun::ddcomplex")
+                   complex_type="Kokkos::Experimental::DoubleDoubleComplex")
     after = {p.name: p.read_bytes()
              for p in sorted(_QCDLOOP_FULL.glob("**/*.h"))}
     assert before == after

@@ -53,7 +53,7 @@ class _CannedLLM:
             "// SOURCE_HASH: PENDING\n"
             "#include <dd_math.hpp>\n"
             "#include <dd_complex.hpp>\n"
-            "// Rule 2 / C9: chain-internal value stays ddouble\n"
+            "// Rule 2 / C9: chain-internal value stays DoubleDouble\n"
         )
 
 
@@ -77,13 +77,13 @@ def test_generates_dd_shim_and_boundary_into_family_shim(repo, tmp_path):
     assert canonical.exists()
     assert '#include "ql_shim_dd.h"' in res.boundary_patch
     patch = res.boundary_patch
-    assert "quad::ddfun::ddouble a__ff = quad::ddfun::ddouble(a);" in patch
-    assert "quad::ddfun::ddouble r__ext = a__ff * b__ff;" in patch
+    assert "Kokkos::Experimental::DoubleDouble a__ff = Kokkos::Experimental::DoubleDouble(a);" in patch
+    assert "Kokkos::Experimental::DoubleDouble r__ext = a__ff * b__ff;" in patch
 
 
 def test_spec_targets_double_double():
-    assert chain.SPEC.cpp_scalar == "quad::ddfun::ddouble"
-    assert chain.SPEC.cpp_complex == "quad::ddfun::ddcomplex"
+    assert chain.SPEC.cpp_scalar == "Kokkos::Experimental::DoubleDouble"
+    assert chain.SPEC.cpp_complex == "Kokkos::Experimental::DoubleDoubleComplex"
     assert chain.SPEC.shim_prefix == "dd"          # shares ql_shim_dd.h
     assert chain.SPEC.two_limb is True             # extended scalar
 
@@ -94,7 +94,7 @@ def test_ruleset_carries_c9_chain_boundary_rule():
     assert "chain-boundary" in chain._SYSTEM_PROMPT.lower()
     assert "chain-internal" in chain._SYSTEM_PROMPT.lower()
     # still carries the inherited dd discipline (R3 hex constants, C1 include set)
-    assert "make_dd(0x" in chain._SYSTEM_PROMPT
+    assert "DoubleDouble::from_bits(0x" in chain._SYSTEM_PROMPT
     assert "C1." in chain._SYSTEM_PROMPT and "app-source" in chain._SYSTEM_PROMPT
 
 
@@ -102,8 +102,8 @@ def test_user_message_carries_hex_and_c9_notes(repo, tmp_path):
     llm = _CannedLLM()
     _call(repo, tmp_path / "shims", llm)
     user = llm.calls[0][1]
-    assert "make_dd(0x" in user
-    assert "quad::ddfun::ddouble" in user
+    assert "DoubleDouble::from_bits(0x" in user
+    assert "Kokkos::Experimental::DoubleDouble" in user
     assert "C9" in user or "Chain-boundary" in user
 
 
@@ -154,5 +154,5 @@ def test_real_llm_generates_parseable_dd_shim(repo, tmp_path):
     shim = Path(res.shim_paths[0]).read_text()
     assert "#pragma once" in shim
     assert "dd_math.hpp" in shim
-    assert res.boundary_patch and "quad::ddfun::ddouble" in res.boundary_patch
+    assert res.boundary_patch and "Kokkos::Experimental::DoubleDouble" in res.boundary_patch
     assert res.llm_tokens > 0

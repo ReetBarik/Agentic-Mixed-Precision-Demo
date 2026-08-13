@@ -21,19 +21,19 @@ N1 — **redeclaration of an already-promoted local** (the ``T__ff`` class).  Wh
      function body contains more than one chain region, each region's boundary
      entry emits ``<ext> r__ff = <ext>(r);`` for the same read ``r``; two such
      lines in one scope are a C++ redeclaration (``error: redeclaration of
-     'ddouble T__ff'``).  The redeclaration is dropped down to a plain assignment
+     'DoubleDouble T__ff'``).  The redeclaration is dropped down to a plain assignment
      ``r__ff = <ext>(r);`` (the first declaration still introduces the name).
 
 N2 — **malformed unary ``operator+``**.  The LLM sometimes emits a redundant
      unary ``+`` on an extended operand (``x = + y;``, ``return + expr;``); the
-     vendored ``ddouble``/``ffloat`` define no unary ``operator+``, so this is a
+     vendored ``DoubleDouble``/``FloatFloat`` define no unary ``operator+``, so this is a
      hard compile error.  A redundant unary ``+`` is semantically null for every
      numeric type, so it is simply removed.
 
 N3 — **``_ieps50``-residual constant spelling** (WAVE-1+2).  A two-limb extended
      constant written through the *scalar constructor from a decimal literal*
-     (``ddouble(1e-50)``) is canonicalised to the equivalent full-precision bit
-     pair (``make_dd(<bits(1e-50)>, 0x0)``).  ``ddouble(double h)`` sets
+     (``DoubleDouble(1e-50)``) is canonicalised to the equivalent full-precision bit
+     pair (``DoubleDouble::from_bits(<bits(1e-50)>, 0x0)``).  ``DoubleDouble(double h)`` sets
      ``{hi=h, lo=0}``, so the rewrite is BIT-IDENTICAL — a defensive
      canonicalisation that removes the truncation-prone decimal-literal spelling
      the WAVE-1 model leaked, never a value change.  (The *complex* iε collapse —
@@ -42,7 +42,7 @@ N3 — **``_ieps50``-residual constant spelling** (WAVE-1+2).  A two-limb extend
 
 Nothing here is app-specific: the extended-type spellings are supplied by the
 caller (the chain flow passes its ``scalar``/``complex`` C++ spellings); the
-defaults name only the vendored ``quad::ddfun`` / ``quad::ffun`` families the
+defaults name only the vendored ``Kokkos::Experimental`` / ``Kokkos::Experimental`` families the
 integrators target.
 """
 
@@ -57,10 +57,10 @@ from agents.shared import constant_derive as cderive
 # Callers pass their own via ``normalise_source(..., ext_types=...)``; this default
 # is only the fallback used by tests and the classic dd/ff families.
 DEFAULT_EXT_SCALARS: frozenset[str] = frozenset({
-    "quad::ddfun::ddouble", "quad::ffun::ffloat",
+    "Kokkos::Experimental::DoubleDouble", "Kokkos::Experimental::FloatFloat",
 })
 DEFAULT_EXT_COMPLEX: frozenset[str] = frozenset({
-    "quad::ddfun::ddcomplex", "quad::ffun::ffcomplex",
+    "Kokkos::Experimental::DoubleDoubleComplex", "Kokkos::Experimental::FloatFloatComplex",
 })
 
 
@@ -168,16 +168,16 @@ def _drop_redundant_unary_plus(text: str) -> str:
 # --------------------------------------------------------------------------- #
 
 _MAKE_FOR_SCALAR = {
-    "quad::ddfun::ddouble": ("dd", "quad::ddfun::make_dd"),
-    "quad::ffun::ffloat":   ("ff", "quad::ffun::make_ff"),
+    "Kokkos::Experimental::DoubleDouble": ("dd", "Kokkos::Experimental::DoubleDouble::from_bits"),
+    "Kokkos::Experimental::FloatFloat":   ("ff", "Kokkos::Experimental::FloatFloat::from_bits"),
 }
 
 
 def _canonicalise_literal_ctors(text: str, ext_scalars: frozenset[str]) -> str:
     """N3: rewrite ``<ext-scalar>(<decimal-literal>)`` to the equivalent
-    ``make_dd/make_ff(<bits>, 0x0)`` bit pair.
+    ``DoubleDouble::from_bits/FloatFloat::from_bits(<bits>, 0x0)`` bit pair.
 
-    ``ddouble(double h)`` initialises ``{hi=h, lo=0}``; ``make_dd(bits(h), 0)``
+    ``DoubleDouble(double h)`` initialises ``{hi=h, lo=0}``; ``DoubleDouble::from_bits(bits(h), 0)``
     reconstructs the same value, so the rewrite is BIT-IDENTICAL (a defensive
     canonicalisation, never a value change) and removes the decimal-literal
     spelling the WAVE-1 model leaked.  A ctor whose argument is anything but a plain

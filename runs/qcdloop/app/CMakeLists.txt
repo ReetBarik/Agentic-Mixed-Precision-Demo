@@ -21,7 +21,7 @@ endif()
 
 set(_recipes_dir ${CMAKE_CURRENT_SOURCE_DIR}/../src)
 
-# Repo-vendored extended-precision headers (quad::ffun::ffloat / quad::ddfun::ddouble)
+# Repo-vendored extended-precision headers (Kokkos::Experimental::FloatFloat / Kokkos::Experimental::DoubleDouble)
 # that regional ff/dd shims #include.  Always available regardless of the candidate
 # header tree, so a regional shim installed by the Patcher resolves <ff_math.hpp>.
 set(_vendored_include ${CMAKE_CURRENT_SOURCE_DIR}/../../../third_party/include)

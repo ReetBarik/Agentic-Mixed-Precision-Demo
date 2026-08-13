@@ -23,8 +23,8 @@ from tests.patcher.conftest import intent, make_shim_integrator, ok_gate
 
 def test_detects_chain_integrator_escape_and_extracts_symbol():
     log = ('.../shim.hpp:12:2: error: #error "DD Chain Integrator: '
-           'ql::Lnrat<ddouble> requires manual classification"')
-    assert _r4_escape_symbol(log) == "ql::Lnrat<ddouble>"
+           'ql::Lnrat<DoubleDouble> requires manual classification"')
+    assert _r4_escape_symbol(log) == "ql::Lnrat<DoubleDouble>"
 
 
 def test_detects_any_integrator_flavor():
@@ -51,8 +51,8 @@ def test_empty_symbol_when_phrase_unparseable():
 def test_scans_multiple_texts_detail_then_log():
     # detail is the short gate summary (no #error); the log carries it.
     detail = "cmake configure/build failed"
-    build_log = '#error "DD Chain Integrator: q::f<ddouble> requires manual classification"'
-    assert _r4_escape_symbol(detail, build_log) == "q::f<ddouble>"
+    build_log = '#error "DD Chain Integrator: q::f<DoubleDouble> requires manual classification"'
+    assert _r4_escape_symbol(detail, build_log) == "q::f<DoubleDouble>"
 
 
 # -- placement in the per-attempt log ---------------------------------------
@@ -80,7 +80,7 @@ def _read_jsonl(run_dir):
 
 def test_r4_escape_tagged_in_attempt_log(repo, make_ctx):
     root, start = repo
-    fn = make_patcher_fn(gate_fn=_r4_gate("ql::Lnrat<ddouble>"),
+    fn = make_patcher_fn(gate_fn=_r4_gate("ql::Lnrat<DoubleDouble>"),
                          integrators={"ff": make_shim_integrator(root)})
     ctx = make_ctx(root, start)
     resp = fn(intent("double-to-ff"), ctx)
@@ -90,7 +90,7 @@ def test_r4_escape_tagged_in_attempt_log(repo, make_ctx):
     # every attempt hit the R4 escape → tagged, with the symbol, on all of them.
     assert len(log) == MAX_INTEGRATOR_RETRIES
     assert all(r.get("r4_escape") is True for r in log)
-    assert all(r["r4_symbol"] == "ql::Lnrat<ddouble>" for r in log)
+    assert all(r["r4_symbol"] == "ql::Lnrat<DoubleDouble>" for r in log)
     assert all(r["outcome"] == "build_failed" for r in log)
 
 

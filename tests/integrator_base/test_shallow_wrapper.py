@@ -44,7 +44,7 @@ _COMPLEX_OPS = frozenset("abs conj sqrt exp log pow sin cos real imag".split())
 @pytest.fixture
 def surface():
     return sw.surface_from_spelling(
-        "quad::ddfun::ddouble", "quad::ddfun::ddcomplex",
+        "Kokkos::Experimental::DoubleDouble", "Kokkos::Experimental::DoubleDoubleComplex",
         scalar_ops=_SCALAR_OPS, complex_ops=_COMPLEX_OPS)
 
 
@@ -189,7 +189,7 @@ def test_stop_s_refuses_unprovided_op():
     # A delegation to a valid _MATH_FN_NAMES op the vendored surface does NOT
     # provide (for either operand kind) is refused — never invent a mapping.
     narrow = sw.surface_from_spelling(
-        "quad::ddfun::ddouble", "quad::ddfun::ddcomplex",
+        "Kokkos::Experimental::DoubleDouble", "Kokkos::Experimental::DoubleDoubleComplex",
         scalar_ops=frozenset({"abs", "log"}), complex_ops=frozenset({"abs", "log"}))
     erfc = ("template<typename T> KOKKOS_INLINE_FUNCTION "
             "T kErfc(T const& x) { return Kokkos::erfc(x); }")
@@ -210,17 +210,17 @@ def test_emit_delegation_scalar_and_complex(surface):
     oset.add(r, qualifier="ql")
     out = _norm(oset.render())
     # template param → both scalar and complex overloads, each redirecting to vendored abs
-    assert ("KOKKOS_INLINE_FUNCTION auto kAbs(quad::ddfun::ddouble const& x) "
-            "{ return quad::ddfun::abs(x); }") in out
-    assert ("KOKKOS_INLINE_FUNCTION auto kAbs(quad::ddfun::ddcomplex const& x) "
-            "{ return quad::ddfun::abs(x); }") in out
+    assert ("KOKKOS_INLINE_FUNCTION auto kAbs(Kokkos::Experimental::DoubleDouble const& x) "
+            "{ return Kokkos::Experimental::abs(x); }") in out
+    assert ("KOKKOS_INLINE_FUNCTION auto kAbs(Kokkos::Experimental::DoubleDoubleComplex const& x) "
+            "{ return Kokkos::Experimental::abs(x); }") in out
 
 
 def test_emit_accessor(surface):
     r = sw.recognize(_REAL, surface)
     out = _norm(sw.emit_overload(r, surface, qualifier="ql",
                                  target=surface.complex))
-    assert ("KOKKOS_INLINE_FUNCTION auto Real(quad::ddfun::ddcomplex const& z) "
+    assert ("KOKKOS_INLINE_FUNCTION auto Real(Kokkos::Experimental::DoubleDoubleComplex const& z) "
             "{ return z.real(); }") in out
 
 
@@ -229,9 +229,9 @@ def test_emit_scalar_expr_widens_param_type(surface):
     out = _norm(sw.emit_overload(r, surface, qualifier="ql",
                                  target=surface.scalar))
     # the ``double(0)`` functional casts must widen to the promoted type
-    assert ("return (quad::ddfun::ddouble(0) < x) - "
-            "(x < quad::ddfun::ddouble(0));") in out
-    assert "double(0)" not in out.replace("ddfun::ddouble(0)", "")
+    assert ("return (Kokkos::Experimental::DoubleDouble(0) < x) - "
+            "(x < Kokkos::Experimental::DoubleDouble(0));") in out
+    assert "double(0)" not in out.replace("ddfun::DoubleDouble(0)", "")
 
 
 def test_emit_transitive_keeps_inner_call(surface):
@@ -239,7 +239,7 @@ def test_emit_transitive_keeps_inner_call(surface):
     out = _norm(sw.emit_overload(r, surface, qualifier="ql",
                                  target=surface.scalar))
     assert "ql::kAbs(x)" in out           # inner Class-1 call preserved
-    assert "auto iszero(quad::ddfun::ddouble const& x)" in out
+    assert "auto iszero(Kokkos::Experimental::DoubleDouble const& x)" in out
 
 
 def test_emit_carries_subtask_comment(surface):
@@ -384,7 +384,7 @@ def test_regional_surface_reads_vendored_headers():
     from agents.dd_integrator.agent import _SPEC
     from agents.integrator_base import regional
     surf = regional._build_vendored_surface(_SPEC)
-    assert surf.root == "quad::ddfun"
+    assert surf.root == "Kokkos::Experimental"
     assert "abs" in surf.scalar_ops and "log" in surf.complex_ops
 
 
@@ -447,9 +447,9 @@ def test_synthesized_overloads_compile_and_run(tmp_path):
 
     ddh = (_VENDORED / "dd_math.hpp").read_text()
     ddc = (_VENDORED / "dd_complex.hpp").read_text()
-    s_ops, c_ops = _sw.scan_vendored_ops([ddh, ddc], "quad::ddfun::ddouble",
-                                         "quad::ddfun::ddcomplex")
-    surf = _sw.surface_from_spelling("quad::ddfun::ddouble", "quad::ddfun::ddcomplex",
+    s_ops, c_ops = _sw.scan_vendored_ops([ddh, ddc], "Kokkos::Experimental::DoubleDouble",
+                                         "Kokkos::Experimental::DoubleDoubleComplex")
+    surf = _sw.surface_from_spelling("Kokkos::Experimental::DoubleDouble", "Kokkos::Experimental::DoubleDoubleComplex",
                                      scalar_ops=s_ops, complex_ops=c_ops)
 
     # a region naming all four shapes; kSqrt/kConj add complex-delegation coverage
@@ -458,7 +458,7 @@ def test_synthesized_overloads_compile_and_run(tmp_path):
         "auto r = ql::Real(z); auto i = ql::Imag(z);"
         "auto s = ql::Sign(x);"
         "auto c = ql::kConj(z); auto q = ql::kSqrt(z);"
-        "bool t = ql::iszero<quad::ddfun::ddouble>(x);")
+        "bool t = ql::iszero<Kokkos::Experimental::DoubleDouble>(x);")
     res = _sw.synthesize_for_region(region, frozenset({"x", "z"}),
                                     _region_sources_full(), surf)
     overlay = res.overload_text
@@ -472,16 +472,16 @@ def test_synthesized_overloads_compile_and_run(tmp_path):
         "#include <Kokkos_Core.hpp>\n"
         "#include <dd_math.hpp>\n"
         "#include <dd_complex.hpp>\n"
-        "using quad::ddfun::ddouble;\n"
-        "using quad::ddfun::ddcomplex;\n"
+        "using Kokkos::Experimental::DoubleDouble;\n"
+        "using Kokkos::Experimental::DoubleDoubleComplex;\n"
         f'#include "{overlay_path}"\n'
         "int main(int argc, char** argv){ Kokkos::initialize(argc, argv);\n"
-        "  { ddouble x(2.0); ddcomplex z(1.0, 2.0);\n"
-        "    ddouble a = ql::kLog(ql::kAbs(x));\n"
-        "    ddouble r = ql::Real(z); ddouble i = ql::Imag(z);\n"
+        "  { DoubleDouble x(2.0); DoubleDoubleComplex z(1.0, 2.0);\n"
+        "    DoubleDouble a = ql::kLog(ql::kAbs(x));\n"
+        "    DoubleDouble r = ql::Real(z); DoubleDouble i = ql::Imag(z);\n"
         "    int s = ql::Sign(x);\n"
-        "    ddcomplex c = ql::kConj(z); ddcomplex q = ql::kSqrt(z);\n"
-        "    ddouble ca = ql::kAbs(z);\n"
+        "    DoubleDoubleComplex c = ql::kConj(z); DoubleDoubleComplex q = ql::kSqrt(z);\n"
+        "    DoubleDouble ca = ql::kAbs(z);\n"
         "    bool t = ql::iszero(x);\n"
         "    (void)a;(void)r;(void)i;(void)s;(void)c;(void)q;(void)ca;(void)t;\n"
         "  } Kokkos::finalize(); return 0; }\n")

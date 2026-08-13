@@ -42,17 +42,17 @@ def _dd_constants(member: str) -> str:
         "namespace ql {\n"
         "template <class T> struct Constants;\n"
         "template <>\n"
-        "struct Constants< ::quad::ddfun::ddouble > {\n"
+        "struct Constants< ::Kokkos::Experimental::DoubleDouble > {\n"
         f"{member}\n"
         "};\n"
         "} // namespace ql\n"
     )
 
 
-_ONE = ("    static inline ::quad::ddfun::ddouble _one() {\n"
-        "        return ::quad::ddfun::ddouble(1.0);\n    }")
-_TWO = ("    static inline ::quad::ddfun::ddouble _two() {\n"
-        "        return ::quad::ddfun::ddouble(2.0);\n    }")
+_ONE = ("    static inline ::Kokkos::Experimental::DoubleDouble _one() {\n"
+        "        return ::Kokkos::Experimental::DoubleDouble(1.0);\n    }")
+_TWO = ("    static inline ::Kokkos::Experimental::DoubleDouble _two() {\n"
+        "        return ::Kokkos::Experimental::DoubleDouble(2.0);\n    }")
 
 
 # --------------------------------------------------------------------------- #
@@ -61,7 +61,7 @@ _TWO = ("    static inline ::quad::ddfun::ddouble _two() {\n"
 
 def test_same_type_members_union_into_one_spec():
     merged = sm.merge_into_canonical(_dd_constants(_ONE), _dd_constants(_TWO))
-    assert _n_specs(merged, "Constants", "quad::ddfun::ddouble") == 1
+    assert _n_specs(merged, "Constants", "Kokkos::Experimental::DoubleDouble") == 1
     assert _n_defs(merged, "_one") == 1
     assert _n_defs(merged, "_two") == 1
     # forward decl precedes the specialization (a spec of an undeclared primary
@@ -73,9 +73,9 @@ def test_leading_colon_type_spelling_still_dedups():
     # The LLM sometimes writes `Constants< ::quad...>` and sometimes
     # `Constants<quad...>` — the same type to the compiler, must still collapse.
     a = _dd_constants(_ONE)
-    b = _dd_constants(_TWO).replace("::quad::ddfun::ddouble >", "quad::ddfun::ddouble >")
+    b = _dd_constants(_TWO).replace("::Kokkos::Experimental::DoubleDouble >", "Kokkos::Experimental::DoubleDouble >")
     merged = sm.merge_into_canonical(a, b)
-    assert _n_specs(merged, "Constants", "quad::ddfun::ddouble") == 1
+    assert _n_specs(merged, "Constants", "Kokkos::Experimental::DoubleDouble") == 1
     assert _n_defs(merged, "_one") == 1 and _n_defs(merged, "_two") == 1
 
 
@@ -89,14 +89,14 @@ def test_different_types_coexist():
         "#pragma once\n// SOURCE_HASH: PENDING\n#include <dd_complex.hpp>\n"
         "namespace ql {\n"
         "template <class T> struct Constants;\n"
-        "template <>\nstruct Constants< ::quad::ddfun::ddcomplex > {\n"
-        "    static inline ::quad::ddfun::ddcomplex _one() {\n"
-        "        return ::quad::ddfun::ddcomplex(1.0, 0.0);\n    }\n"
+        "template <>\nstruct Constants< ::Kokkos::Experimental::DoubleDoubleComplex > {\n"
+        "    static inline ::Kokkos::Experimental::DoubleDoubleComplex _one() {\n"
+        "        return ::Kokkos::Experimental::DoubleDoubleComplex(1.0, 0.0);\n    }\n"
         "};\n} // namespace ql\n"
     )
     merged = sm.merge_into_canonical(dd, cx)
-    assert _n_specs(merged, "Constants", "quad::ddfun::ddouble") == 1
-    assert _n_specs(merged, "Constants", "quad::ddfun::ddcomplex") == 1
+    assert _n_specs(merged, "Constants", "Kokkos::Experimental::DoubleDouble") == 1
+    assert _n_specs(merged, "Constants", "Kokkos::Experimental::DoubleDoubleComplex") == 1
     # exactly one forward decl shared by both specializations
     assert merged.count("struct Constants;") == 1
 
@@ -112,7 +112,7 @@ def _dd_free_fn(defn: str) -> str:
     )
 
 
-_REAL = ("inline ::quad::ddfun::ddouble Real(const ::quad::ddfun::ddcomplex& z) {\n"
+_REAL = ("inline ::Kokkos::Experimental::DoubleDouble Real(const ::Kokkos::Experimental::DoubleDoubleComplex& z) {\n"
          "    return z.re;\n}")
 
 
@@ -126,9 +126,9 @@ def test_same_free_function_dedups():
 
 def test_different_free_functions_coexist():
     a = _dd_free_fn(_REAL)
-    lnrat = ("inline ::quad::ddfun::ddouble Lnrat(const ::quad::ddfun::ddouble& x,\n"
-             "                                     const ::quad::ddfun::ddouble& y) {\n"
-             "    return quad::ddfun::log(x / y);\n}")
+    lnrat = ("inline ::Kokkos::Experimental::DoubleDouble Lnrat(const ::Kokkos::Experimental::DoubleDouble& x,\n"
+             "                                     const ::Kokkos::Experimental::DoubleDouble& y) {\n"
+             "    return Kokkos::Experimental::log(x / y);\n}")
     merged = sm.merge_into_canonical(a, _dd_free_fn(lnrat))
     assert _n_defs(merged, "Real") == 1
     assert _n_defs(merged, "Lnrat") == 1
@@ -140,7 +140,7 @@ def test_different_free_functions_coexist():
 
 def test_redundant_member_no_duplicate():
     merged = sm.merge_into_canonical(_dd_constants(_ONE), _dd_constants(_ONE))
-    assert _n_specs(merged, "Constants", "quad::ddfun::ddouble") == 1
+    assert _n_specs(merged, "Constants", "Kokkos::Experimental::DoubleDouble") == 1
     assert _n_defs(merged, "_one") == 1
 
 
@@ -148,10 +148,10 @@ def test_keep_first_on_conflicting_body():
     # If two shims define _one() with different bodies, keep the FIRST (already
     # committed + validated) one — the incoming duplicate is dropped, not appended.
     a = _dd_constants(_ONE)
-    b = _dd_constants(_ONE.replace("ddouble(1.0)", "ddouble(1.0e0)"))
+    b = _dd_constants(_ONE.replace("DoubleDouble(1.0)", "DoubleDouble(1.0e0)"))
     merged = sm.merge_into_canonical(a, b)
     assert _n_defs(merged, "_one") == 1
-    assert "ddouble(1.0)" in merged and "ddouble(1.0e0)" not in merged
+    assert "DoubleDouble(1.0)" in merged and "DoubleDouble(1.0e0)" not in merged
 
 
 # --------------------------------------------------------------------------- #
@@ -161,7 +161,7 @@ def test_keep_first_on_conflicting_body():
 def test_lone_shim_assembles_unchanged_semantics():
     lone = sm.merge_into_canonical(None, _dd_constants(_ONE))
     assert lone.startswith("#pragma once")
-    assert _n_specs(lone, "Constants", "quad::ddfun::ddouble") == 1
+    assert _n_specs(lone, "Constants", "Kokkos::Experimental::DoubleDouble") == 1
     assert _n_defs(lone, "_one") == 1
     assert "#include <dd_math.hpp>" in lone
     assert "#include <dd_complex.hpp>" in lone

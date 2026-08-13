@@ -36,9 +36,9 @@ def _write_log(tmp_path, body: str) -> Path:
 def test_binding_failure_gets_instantiation_tag(tmp_path):
     log = _write_log(tmp_path,
         "b.h:1:1: error: invalid cast from type "
-        "‘quad::ddfun::ddouble’ to type ‘double’\n"
+        "‘Kokkos::Experimental::DoubleDouble’ to type ‘double’\n"
         "b.h:2:1: error: no matching function for call to "
-        "‘Kokkos::complex<double>::complex(quad::ddfun::ddouble)’\n")
+        "‘Kokkos::complex<double>::complex(Kokkos::Experimental::DoubleDouble)’\n")
     tag, report = H._instantiation_gate(str(log), tmp_path, 0)
     assert tag == "instantiation_binding"
     assert report.total == 2

@@ -15,8 +15,8 @@ import struct
 
 from agents.patcher import shim_normalise as sn
 
-_DD = "quad::ddfun::ddouble"
-_FF = "quad::ffun::ffloat"
+_DD = "Kokkos::Experimental::DoubleDouble"
+_FF = "Kokkos::Experimental::FloatFloat"
 
 
 def _dbits(x: float) -> int:
@@ -39,7 +39,7 @@ def test_n1_drops_same_scope_redeclaration():
     out = sn.normalise_source(src)
     # first decl kept, second demoted to an assignment (no type prefix)
     assert out.count(f"{_DD} T__ff =") == 1
-    assert "    T__ff = quad::ddfun::ddouble(T);  // Rule R1" in out
+    assert "    T__ff = Kokkos::Experimental::DoubleDouble(T);  // Rule R1" in out
 
 
 def test_n1_keeps_deeper_scope_shadow():
@@ -125,12 +125,12 @@ def test_n2_idempotent():
 def test_n3_rewrites_literal_ctor_to_bit_pair():
     out = sn.normalise_source(f"{_DD} e = {_DD}(1e-50);\n")
     hi = _dbits(1e-50)
-    assert f"quad::ddfun::make_dd(0x{hi:016x}ULL, 0x0000000000000000ULL)" in out
+    assert f"Kokkos::Experimental::DoubleDouble::from_bits(0x{hi:016x}ULL, 0x0000000000000000ULL)" in out
     assert "(1e-50)" not in out
 
 
 def test_n3_is_bit_identical_value():
-    # ddouble(h) == {h, 0}; make_dd(bits(h), 0) reconstructs the same value
+    # DoubleDouble(h) == {h, 0}; DoubleDouble::from_bits(bits(h), 0) reconstructs the same value
     out = sn.normalise_source(f"{_DD} e = {_DD}(0.125);\n")
     hi = _dbits(0.125)
     assert f"0x{hi:016x}ULL, 0x0000000000000000ULL" in out
@@ -149,7 +149,7 @@ def test_n3_leaves_nonliteral_expression_ctor():
 
 def test_n3_ff_family_uses_make_ff():
     out = sn.normalise_source(f"{_FF} e = {_FF}(0.5);\n")
-    assert "quad::ffun::make_ff(0x" in out
+    assert "Kokkos::Experimental::FloatFloat::from_bits(0x" in out
 
 
 def test_n3_idempotent():
@@ -166,7 +166,7 @@ def test_clean_shim_unchanged():
         "#pragma once\n"
         "namespace ql {\n"
         f"inline {_DD} kLog({_DD} x) {{\n"
-        "    return quad::ddfun::log(x);\n"
+        "    return Kokkos::Experimental::log(x);\n"
         "}\n"
         f"{_DD} a = {_DD}(x);\n"
         "auto s = a + b;\n"
@@ -188,7 +188,7 @@ def test_all_three_together_idempotent():
     assert sn.normalise_source(once) == once
     # all three fired
     assert once.count(f"{_DD} T__ff =") == 1
-    assert "make_dd(0x" in once
+    assert "DoubleDouble::from_bits(0x" in once
     assert "= + " not in once
 
 
@@ -200,7 +200,7 @@ def test_normalise_file_reports_change(tmp_path):
     p = tmp_path / "shim.h"
     p.write_text(f"{_DD} e = {_DD}(1e-50);\n", encoding="utf-8")
     assert sn.normalise_file(p) is True
-    assert "make_dd(0x" in p.read_text(encoding="utf-8")
+    assert "DoubleDouble::from_bits(0x" in p.read_text(encoding="utf-8")
 
 
 def test_normalise_file_noop_on_clean(tmp_path):
