@@ -102,13 +102,23 @@ The routing table counts *integrals*; this counts the **math operations** behind
 Because `tu_only` flips a whole TU, every op in an integral executes at that integral's
 routed precision, so op counts map onto rungs without ambiguity.
 
-![Math ops by precision rung — two pie charts. Control: double 51.53%, ff 38.36%,
-dd 10.11%. QF run: double 51.53%, ff 38.36%, qf 10.11%. Total 19,443,258 ops.](qf_op_share.svg)
+![Precision assignment for the qcdloop workload, two pie charts. By math operations:
+double 51.53%, ff 38.36%, qf 10.11% of 19,443,258 ops. By integral count: ff 14 of 21,
+double 5 of 21, qf 2 of 21. float and dd unused.](op_share.svg)
 
-Regenerate with `python scripts/one_off/gen_qf_opshare_svg.py` (`--check` prints the
-shares without writing). The figures are read from the source data on every run and are
+The chart describes the **current routing** only — it is a general picture of where this
+workload's precision sits, not a QF before/after; the controlled diff is the table below.
+Both panels show the same three rungs weighted two different ways, and the disagreement
+between them is the substance: **the five double-routed integrals are 23.8% of the
+integrals but 51.5% of the ops.** `float` and `dd` are carried in the legend at 0.00%
+because a rung being *available and unused* is a result, not an absence.
+
+Regenerate with `python scripts/one_off/gen_op_share_svg.py` (`--check` prints both
+distributions without writing). The figures are read from source on every run and are
 never hand-edited into the SVG; the generator also asserts its own label geometry and
 refuses to emit a chart with an overflow or a near-collision.
+
+### The controlled diff
 
 | rung | ops | control | **qf run** |
 |---|---:|---:|---:|
@@ -120,13 +130,41 @@ refuses to emit a chart with an overflow or a near-collision.
 | **total** | **19,443,258** | 100% | 100% |
 
 **The entire 10.11% dd slice moves to qf, intact.** Nothing else shifts by a single op —
-the same two integrals (B12, B16) carry it, so the two pies differ in exactly one label.
+the same two integrals (B12, B16) carry it, so the two columns differ in exactly one row.
 That is the op-level statement of the verdict: **10.1% of this workload's arithmetic was
 running on the most expensive rung the pipeline can emit, and none of it is now.**
 
 Op mix across all 21 integrals: `mul` 7,458,181 · `add` 4,260,392 · `sub` 3,866,267 ·
 `div` 1,346,656 · `neg` 1,089,505 · `sqrt` 431,766 · `log` 388,742 · `abs` 377,587 ·
 `atan2` 224,162.
+
+### Why the two panels disagree
+
+Integrals are not interchangeable units of work. The five `double`-routed integrals
+average **2,003,736 ops** each against **532,811** for the fourteen `ff`-routed ones —
+roughly 3.8× heavier — which is the whole gap between "24% of the integrals" and "52% of
+the ops".
+
+| integral | ops | % of all ops | range-unsafe ops | as % of its own ops |
+|---|---:|---:|---:|---:|
+| BIN4 | 3,861,404 | 19.86% | 1,451,032 | 37.58% |
+| BIN3 | 2,266,778 | 11.66% | **9,296** | **0.41%** |
+| BIN2 | 1,593,781 | 8.20% | 930,961 | 58.41% |
+| BIN1 | 1,277,275 | 6.57% | 571,881 | 44.77% |
+| BIN0 | 1,019,444 | 5.24% | 452,850 | 44.42% |
+| **total** | **10,018,682** | **51.53%** | | |
+
+All five sit at `double` for the same two reasons, and both must hold: they already clear
+the 7.0 bar at raw double (`tu_no_flip_needed`, so the correctness walk never climbs), and
+every rung *below* double is fp32-family, which the range guard disqualifies for all five.
+`qf` cannot help — it is above double, and these integrals are not short of accuracy.
+
+**BIN3 is the outlier worth naming.** One range-unsafe region out of 71 — 9,296 ops,
+**0.41% of its own work** — pins **11.66% of the entire workload** at double, because
+`tu_only` disqualifies a whole TU on one unsafe region. That is what the region walk
+exists for (hold that region at double, downshift the other 70); it is not reachable
+today, since the region path carries float/ff/dd integrators and this change explicitly
+excluded qf from it. BIN2 at 58% unsafe ops is genuinely range-bound; BIN3 is not.
 
 ### What these percentages are, and are not
 
@@ -140,7 +178,11 @@ Four caveats, because the number is easy to over-read:
    (`samples_seen` is uniform across all 21). So this is the op mix of a workload that
    exercises all 21 integrals equally, **not** of any real physics run, where call
    frequencies differ by orders of magnitude. Re-weighting by a real workload's integral
-   histogram would move these percentages substantially.
+   histogram would move these percentages substantially. The chart's **right panel is
+   the control for this**: it gives every integral one equal wedge, so the left panel's
+   op weighting is visible as the difference between the two rather than hidden inside a
+   single number. What the right panel *cannot* correct for is call frequency — it says
+   each integral counts once, which is a different claim from each integral running once.
 3. **Source is the characterization run** (`runs/qcdloop/report_smoke.json`, 1000
    samples/integral), not the 5000-sample validation run that produced the digits. Op mix
    is a structural property of the code paths taken, so the two agree in shape, but the
@@ -467,4 +509,4 @@ gate refactor.
 | constant generator | `scripts/one_off/gen_qf_constants.py` (`--check` re-reports table error) |
 | provenance + local patches | `third_party/include/UPSTREAM.sha` |
 | op-share source data | `runs/qcdloop/report_smoke.json` — per-region `ops` counters, summed per integral and grouped by each run's `tu_routing` |
-| op-share chart | `runs/qcdloop/qf_op_share.svg`, generated by `scripts/one_off/gen_qf_opshare_svg.py` |
+| op-share chart | `runs/qcdloop/op_share.svg`, generated by `scripts/one_off/gen_op_share_svg.py` |
