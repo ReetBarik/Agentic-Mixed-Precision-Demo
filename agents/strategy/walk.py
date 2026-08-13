@@ -37,8 +37,8 @@ from dataclasses import dataclass, field
 
 from agents.strategy.characterization import RegionRecord
 from agents.strategy.models import (
-    IDENTITY_CATALOG, INTENT_CORRECTNESS, INTENT_SPEEDUP, LADDER,
-    SIGNAL_CANCELLATION_CASCADE, SIGNAL_LOCAL_CANCELLATION,
+    FP32_FAMILY, IDENTITY_CATALOG, INTENT_CORRECTNESS, INTENT_SPEEDUP, LADDER,
+    REGION_REALIZABLE, SIGNAL_CANCELLATION_CASCADE, SIGNAL_LOCAL_CANCELLATION,
     VIA_PLAIN, VIA_REGIONAL,
     RemediationIntent, TRANSITION_KINDS, next_down,
 )
@@ -75,7 +75,7 @@ def _rewrites_for(signal_class: str) -> list[tuple[str, str | None]]:
 class RetryWalk:
     def __init__(self, record: RegionRecord, mode: str, tolerance: float,
                  baseline: str = "double", floor: str | None = None,
-                 float_via: str = VIA_PLAIN, float_ok: bool = True):
+                 float_via: str = VIA_PLAIN, fp32_range_ok: bool = True):
         if mode not in (INTENT_CORRECTNESS, INTENT_SPEEDUP):
             raise ValueError(f"unknown walk mode {mode!r}")
         if float_via not in (VIA_PLAIN, VIA_REGIONAL):
@@ -85,15 +85,22 @@ class RetryWalk:
         self.tolerance = tolerance
         self.baseline = baseline
         self.installed = baseline
-        # Wave-3 WI1: float-rung guard.  When False the speedup walk stops at ff
-        # and never attempts ``->float`` — the region is range-unsafe
-        # (`value_range_ok_for_float`), a float over/underflow risk the Validator's
-        # finite sample can miss.  (WI2/`predicted_rel_err_if_float` is telemetry-
-        # only and does NOT feed this flag — see agent._float_rung_ok.)  Orthogonal
-        # to the ff error gate that admits the region into the speedup queue;
-        # correctness walks never target float, so this is inert there.  Defaults
-        # True (historical behavior / fail-open).
-        self.float_ok = float_ok
+        # fp32-family range guard (generalized from the Wave-3 WI1 float-rung guard).
+        # When False the region's measured |val| leaves FP32's normal exponent range
+        # (`value_range_ok_for_float`), so NO rung built from FP32 words is safe —
+        # float, ff and qf all share that ceiling (models.FP32_FAMILY).  This is an
+        # over/underflow risk the Validator's finite sample can miss, and the error
+        # model (`predicted_rel_err_if_*`) is blind to it.
+        #
+        # It was previously float-only, which left a hole: dropping ``float`` and
+        # falling back to ``ff`` moved to a rung with the IDENTICAL range ceiling.
+        # It now prunes the whole family, on BOTH walk directions — correctness as
+        # well as speedup, because qf is an fp32-family rung the correctness walk
+        # can climb TO (it sits between double and dd), so range is no longer a
+        # speedup-only concern.  (WI2/`predicted_rel_err_if_float` is telemetry-only
+        # and does NOT feed this flag — see agent._fp32_rung_ok.)  Defaults True
+        # (fail-open / historical behavior).
+        self.fp32_range_ok = fp32_range_ok
         # Speedup floor (design "Speedup floor rule"): the lowest precision this
         # region may be demoted to, because a promoted cascade chain still claims
         # one of its lines at that precision.  None → no floor (down to float).
@@ -112,17 +119,33 @@ class RetryWalk:
         # Correctness walks never target float, so this is inert there.
         self.float_via = float_via
         # Regional speedup plan: demotion targets below ``double`` in cost order
-        # (cheapest first); the first that the Validator accepts wins.  The float
-        # rung is dropped when the WI1/WI2 guard fires (``float_ok=False``) — the
-        # walk then settles at ff without spending a doomed float attempt.
-        self._regional_plan: list[str] = ["float", "ff"] if float_ok else ["ff"]
+        # (cheapest first); the first that the Validator accepts wins.  Both rungs
+        # are fp32-family, so a range-unsafe region drops BOTH and the plan is empty
+        # — the walk settles at double rather than spending a doomed attempt.  (The
+        # earlier form kept ``ff`` here, which was the hole: ff is 2xFP32 and hits
+        # the same ceiling that disqualified float.)
+        self._regional_plan: list[str] = [
+            lvl for lvl in ("float", "ff") if fp32_range_ok or lvl not in FP32_FAMILY
+        ]
         self._regional_i = 0
 
-        # correctness: higher rungs reachable from baseline via a supported kind
+        # correctness: higher rungs reachable from baseline via a supported kind.
+        #
+        # Two filters beyond the kind vocabulary:
+        #  * REGION_REALIZABLE — this walk drives the REGION path, which has no qf
+        #    integrator; a ``double-to-qf`` region intent would reach dispatch with
+        #    nothing to service it.  qf is reachable today only via the whole-TU
+        #    flip (see tu_walk.CORRECTNESS_WALK), so it is excluded here.
+        #  * the fp32-family range guard — a range-unsafe region skips fp32 rungs
+        #    entirely, since a wider SIGNIFICAND buys no exponent range.  (Inert
+        #    while REGION_REALIZABLE already excludes qf, but kept so the guard
+        #    holds the moment a qf integrator lands.)
         base_i = LADDER.index(baseline)
         self._up_targets = [
             lvl for lvl in LADDER[base_i + 1:]
             if f"{baseline}-to-{lvl}" in TRANSITION_KINDS
+            and lvl in REGION_REALIZABLE
+            and (fp32_range_ok or lvl not in FP32_FAMILY)
         ]
         self._up_i = 0
         self._phase = "precision"                     # precision | reformulate
@@ -187,9 +210,16 @@ class RetryWalk:
         if target_level is None or f"{self.installed}-to-{target_level}" not in TRANSITION_KINDS:
             self._result = WalkResult(status="settled", final_precision=self.installed)
             return None
-        # WI1/WI2 float-rung guard: a range-unsafe / pred-float-unsafe region may
-        # demote to ff but never to float — settle at the current (ff) rung.
-        if target_level == "float" and not self.float_ok:
+        # The region path cannot realize every ladder rung (no qf integrator), so a
+        # demotion that lands on an unrealizable rung settles instead of emitting an
+        # intent nothing can service.  Reachable from ``dd``, whose next-cheaper rung
+        # is now qf rather than double.
+        if target_level not in REGION_REALIZABLE:
+            self._result = WalkResult(status="settled", final_precision=self.installed)
+            return None
+        # fp32-family range guard: a range-unsafe region may not demote to ANY rung
+        # built from FP32 words (float, ff, qf) — settle at the current rung.
+        if target_level in FP32_FAMILY and not self.fp32_range_ok:
             self._result = WalkResult(status="settled", final_precision=self.installed)
             return None
         # required_by floor: never demote a line below the precision a promoted
@@ -214,6 +244,10 @@ class RetryWalk:
         This is what makes ``double->float`` reachable on template code — it is
         proposed DIRECTLY (a skip transition), not gated off as in Wave 1 — while
         the ``double->ff`` fallback preserves the demotions Wave 1 already won.
+
+        The plan is EMPTY when the fp32-family range guard fires (both candidate
+        rungs are FP32-based), in which case the loop falls straight through and the
+        walk settles at the baseline without proposing anything.
         """
         while self._regional_i < len(self._regional_plan):
             target_level = self._regional_plan[self._regional_i]

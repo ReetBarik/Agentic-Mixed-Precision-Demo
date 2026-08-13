@@ -153,4 +153,4 @@ def test_clean_success_all_accept(tmp_path):
     res, rep = run_agent(tmp_path, report, ok_patcher(), const_validator("accept"))
     assert res["status"] == "success"
     # A cleared at dd; B untouched at double
-    assert rep["precision_distribution"] == {"float": 0, "ff": 0, "double": 1, "dd": 1}
+    assert rep["precision_distribution"] == {"float": 0, "ff": 0, "double": 1, "qf": 0, "dd": 1}

@@ -6,9 +6,9 @@ This is the L-measure recipe (``phase1_lmeasure.py`` + ``phase2_lmeasure.py``)
 packaged as the provider contract the generic Strategy walk consumes:
 
     tu_measure_fn(integral, target) -> dict
-        target == "baseline"          -> {"built", "baseline_digits"}
-        target in {"dd","float","ff"} -> {"built", "baseline_digits",
-                                          "candidate_digits", "log_tail"}
+        target == "baseline"               -> {"built", "baseline_digits"}
+        target in {"dd","qf","float","ff"} -> {"built", "baseline_digits",
+                                               "candidate_digits", "log_tail"}
 
 The qcdloop-specific build/oracle/measure lives HERE (runs/qcdloop), not in
 agents/strategy — Strategy only calls the injected callable (keeps agents/ free of
@@ -51,6 +51,7 @@ VEND = _REPO / "third_party" / "include"
 
 _TARGET_BY_NAME = {
     "dd": TargetPrecision.DD,
+    "qf": TargetPrecision.QF,
     "float": TargetPrecision.FLOAT,
     "ff": TargetPrecision.FF,
 }

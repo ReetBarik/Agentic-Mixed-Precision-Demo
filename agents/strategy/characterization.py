@@ -43,8 +43,23 @@ def _range_ok_for_float(region: dict) -> bool:
     """Read ``value_range_ok_for_float`` with fail-open default ``True``.
 
     Reports predating the field (Wave-3 WI1) carry no range signal; defaulting to
-    ``True`` means the float-rung guard does not fire — the historical behavior.
+    ``True`` means the range guard does not fire — the historical behavior.
     Warns once so the omission is visible and future reports get regenerated.
+
+    SCOPE (wider than the name).  The reducer computes this as
+    ``abs_val_min >= FLT_MIN_NORMAL and abs_val_max <= FLT_MAX``, so it measures
+    whether the region's values fit **FP32's exponent range** — it is not specific
+    to the ``float`` rung.  Every fp32-family rung inherits that range regardless of
+    how many FP32 words it stacks (``float`` 1x, ``ff`` 2x, ``qf`` 4x), so this one
+    flag governs all three; see ``models.FP32_FAMILY``.  The field name is retained
+    for report-schema compatibility with existing characterization runs.
+
+    Note also what it does NOT measure: it bounds the region's own |value|, so it
+    catches the value itself overflowing or falling below FP32's smallest normal.
+    It does not model **low-limb underflow** — a value comfortably inside FP32 range
+    whose 3rd/4th limbs nonetheless fall under FLT_MIN_NORMAL and flush to zero,
+    costing precision (not range) on the multi-word rungs.  That failure mode is
+    real (the qf constant tables show it in the ~1e-35 tail) but unmodelled here.
     """
     global _warned_missing_range_flag
     if "value_range_ok_for_float" not in region:
@@ -131,9 +146,12 @@ class RegionRecord:
     op_count: int
     n: int
     integrals: list[str] = field(default_factory=list)
-    # Wave-3 WI1: float exponent-range safety flag (fail-open true).  A region
-    # flagged false may still be demoted to ff but MUST NOT be walked to float —
-    # the error model (`predicted_rel_err_if_*`) is blind to over/underflow.
+    # Wave-3 WI1: FP32 exponent-range safety flag (fail-open true).  A region
+    # flagged false MUST NOT be walked to ANY fp32-family rung — float, ff or qf,
+    # which all share FP32's exponent range — in either walk direction; the error
+    # model (`predicted_rel_err_if_*`) is blind to over/underflow.  (It was
+    # originally read as float-only, which let a rejected float fall back to the
+    # equally range-limited ff.)  See _range_ok_for_float for the exact measurement.
     value_range_ok_for_float: bool = True
     # Wave-3 WI3: per-op dynamic mix (op_kind -> count).  ``op_count`` is its
     # sum; the mix drives the flop-weighted speedup ordering (div/log ≫ add).

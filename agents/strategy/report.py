@@ -13,6 +13,13 @@ from pathlib import Path
 
 from agents.strategy.models import LADDER
 
+# Candidate columns in the tu_only routing table: every ladder rung the walk can
+# target, i.e. everything except the ``double`` baseline the table's `base` column
+# already carries.  Derived from LADDER so a new rung shows up automatically —
+# hard-coding the columns is how the qf rung's candidate digits went unreported in
+# its first run (the route said "qf" with no column to explain it).
+_TU_COLUMNS: tuple[str, ...] = tuple(p for p in LADDER if p != "double")
+
 
 def write_reports(run_dir: str | Path, report: dict) -> tuple[Path, Path]:
     """Write ``report.json`` + ``report.md`` under ``run_dir``; return both paths."""
@@ -153,11 +160,11 @@ def _render_markdown_tu(r: dict) -> str:
         "",
         "## Routing table",
         "",
-        "`base` = raw-double p100; `dd`/`float`/`ff` = candidate p100 "
-        "(min over samples/components); `—` = not attempted.",
+        f"`base` = raw-double p100; {'/'.join(f'`{p}`' for p in _TU_COLUMNS)} = "
+        "candidate p100 (min over samples/components); `—` = not attempted.",
         "",
-        "| integral | base | dd | float | ff | route |",
-        "|---|---|---|---|---|---|",
+        "| integral | base | " + " | ".join(_TU_COLUMNS) + " | route |",
+        "|---|---|" + "---|" * (len(_TU_COLUMNS) + 1),
     ]
 
     def _fmt(x) -> str:
@@ -179,8 +186,8 @@ def _render_markdown_tu(r: dict) -> str:
 
         lines.append(
             f"| {row.get('integral', '?')} | {_fmt(row.get('baseline_digits'))} | "
-            f"{_cell('dd')} | {_cell('float')} | {_cell('ff')} | "
-            f"**{row.get('route', 'double')}** |")
+            + " | ".join(_cell(t) for t in _TU_COLUMNS)
+            + f" | **{row.get('route', 'double')}** |")
     lines.append("")
 
     lines += ["## Precision distribution", "", "| precision | integrals |",

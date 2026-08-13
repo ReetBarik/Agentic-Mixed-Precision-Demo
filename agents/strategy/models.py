@@ -13,16 +13,73 @@ from dataclasses import dataclass, field
 # ---------------------------------------------------------------------------
 # Precision ladder — COST-ordered, not strictly precision-ordered (P3).
 #
-#   float (~7)  →  ff (~14)  →  double (~15-16)  →  dd (~30-31)
+#   float (~7)  →  ff (~14)  →  double (~15-16)  →  qf (~29)  →  dd (~30-31)
 #
 # ff and double are precision peers (within one digit) that trade in either
 # direction; the ladder orders them by *cost*, so a double→ff move is a legit
 # speedup demotion.  The retry walk single-steps this list by index.
+#
+# qf (quad-float, 4xFP32, ~28.9 digits) sits between double and dd.  On the
+# fp32-heavy GPU silicon this pipeline targets, cost order and accuracy order
+# COINCIDE for qf — four FP32 words are cheaper than a double-double while
+# resolving only ~2 digits less — so it needs no split cost/accuracy ordering and
+# slots into the single cost-ordered ladder directly.  That placement is what
+# makes the correctness walk a *cheapest-sufficient* search: try qf, and only pay
+# for dd if qf does not clear.
+#
+# RANGE IS NOT MONOTONE ALONG THIS LADDER.  Cost and precision both increase
+# left to right, but exponent range does not: float/ff/qf are FP32-ranged
+# (~3.4e38) while double/dd are FP64-ranged (~1.8e308).  So qf is WIDER than
+# double in significand yet NARROWER in range — the one place the ladder's order
+# does not carry range with it.  See FP32_FAMILY below and the guard that uses it.
 # ---------------------------------------------------------------------------
 
-LADDER: tuple[str, ...] = ("float", "ff", "double", "dd")
+LADDER: tuple[str, ...] = ("float", "ff", "double", "qf", "dd")
 
 PRECISIONS = frozenset(LADDER)
+
+# ---------------------------------------------------------------------------
+# The fp32 family — rungs built out of FP32 words, which therefore inherit
+# FP32's EXPONENT RANGE (|x| in [~1.18e-38, ~3.40e38]) no matter how many words
+# they stack:
+#
+#   float  1 x FP32   ~7 digits
+#   ff     2 x FP32   ~14 digits
+#   qf     4 x FP32   ~29 digits
+#
+# Stacking words widens the SIGNIFICAND, never the exponent.  So a value that
+# overflows float overflows qf too, even though qf is nearly twice as precise as
+# double.  Every other rung (double, dd) is FP64-ranged and at least as wide as
+# the double baseline, so range is only ever a question for this set.
+#
+# This is why the range guard is keyed on the family and not on ``float``: the
+# original WI1 guard dropped only the float rung and fell back to ff, which has
+# the identical ceiling — the fallback was never safe.  See
+# characterization.value_range_ok_for_float (the measured signal) and
+# walk.RetryWalk(fp32_range_ok=...) (the consumer).
+# ---------------------------------------------------------------------------
+
+FP32_FAMILY: frozenset[str] = frozenset({"float", "ff", "qf"})
+
+# ---------------------------------------------------------------------------
+# Which rungs the REGION path can actually realize.
+#
+# The ladder is shared by two remediation mechanisms with different reach:
+#
+#   * the whole-TU precision flip (agents.patcher.tu_emit PROFILES) — has a qf
+#     profile, so it can build a whole TU at qf; and
+#   * the region path (agents.patcher.dispatch -> the per-precision *_integrator
+#     packages) — has float / ff / dd integrators and NO qf integrator.
+#
+# Adding qf to LADDER makes it a candidate up-rung for BOTH walks, but a
+# ``double-to-qf`` region intent has nothing to service it.  Restricting the
+# region walk here keeps the ladder single and honest rather than forking it:
+# qf is on the ladder because it is a real precision, and this set records that
+# one mechanism cannot reach it yet.  Drop qf from this exclusion once a
+# qf_integrator exists.
+# ---------------------------------------------------------------------------
+
+REGION_REALIZABLE: frozenset[str] = frozenset({"float", "ff", "double", "dd"})
 
 
 def _index(precision: str) -> int:
@@ -47,18 +104,27 @@ def next_down(precision: str) -> str | None:
 # ---------------------------------------------------------------------------
 # Remediation-kind vocabulary (P1 + P3).
 #
-# 9 transition kinds + 2 reformulate kinds = 11 total.  `float-to-ff` is the
+# 13 transition kinds + 2 reformulate kinds = 15 total.  `float-to-ff` is the
 # single-step up-rung the P3 table omits (see HANDOFF.md); it is required for a
 # cost-ladder walk that starts from a float region.  The three "skip"
 # transitions (float-to-double, double-to-float, ff-to-dd) are valid Patcher
 # kinds but are NOT emitted by the current single-step walk.
+#
+# The qf rung adds four: double-to-qf / qf-to-dd going up and dd-to-qf /
+# qf-to-double coming down.  `double-to-dd` and `dd-to-double` are RETAINED even
+# though qf now sits between them — inserting a ladder rung must not silently
+# retire the direct double<->dd transition, which the correctness walk still
+# emits whenever the qf rung is skipped (range guard) or does not clear.
 # ---------------------------------------------------------------------------
 
 TRANSITION_KINDS: frozenset[str] = frozenset({
     # single-step up (correctness)
-    "float-to-ff", "ff-to-double", "double-to-dd",
+    "float-to-ff", "ff-to-double", "double-to-qf", "qf-to-dd",
     # single-step down (speedup)
-    "dd-to-double", "double-to-ff", "ff-to-float",
+    "qf-to-double", "dd-to-qf", "double-to-ff", "ff-to-float",
+    # double<->dd: no longer single-step now that qf is between them, but still
+    # emitted (and still the dominant correctness rung) — see note above.
+    "double-to-dd", "dd-to-double",
     # skip transitions — in vocabulary, not emitted by single-step walk
     "float-to-double", "double-to-float", "ff-to-dd",
 })

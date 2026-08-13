@@ -84,17 +84,23 @@ def _run(tmp_path, report, *, tolerance=10.0, report_prunes=True,
 # WI1 — value_range_ok_for_float float-rung guard
 # ---------------------------------------------------------------------------
 
-def test_wi1_range_unsafe_stops_at_ff(tmp_path):
-    # float-safe by the error model, but range-unsafe → float NOT attempted; ff is.
+def test_wi1_range_unsafe_stays_at_double(tmp_path):
+    # Range-unsafe region: NO fp32-family rung is attempted — not float and not ff.
+    #
+    # This corrects the original WI1 behavior, which dropped only the float rung and
+    # fell back to ff.  ff is 2xFP32 and inherits the identical exponent range, so
+    # the fallback landed on a rung disqualified by the very same measurement.  The
+    # guard is now keyed on models.FP32_FAMILY, so the region settles at double.
     report = _write(tmp_path, {"f.h:1": _stable(pf=1e-30, pff=1e-30, ops={"mul": 5},
                                                 range_ok=False)})
     rep, kinds = _run(tmp_path, report)
-    assert "double-to-ff" in kinds
     assert not any(k.endswith("-to-float") for k in kinds)
+    assert not any(k.endswith("-to-ff") for k in kinds)
     ss = rep["speedup_summary"]
     assert ss["regions_skipped_range_unsafe"] == 1
     assert ss["regions_flagged_pred_float"] == 0
-    assert rep["precision_distribution"]["ff"] == 1
+    assert rep["precision_distribution"]["double"] == 1
+    assert rep["precision_distribution"]["ff"] == 0
 
 
 def test_wi1_range_ok_true_attempts_float(tmp_path):

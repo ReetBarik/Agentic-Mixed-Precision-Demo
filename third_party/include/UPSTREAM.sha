@@ -1,6 +1,5 @@
-# Provenance for the four vendored extended-precision headers.
+# Provenance for the six vendored extended-precision headers.
 # Refresh via: cp from kokkos-extended-precision-demo@<sha>:third_party/include/
-# Do NOT include qf_math.hpp / qf_complex.hpp — QF integration is a separate task.
 
 source_repo:   https://github.com/ReetBarik/kokkos-extended-precision-demo
 source_branch: main
@@ -11,6 +10,37 @@ files:
   - dd_complex.hpp
   - ff_math.hpp
   - ff_complex.hpp
+
+# ------------------------------------------------------------
+# QF (quad-float, 4xFP32) — vendored later than the dd/ff set, so it carries
+# its own sha. QF is a DIFFERENT LINEAGE: ported from QD 2.3.24 (LBNL), not
+# from DDFUN like dd/ff, and the files declare LicenseRef-LBNL-BSD-License
+# rather than LicenseRef-DHB-License. License/NOTICE bookkeeping for that
+# split is deliberately deferred (QF-integration task non-goal), so this repo
+# vendors the headers without the LICENSES/ text they reference.
+# ------------------------------------------------------------
+qf_source_sha:  e67d7da192215585e439db77fd8627d086b56d36
+qf_source_date: 2026-08-09 16:59:02 +0000   # last commit touching qf_math.hpp (6b6ee3e)
+qf_files:
+  - qf_math.hpp
+  - qf_complex.hpp
+
+# ------------------------------------------------------------
+# PROVENANCE CAVEAT (recorded during the QF vendor, 2026-08-13).
+#
+# `source_sha` 5ae2f80 above NO LONGER RESOLVES in the upstream clone:
+#     $ git -C ~/kokkos-extended-precision-demo cat-file -t 5ae2f80
+#     fatal: git cat-file: could not get object info
+# Upstream history was rewritten at some point after the dd/ff drop, so the
+# recorded sha is now dangling. It is kept verbatim rather than silently
+# rewritten to a live sha — it is what the dd/ff copy was actually taken from.
+#
+# The dd/ff CONTENT was re-verified against upstream HEAD (e67d7da) on the QF
+# vendor: `diff -u <upstream-HEAD>/<file> third_party/include/<file>` yields
+# exactly the local_patches set below and nothing else, so the vendored dd/ff
+# are content-consistent with upstream HEAD despite the dangling sha. Only the
+# two QF files were copied in this change; dd/ff were NOT re-vendored.
+# ------------------------------------------------------------
 
 # ============================================================
 # LOCAL DELTA — the vendored files are NOT byte-identical to upstream.
@@ -67,6 +97,66 @@ local_patches:
     why:   pairs with 45197be's operator int() — resolves the `ff == 0`
            ambiguity. Cleared the B4m.h comparison ambiguity.
 
+# ============================================================
+# QF LOCAL DELTA — qf_math.hpp only; qf_complex.hpp is byte-identical to upstream.
+#
+# A standalone TU including both QF headers compiles clean at -std=c++20 with NO
+# patch. The four below were driven by the REAL per-group flip-TU compile
+# (runs/qcdloop/qf_flip_probe.py), each traceable to a named source site, and
+# each a twin of an existing dd/ff patch above.
+# ============================================================
+qf_local_patches:
+  - sha:   QF integration 2026-08-13
+    file:  qf_math.hpp
+    what:  unary operator+() on QuadFloat
+    why:   twin of dd 44c1ec4 / ff 3ab4aa6. Template-arg promotion rewrites double
+           exprs to QuadFloat in place, so a source-level `+x` must survive.
+    where: B2m.h `TOutput(+p3sq + m3sq - m4sq)` — "no match for operator+
+           (operand type is const QuadFloat)".
+
+  - sha:   QF integration 2026-08-13
+    file:  qf_math.hpp
+    what:  QuadFloat(int) ctor (NOT explicit — see the comparison note)
+    why:   twin of ff 4f21245. int -> QuadFloat is ambiguous between the float and
+           double ctors. Delegates to the double ctor so ints past float's 2^24
+           exact range do not truncate.
+    where: B3m.h / B4m.h `ql::Imag(r13) == 0` — "conversion from int to QuadFloat
+           is ambiguous".
+
+  - sha:   QF integration 2026-08-13
+    file:  qf_math.hpp
+    what:  operator int() on QuadFloat
+    why:   twin of dd 44c1ec4 / ff 45197be. Routes via the FOUR-limb sum, not f0
+           alone, so the low words still contribute near an exact-int boundary.
+    where: B3m.h `ir14 = <QuadFloat expr>` where ir14 is int — "cannot convert
+           QuadFloat to int in assignment".
+
+  - sha:   QF integration 2026-08-13
+    file:  qf_math.hpp
+    what:  6 scalar-FLOAT comparison overloads
+    why:   twin of dd 44c1ec4 / ff f12d8bf, and PAIRED with operator int() above —
+           do not re-apply one without the other. Pristine QF resolves `qf == 0.0`
+           via the implicit QuadFloat(double) ctor and needs no overloads; adding
+           operator int() is what creates the ambiguity (both directions become
+           user-defined conversions). These overloads take the literal by a
+           standard floating-integral conversion, which outranks both.
+           float and NOT double overloads: QuadFloat has BOTH converting ctors, so
+           declaring both families would reintroduce the ambiguity. (dd uses double
+           overloads because DoubleDouble has a single floating ctor.)
+
+# DELIBERATELY NOT APPLIED (no call site demanded them; do not add pre-emptively):
+#   * unary operator+() on QuadFloatComplex — dd has this twin, ff does not, and no
+#     complex unary-plus site appeared in the QF flip TUs.
+#   * hypot-style overflow-safe complex abs() + sqrt (dd/ff 45197be).
+#     ** LATENT, NOT ABSENT. ** qf_complex.hpp ships the NAIVE sqrt(re^2+im^2),
+#     which overflows at sqrt(FLT_MAX) ~ 1.84e19 — the identical FP32 ceiling that
+#     produced ff = nan on ~half the BIN inputs (STOP #HHH / #III). It has not
+#     fired because the two qf-routed integrals (B12, B16) are range-safe and the
+#     range-unsafe BIN integrals never reach the qf rung (the fp32-family range
+#     guard skips it). IF A RANGE-UNSAFE INTEGRAL IS EVER ROUTED TO qf, APPLY THE
+#     HYPOT TWIN FIRST. Unlike dd_complex::abs this one is NOT load-bearing for the
+#     oracle — the oracle is dd — so it can be added without re-baselining routing.
+
 # Authoritative delta vs pristine upstream, measured with the temporary compat
 # shim removed, i.e. this is exactly the persistent local patch set:
 #
@@ -76,11 +166,17 @@ local_patches:
 # body and the inlined magnitude inside complex sqrt(), both replaced by the
 # hypot form (45197be). Everything else is pure addition, so a future refresh
 # can re-apply the set by adding the marked blocks back.
+#
+# Counts re-measured against upstream HEAD on the QF vendor (2026-08-13); the
+# dd_complex.hpp figure was stale (recorded +32, actual +40 — comment lines
+# added to the patch blocks after the diffstat was first written).
 local_delta_lines:
-  dd_math.hpp:     +20  -0
-  dd_complex.hpp:  +32  -2
-  ff_math.hpp:     +26  -0
+  dd_math.hpp:     +21  -0
+  dd_complex.hpp:  +40  -2
+  ff_math.hpp:     +27  -0
   ff_complex.hpp:  +28  -2
+  qf_math.hpp:     +46  -0
+  qf_complex.hpp:  +0   -0
 
 # Locate every re-applied block in a refreshed file with:
 #   grep -n 'LOCAL PATCH' third_party/include/*.hpp

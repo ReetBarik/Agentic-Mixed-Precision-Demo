@@ -201,6 +201,17 @@ def _gen_regional(intent: RemediationIntent, deps: PatchDeps, attempt: int) -> G
     # target routed here only when Strategy tagged the intent ``via="regional"``
     # (a template-typed region — dispatch_path made that call); ff/dd are the
     # extended promotion/demotion targets.
+    # Fail loud on a target this path has no integrator for.  The mapping below
+    # used to default to ``float`` for anything unrecognised, which was safe only
+    # while float was the sole non-ff/dd rung.  With qf on the ladder that default
+    # would silently turn a ``double-to-qf`` UPCAST into a float DOWNCAST — a
+    # numerical regression no build error would catch.  Strategy already filters
+    # these out (models.REGION_REALIZABLE); this is the second line of defence.
+    if to not in ("ff", "dd", "float"):
+        return Gen(False, R.LLM_GEN_FAILED, R.ERR_INTEGRATOR,
+                   f"regional path has no integrator for target precision {to!r} "
+                   f"(intent kind {intent.kind!r}); this path reaches ff/dd/float "
+                   f"only — a whole-TU flip is the only qf mechanism")
     scalar = {"ff": "FloatFloat", "dd": "DoubleDouble"}.get(to, "float")
     which = {"ff": "ff", "dd": "dd"}.get(to, "float")
     # Caller precision to demote/widen region writes back to on exit.  Only
@@ -330,6 +341,17 @@ def _gen_regional_fanout(intent: RemediationIntent, deps: PatchDeps, attempt: in
     from agents.shared.region_scan import extract_region_writes
 
     to = intent.kind.split("-to-")[-1]
+    # Fail loud on a target this path has no integrator for.  The mapping below
+    # used to default to ``float`` for anything unrecognised, which was safe only
+    # while float was the sole non-ff/dd rung.  With qf on the ladder that default
+    # would silently turn a ``double-to-qf`` UPCAST into a float DOWNCAST — a
+    # numerical regression no build error would catch.  Strategy already filters
+    # these out (models.REGION_REALIZABLE); this is the second line of defence.
+    if to not in ("ff", "dd", "float"):
+        return Gen(False, R.LLM_GEN_FAILED, R.ERR_INTEGRATOR,
+                   f"regional path has no integrator for target precision {to!r} "
+                   f"(intent kind {intent.kind!r}); this path reaches ff/dd/float "
+                   f"only — a whole-TU flip is the only qf mechanism")
     scalar = {"ff": "FloatFloat", "dd": "DoubleDouble"}.get(to, "float")
     which = {"ff": "ff", "dd": "dd"}.get(to, "float")
     caller_type = "float" if intent.kind == "float-to-ff" else "double"

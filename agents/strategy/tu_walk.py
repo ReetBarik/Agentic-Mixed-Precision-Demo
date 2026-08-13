@@ -16,31 +16,46 @@ qcdloop-specific build/oracle/measure is **not** here — it is injected as
 
 Provider contract (``tu_measure_fn(integral, target) -> dict``):
 
-    target == "baseline"        -> {"built": bool, "baseline_digits": float|None}
-    target in {"dd","float","ff"} -> {"built": bool,
-                                      "baseline_digits": float|None,
-                                      "candidate_digits": float|None,
-                                      "log_tail": str}
+    target == "baseline"               -> {"built": bool, "baseline_digits": float|None}
+    target in {"dd","qf","float","ff"} -> {"built": bool,
+                                           "baseline_digits": float|None,
+                                           "candidate_digits": float|None,
+                                           "log_tail": str}
 
 The provider owns caching (vanilla baseline + dd oracle + per-group flip builds are
 built once and reused across integrals sharing a group).
 
 **Two phases**, mirroring the region walk's correctness→speedup split:
 
-* **Correctness (UPSHIFT).**  For an integral below the bar at double, try ``dd``.
-  ``baseline >= bar`` → ``tu_no_flip_needed`` (double already clears; no flip).
-  Built + clears bar → ``tu_accepted`` (routed to dd).  Otherwise the integral
+* **Correctness (UPSHIFT).**  For an integral below the bar at double, walk
+  :data:`CORRECTNESS_WALK` — ``qf`` then ``dd`` — and take the FIRST that clears;
+  a qf accept short-circuits the dd attempt entirely.  ``baseline >= bar`` →
+  ``tu_no_flip_needed`` (double already clears; no flip).  Otherwise the integral
   stays at double and the speedup phase still considers float/ff for it.
+
+  A range-unsafe integral skips the ``qf`` rung and goes straight to ``dd`` — qf is
+  fp32-ranged, so it cannot rescue a value that overflows float (models.FP32_FAMILY).
 * **Speedup (DOWNSHIFT).**  For *every* integral, walk ``float`` then ``ff`` in
   order; the first that clears the bar wins (routed to that precision).  ``float``
   is a candidate only when the report's ``predicted_rel_err_if_float`` signal makes
   it plausible (the same ``error_threshold(tolerance)`` gate the region walk uses);
-  ``ff`` is always a candidate (the workhorse per prior L-measure runs).
+  ``ff`` is otherwise always a candidate (the workhorse per prior L-measure runs).
 
-The final routing per integral is the widest accepted correctness precision if the
+  A range-unsafe integral skips BOTH speedup rungs — float and ff are both
+  fp32-family — exactly as it skips ``qf`` on the correctness side.  The
+  ``predicted_rel_err`` signal cannot substitute for this: it models ACCURACY and
+  is blind to over/underflow.
+
+The final routing per integral is the CHEAPEST accepted correctness precision if the
 speedup phase found nothing narrower, else the narrowest accepted speedup precision
 (a downshift always beats staying at the correctness precision when it clears the
 bar — that is the whole point of the speedup phase).
+
+Cheapest, not widest: with qf and dd both on the correctness walk, "widest accepted"
+would prefer dd over qf whenever both were recorded, which inverts the intent — the
+point of the qf rung is to avoid paying for dd.  In practice the walk short-circuits
+on the first accept so only one correctness precision is ever recorded, but the
+tie-break is stated as cheapest so the rule stays correct if that ever changes.
 """
 
 from __future__ import annotations
@@ -54,9 +69,20 @@ TU_REJECTED_BELOW_TOL = "tu_rejected_below_tolerance"
 TU_BUILD_FAILED = "tu_build_failed"
 TU_NO_FLIP_NEEDED = "tu_no_flip_needed"
 
-# The precision targets, by phase.  dd is the sole correctness (upshift) target;
-# float then ff is the speedup (downshift) walk order (cheapest/narrowest first).
-_CORRECTNESS_TARGET = "dd"
+# The precision targets, by phase — both CHEAPEST-FIRST, first accept wins.
+#
+# Correctness (upshift) walks qf then dd.  qf (~29 digits, 4xFP32) is the cheap
+# alternative to dd on the fp32-heavy silicon this targets, so trying it first
+# makes correctness a *cheapest-sufficient* search rather than a jump straight to
+# the most expensive rung.  dd remains the backstop: an integral qf cannot carry
+# still reaches dd in the same pass.
+#
+# Walking qf-first also means STOP #ZZ (a dd accept is never downshifted) needs no
+# relaxation — there is never a dd accept to undo, because qf is evaluated before
+# dd is ever attempted.
+#
+# Speedup (downshift) walks float then ff, likewise cheapest/narrowest first.
+CORRECTNESS_WALK: tuple[str, ...] = ("qf", "dd")
 _SPEEDUP_WALK = ("float", "ff")
 
 

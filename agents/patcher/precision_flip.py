@@ -44,9 +44,16 @@ from agents.patcher.call_graph import CallGraph, FuncDef
 class TargetPrecision(str, Enum):
     """A precision the flip can target.  Phase-1 uses ``DD``; the enum exists so the
     routing/emission stack is precision-parameterized from the start (Decision 2 —
-    hard-coding to dd is STOP #SS).  ``FF`` / ``FLOAT`` are wired for Phase 2/3."""
+    hard-coding to dd is STOP #SS).  ``FF`` / ``FLOAT`` are wired for Phase 2/3.
+
+    ``QF`` (quad-float, 4xFP32, ~28.9 digits) sits between ``DOUBLE`` and ``DD`` on the
+    ladder: it is the cheap alternative to dd on fp32-heavy silicon, where four FP32
+    words cost far less than a double-double.  Unlike dd it does NOT widen the exponent
+    range — qf stays FP32-bounded at ~3.4e38, which the strategy walk's fp32-family
+    range guard has to account for on the correctness path, not just for speedups."""
 
     DD = "dd"
+    QF = "qf"
     FF = "ff"
     FLOAT = "float"
 

@@ -39,7 +39,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from pathlib import Path
 
-from agents.integrator_base.boundary import narrow_two_limb_scalar
+from agents.integrator_base.boundary import narrow_extended_scalar
 from agents.patcher.precision_flip import TargetPrecision
 from agents.patcher.shim_synth import read_embedded_sha, render_shim
 
@@ -82,8 +82,14 @@ class PrecisionProfile:
     cpp_output: str               # TOutput template arg (the complex container)
     cpp_scalar: str               # TMass / TScale template arg (the real scalar)
     printer_name: str             # ql_app Printer struct name emitted into the driver
-    two_limb: bool                # component printer emits hi|lo (dd/ff) vs one token
+    two_limb: bool                # scalar is an extended multi-limb aggregate (not native)
     available: bool               # servable without enrichment (static header OR shim)
+    # The scalar's limb members, most-significant first — what the narrowing printer
+    # sums to rebuild a caller-precision value.  Empty for a native single scalar.
+    # ``two_limb`` says *whether* the scalar is an aggregate; ``limbs`` says which
+    # members it actually has, which is not always ``("hi","lo")``: QuadFloat carries
+    # four FP32 words ``f0..f3`` and defines no ``.hi``/``.lo`` at all.
+    limbs: tuple[str, ...] = ("hi", "lo")
     caller_type: str = "double"   # the app-boundary caller precision the flip narrows to
     shim_synthesis: bool = False  # serve via a generated leaf shim (Phase-2 float downshift)
     maths_reference_header: str = "kokkosMaths.h"  # double reference the shim layers on
@@ -117,6 +123,18 @@ PROFILES: dict[TargetPrecision, PrecisionProfile] = {
         two_limb=True,
         available=True),           # enabled via kokkosMaths_ff.h enrichment (commit d0f5b35);
                                    # static wrapper + custom FloatFloatComplex container clears STOP #EEE
+    TargetPrecision.QF: PrecisionProfile(
+        precision=TargetPrecision.QF,
+        define_macro="USE_QF_COMPLEX",
+        maths_header="kokkosMaths_qf.h",
+        cpp_output="ql::qfun::qfcomplex",
+        cpp_scalar="ql::qfun::qfloat",
+        printer_name="QFPrinter",
+        two_limb=True,                     # extended aggregate — but FOUR limbs, not two
+        limbs=("f0", "f1", "f2", "f3"),
+        available=True),                   # enabled via kokkosMaths_qf.h enrichment; all
+                                           # five box groups build + run at qf (T4 probe,
+                                           # runs/qcdloop/qf_flip_probe.py)
     TargetPrecision.FLOAT: PrecisionProfile(
         precision=TargetPrecision.FLOAT,
         define_macro=None,                 # default arm (double reference) + generated shim
@@ -125,6 +143,7 @@ PROFILES: dict[TargetPrecision, PrecisionProfile] = {
         cpp_scalar="float",
         printer_name="FloatPrinter",
         two_limb=False,
+        limbs=(),                          # native single scalar — a plain cast narrows it
         available=True,                    # Phase-2: served by shim synthesis (no enrichment)
         shim_synthesis=True,
         maths_reference_header="kokkosMaths.h",
@@ -232,10 +251,13 @@ def render_wrapper(target: TargetPrecision = TargetPrecision.DD) -> str:
             f'#include "{_shim_filename(prof)}"   // pipeline-synthesized target-precision '
             "leaves\n")
     arms: list[str] = []
+    arm_doc: list[str] = []
     for prof in PROFILES.values():
         if prof.available and prof.define_macro is not None:
             arms.append(f'#if defined({prof.define_macro})\n'
                         f'#include "{prof.maths_header}"')
+            arm_doc.append(f"//   {prof.define_macro:<16} -> {prof.cpp_scalar} "
+                           f"({prof.maths_header})\n")
     # The macro-guarded available arms come first as an #if / #elif ladder.
     ladder = ""
     for i, arm in enumerate(arms):
@@ -259,11 +281,16 @@ def render_wrapper(target: TargetPrecision = TargetPrecision.DD) -> str:
         "//\n"
         "// QCDLoop + Kokkos 2025 — precision wrapper (pipeline-generated, Phase-1 flip)\n"
         "//\n"
-        "// Selects the precision maths header from the driver's build define:\n"
-        "//   USE_DD_COMPLEX   -> ql::ddfun double-double (all backends)\n"
-        "//   USE_FF_COMPLEX   -> ql::ffun float-float   (all backends, enrichment header)\n"
+        "// Selects the precision maths header from the driver's build define.  The arms\n"
+        "// below are generated from the AVAILABLE profiles in agents.patcher.tu_emit, so\n"
+        "// this list cannot drift from the ladder underneath it:\n"
+        f"{''.join(arm_doc)}"
         "//   USE_QUAD_COMPLEX -> CUDA __nv_fp128 quad (CUDA only)\n"
         "//   neither          -> Kokkos::complex<double> (kokkosMaths.h)\n"
+        "//\n"
+        "// NB USE_QUAD_COMPLEX (CUDA __nv_fp128, one 128-bit word) and USE_QF_COMPLEX\n"
+        "// (quad-FLOAT, four FP32 words) are different precisions despite both reading\n"
+        "// as 'quad'.  They are separate arms and never interchangeable.\n"
         "//\n"
         "// Generated into the CLONED working tree only; the snapshot wrapper is pristine\n"
         "// (STOP #Z).  Do not hand-edit — regenerate via agents.patcher.tu_emit.\n"
@@ -294,7 +321,7 @@ def _printer_struct(prof: PrecisionProfile) -> str:
     positive: the candidate does not deliver dd to the caller).
     """
     if prof.two_limb:
-        recon = narrow_two_limb_scalar("v", prof.caller_type, two_limb=True)
+        recon = narrow_extended_scalar("v", prof.caller_type, prof.limbs)
         return (
             f"struct {prof.printer_name} {{\n"
             f"    // app-output boundary narrow: extended -> caller precision (STOP #TT)\n"
@@ -303,7 +330,7 @@ def _printer_struct(prof: PrecisionProfile) -> str:
             f"    }}\n"
             f"}};")
     # Native single-limb extended scalar (float): a plain cast is the reconstruction.
-    recon = narrow_two_limb_scalar("v", prof.caller_type, two_limb=False)
+    recon = narrow_extended_scalar("v", prof.caller_type, prof.limbs)
     return (
         f"struct {prof.printer_name} {{\n"
         f"    static void emit(std::string& out, {prof.cpp_scalar} v) {{ "

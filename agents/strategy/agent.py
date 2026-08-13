@@ -35,14 +35,15 @@ from agents.strategy.dispatch import dispatch
 from agents.strategy.gitops import GitRepo
 from agents.strategy.iteration_log import IterationLogger
 from agents.strategy.models import (
-    INTENT_CORRECTNESS, INTENT_SPEEDUP, LADDER, VIA_PLAIN, VIA_REGIONAL,
+    FP32_FAMILY, INTENT_CORRECTNESS, INTENT_SPEEDUP, LADDER, VIA_PLAIN,
+    VIA_REGIONAL,
 )
 from agents.strategy.ranking import build_queues, error_threshold, load_flop_weights
 from agents.strategy.report import write_reports
 from agents.strategy.source_probe import region_has_bare_double
 from agents.strategy.tu_walk import (
-    TU_ACCEPTED, TU_BUILD_FAILED, TU_NO_FLIP_NEEDED, TU_REJECTED_BELOW_TOL,
-    float_is_candidate, status_for,
+    CORRECTNESS_WALK, TU_ACCEPTED, TU_BUILD_FAILED, TU_NO_FLIP_NEEDED,
+    TU_REJECTED_BELOW_TOL, float_is_candidate, status_for,
 )
 from agents.strategy.walk import RetryWalk
 
@@ -217,8 +218,9 @@ class StrategyRun:
         """Mechanical whole-TU walk — no Patcher LLM, no region/chain walk.
 
         Enumerates the report's integrals, drives ``tu_measure_fn`` per precision
-        (dd correctness, then float→ff speedup), applies the tolerance gate, and
-        records a per-integral routing decision.  See :mod:`agents.strategy.tu_walk`.
+        (qf→dd correctness, then float→ff speedup), applies the tolerance gate, and
+        records a per-integral routing decision.  Both walks are cheapest-first with
+        first-accept-wins.  See :mod:`agents.strategy.tu_walk`.
         """
         report = json.loads(Path(self.report_path).read_text())
         integrals = sorted(report.get("integrals", {}))
@@ -250,24 +252,40 @@ class StrategyRun:
                 "route": "double",
             }
 
-        # == Phase 1 — correctness (UPSHIFT to dd) =========================
+        # == Phase 1 — correctness (UPSHIFT, cheapest-sufficient: qf then dd) ==
+        # First accept wins, so an integral qf can carry never pays for a dd build.
         self.phase = INTENT_CORRECTNESS
         for integral in integrals:
             base = baselines[integral]
             # Signal-driven prune: an integral already at/above the bar at double
             # needs no correctness flip (the gate returns no_flip_needed anyway;
-            # skipping the build here saves the measure).
+            # skipping the build here saves the measure).  Recorded against the
+            # LAST rung of the walk so the no_flip_needed row keeps naming the
+            # precision the integral would otherwise have been routed to.
             if base is not None and base >= (self.tolerance):
-                self._tu_record(integral, "dd", built=False, baseline=base,
-                                candidate=None, direction=LiftDirection.UPSHIFT,
+                self._tu_record(integral, CORRECTNESS_WALK[-1], built=False,
+                                baseline=base, candidate=None,
+                                direction=LiftDirection.UPSHIFT,
                                 skipped_no_flip=True)
                 continue
-            res = self.tu_measure_fn(integral, "dd")
-            self._tu_record(integral, "dd", built=bool(res.get("built")),
-                            baseline=res.get("baseline_digits", base),
-                            candidate=res.get("candidate_digits"),
-                            direction=LiftDirection.UPSHIFT,
-                            log_tail=res.get("log_tail", ""))
+            for target in CORRECTNESS_WALK:
+                # fp32-family range guard on the correctness path: qf widens the
+                # significand but stays FP32-ranged, so it cannot rescue an integral
+                # whose values leave float's exponent range — skip straight to dd.
+                if (self.report_prunes and target in FP32_FAMILY
+                        and not signals[integral].get(
+                            "value_range_ok_for_float", True)):
+                    self.n_skipped_range_unsafe += 1
+                    continue
+                res = self.tu_measure_fn(integral, target)
+                accepted = self._tu_record(
+                    integral, target, built=bool(res.get("built")),
+                    baseline=res.get("baseline_digits", base),
+                    candidate=res.get("candidate_digits"),
+                    direction=LiftDirection.UPSHIFT,
+                    log_tail=res.get("log_tail", ""))
+                if accepted:
+                    break   # cheapest sufficient precision wins the upshift walk
 
         # == Phase 2 — speedup (DOWNSHIFT float→ff) ========================
         # Every integral is a downshift candidate (regardless of the correctness
@@ -276,6 +294,18 @@ class StrategyRun:
         for integral in integrals:
             base = baselines[integral]
             for target in ("float", "ff"):
+                # Same fp32-family range guard as the correctness phase above.  Both
+                # speedup targets are FP32-based, so a range-unsafe integral demotes
+                # to neither and keeps its correctness route.  This phase previously
+                # consulted only the pred_rel_err signal, which is an ACCURACY model
+                # and blind to over/underflow — so a range-unsafe integral could be
+                # routed to ff purely on measured digits, which is the exact hole the
+                # region walk's guard was built to close.
+                if (self.report_prunes and target in FP32_FAMILY
+                        and not signals[integral].get(
+                            "value_range_ok_for_float", True)):
+                    self.n_skipped_range_unsafe += 1
+                    continue
                 if target == "float" and not float_is_candidate(
                         signals[integral].get("predicted_rel_err_if_float"),
                         self.tolerance, report_prunes=self.report_prunes):
@@ -303,25 +333,37 @@ class StrategyRun:
         """Per-integral worst-case report signals used to prune candidates.
 
         ``predicted_rel_err_if_float`` drives the float-rung admission (the same
-        signal the region walk's ``_float_rung_ok`` consults).  Taken worst-case
+        signal the region walk's ``_fp32_rung_ok`` consults).  Taken worst-case
         (max) across the integral's regions so a single float-unsafe region blocks
         the float attempt — matching the region walk's merge semantics.
+
+        ``value_range_ok_for_float`` is the fp32-family exponent-range flag, ANDed
+        across the integral's regions (unsafe in any region ⇒ unsafe for the whole
+        TU, since a whole-TU flip compiles every region at the target precision).
+        It gates the qf correctness rung as well as the float/ff speedup rungs —
+        all three inherit FP32's range.  Fails OPEN (True) when absent, matching
+        characterization._range_ok_for_float.
         """
         out: dict[str, dict] = {}
         for integral, idata in report.get("integrals", {}).items():
             pred_float = None
+            range_ok = True
             for region in (idata.get("regions", {}) or {}).values():
                 if region.get("non_localizable"):
                     continue
+                if not region.get("value_range_ok_for_float", True):
+                    range_ok = False
                 v = region.get("predicted_rel_err_if_float")
                 if v is None:
                     continue
                 v = float(v)
                 pred_float = v if pred_float is None else max(pred_float, v)
-            out[integral] = {"predicted_rel_err_if_float": pred_float}
+            out[integral] = {"predicted_rel_err_if_float": pred_float,
+                             "value_range_ok_for_float": range_ok}
         # integrals with no localizable regions still need an entry (fail-open)
         for integral in report.get("integrals", {}):
-            out.setdefault(integral, {"predicted_rel_err_if_float": None})
+            out.setdefault(integral, {"predicted_rel_err_if_float": None,
+                                      "value_range_ok_for_float": True})
         return out
 
     def _tu_record(self, integral: str, target: str, *, built: bool,
@@ -402,8 +444,14 @@ class StrategyRun:
             "tu_routing": {i: self.tu_route[i] for i in sorted(self.tu_route)},
             "tu_rows": rows,
             "precision_distribution": dist,
+            # Report-prune telemetry (never silent).  The range counter belongs here
+            # as much as in the region-mode summary: the fp32-family guard now fires
+            # on BOTH tu_only phases (skipping qf on the correctness walk and
+            # float/ff on the speedup walk), so a routing change it causes must be
+            # attributable from the report alone.
             "speedup_summary": {
                 "report_prunes_enabled": self.report_prunes,
+                "integrals_skipped_range_unsafe": self.n_skipped_range_unsafe,
                 "regions_flagged_pred_float": self.n_flagged_pred_float,
             },
             "region_meta": meta,
@@ -464,7 +512,12 @@ class StrategyRun:
         """Drive one region target's retry walk to termination."""
         floor = self._floor_for(record.key) if mode == INTENT_SPEEDUP else None
         float_via = VIA_PLAIN
-        float_ok = True
+        # The fp32-family range guard applies to BOTH modes.  It used to be computed
+        # only for speedup, because back then every fp32-family rung (float, ff) sat
+        # BELOW double and so could only be reached by demoting.  qf breaks that: it
+        # is an fp32-family rung ABOVE double, which a CORRECTNESS walk climbs to —
+        # so a range-unsafe region must be prevented from routing to qf as well.
+        fp32_range_ok = self._fp32_rung_ok(record)
         if mode == INTENT_SPEEDUP:
             # A region with a bare `double` token reaches float via the Patcher's
             # plain-edit rung (VIA_PLAIN); a template-typed region has no such token
@@ -475,9 +528,9 @@ class StrategyRun:
                 record.target.line_start, record.target.line_end,
                 cache=self._source_cache)
             float_via = VIA_PLAIN if has_bare else VIA_REGIONAL
-            float_ok = self._float_rung_ok(record)
         walk = RetryWalk(record, mode, self.tolerance, baseline="double",
-                         floor=floor, float_via=float_via, float_ok=float_ok)
+                         floor=floor, float_via=float_via,
+                         fp32_range_ok=fp32_range_ok)
         stopped, walk_digits = self._drive_walk(walk, record, chain=None)
         if stopped:
             self.region_final[record.key] = walk.installed
@@ -493,12 +546,19 @@ class StrategyRun:
             return Path(override)
         return _REPO / "runs" / "qcdloop" / "ratio_multipliers.json"
 
-    def _float_rung_ok(self, record) -> bool:
-        """Wave-3 float-rung admission for a speedup region.
+    def _fp32_rung_ok(self, record) -> bool:
+        """fp32-family rung admission for a region (both walk directions).
 
         WI1 (value_range_ok_for_float) is a HARD gate: a range-unsafe region never
-        attempts float (it settles at ff) — this guards float over/underflow, which
-        the Validator's finite (n=1000) sample can miss at untested inputs.
+        attempts ANY rung built from FP32 words — float, ff, or qf (see
+        models.FP32_FAMILY) — because they all share FP32's exponent range.  This
+        guards over/underflow, which the Validator's finite (n=1000) sample can miss
+        at untested inputs.
+
+        Despite its name the report flag is not float-specific: the reducer computes
+        it as ``abs_val_min >= FLT_MIN_NORMAL and abs_val_max <= FLT_MAX``, i.e. a
+        property of FP32's exponent range, which every fp32-family rung inherits.
+        The field name is kept for report-schema compatibility.
 
         WI2 (predicted_rel_err_if_float) is TELEMETRY-ONLY: pred_float is a *local*
         per-region error bound that systematically over-predicts vs the Validator's
@@ -514,7 +574,7 @@ class StrategyRun:
             return True
         if not getattr(record, "value_range_ok_for_float", True):
             self.n_skipped_range_unsafe += 1
-            return False          # WI1 hard gate — do not attempt float
+            return False          # WI1 hard gate — no fp32-family rung is attempted
         # WI2 telemetry: float IS still attempted; we only count the flag.
         if record.predicted_rel_err_if_float > error_threshold(self.tolerance):
             self.n_flagged_pred_float += 1

@@ -15,6 +15,7 @@ nor the Validator callable is ever consulted in tu_only mode.
 """
 
 import json
+from pathlib import Path
 
 from agents.config import StrategyBudget, StrategyConfig
 from agents.strategy import agent as strategy_agent
@@ -105,7 +106,10 @@ def test_three_integral_routing(tmp_path):
         ("B_ok", "baseline"): _base(12.0),
         ("B_dd", "baseline"): _base(5.0),
         ("B_ff", "baseline"): _base(5.0),
-        # correctness dd (B_ok skipped: baseline already clears)
+        # correctness walk is qf-then-dd; qf rejects here so dd is still reached
+        # (B_ok skipped entirely: baseline already clears).
+        ("B_dd", "qf"): _cand(5.0, 4.0),      # below bar -> reject, fall through
+        ("B_ff", "qf"): _cand(5.0, 4.0),      # below bar -> reject, fall through
         ("B_dd", "dd"): _cand(5.0, 15.9),     # clears 7 -> dd
         # dd=6.0 below bar but a strict lift (+1) -> UPSHIFT accepts (best-effort);
         # the speedup ff below overrides it since ff clears the bar.
@@ -140,6 +144,8 @@ def test_statuses_recorded(tmp_path):
         ("B_ok", "baseline"): _base(12.0),
         ("B_dd", "baseline"): _base(5.0),
         ("B_ff", "baseline"): _base(5.0),
+        ("B_dd", "qf"): _cand(5.0, 4.0),
+        ("B_ff", "qf"): _cand(5.0, 4.0),
         ("B_dd", "dd"): _cand(5.0, 15.9),
         ("B_ff", "dd"): _cand(5.0, None, built=False),   # build fail
         ("B_ok", "ff"): _cand(12.0, 9.0),
@@ -168,6 +174,7 @@ def test_float_attempted_when_signal_plausible(tmp_path):
     report = write_report(tmp_path, {"B_x": 1e-9})
     table = {
         ("B_x", "baseline"): _base(5.0),
+        ("B_x", "qf"): _cand(5.0, 4.0),
         ("B_x", "dd"): _cand(5.0, 15.9),
         ("B_x", "float"): _cand(5.0, 8.0),   # clears 7 -> float wins, ff not tried
         ("B_x", "ff"): _cand(5.0, 9.0),
@@ -185,6 +192,8 @@ def test_promote_fn_called_for_non_double_routes(tmp_path):
     table = {
         ("B_dd", "baseline"): _base(5.0),
         ("B_dbl", "baseline"): _base(5.0),
+        ("B_dd", "qf"): _cand(5.0, 4.0),
+        ("B_dbl", "qf"): _cand(5.0, 4.0),
         ("B_dd", "dd"): _cand(5.0, 15.9),     # -> dd
         # dd with NO lift (candidate <= baseline) and below bar -> reject, stays double.
         ("B_dbl", "dd"): _cand(5.0, 5.0),
@@ -218,3 +227,108 @@ def test_float_is_candidate_gate():
     assert not float_is_candidate(1e-2, 7.0)
     assert float_is_candidate(None, 7.0)
     assert float_is_candidate(1e-2, 7.0, report_prunes=False)
+
+
+# --------------------------------------------------------------------------
+# QF rung — cheapest-sufficient correctness walk
+# --------------------------------------------------------------------------
+
+def test_qf_accept_short_circuits_dd(tmp_path):
+    # The whole point of the qf rung: when qf clears the bar, dd is never built.
+    report = write_report(tmp_path, {"B_qf": 1e-2})
+    table = {
+        ("B_qf", "baseline"): _base(5.0),
+        ("B_qf", "qf"): _cand(5.0, 12.0),     # clears 7 -> qf wins
+        ("B_qf", "ff"): _cand(5.0, 4.0),      # speedup rejects, qf route stands
+    }
+    calls = []
+    result, _ = run_tu(tmp_path, report, make_measure_fn(table, calls=calls))
+    assert result["tu_routing"]["B_qf"] == "qf"
+    assert ("B_qf", "qf") in calls
+    assert ("B_qf", "dd") not in calls        # never paid for the dd build
+
+
+def test_qf_reject_falls_through_to_dd(tmp_path):
+    report = write_report(tmp_path, {"B_dd": 1e-2})
+    table = {
+        ("B_dd", "baseline"): _base(5.0),
+        ("B_dd", "qf"): _cand(5.0, 4.0),      # below bar -> reject
+        ("B_dd", "dd"): _cand(5.0, 15.9),     # clears 7 -> dd
+        ("B_dd", "ff"): _cand(5.0, 4.0),
+    }
+    calls = []
+    result, _ = run_tu(tmp_path, report, make_measure_fn(table, calls=calls))
+    assert result["tu_routing"]["B_dd"] == "dd"
+    assert calls.index(("B_dd", "qf")) < calls.index(("B_dd", "dd"))   # qf tried first
+
+
+def test_qf_build_failure_falls_through_to_dd(tmp_path):
+    # A qf TU that does not compile must not strand the integral at double.
+    report = write_report(tmp_path, {"B_dd": 1e-2})
+    table = {
+        ("B_dd", "baseline"): _base(5.0),
+        ("B_dd", "qf"): _cand(5.0, None, built=False),
+        ("B_dd", "dd"): _cand(5.0, 15.9),
+        ("B_dd", "ff"): _cand(5.0, 4.0),
+    }
+    result, rep = run_tu(tmp_path, report, make_measure_fn(table))
+    assert result["tu_routing"]["B_dd"] == "dd"
+    rows = {r["integral"]: r for r in rep["tu_rows"]}
+    qf_row = [c for c in rows["B_dd"]["candidates"] if c["target"] == "qf"][0]
+    assert qf_row["status"] == TU_BUILD_FAILED
+
+
+def test_range_unsafe_integral_skips_qf_and_goes_to_dd(tmp_path):
+    # qf is fp32-ranged, so it cannot rescue an integral whose values leave float's
+    # exponent range — the correctness walk must skip it and try dd directly.
+    data = json.loads(Path(write_report(tmp_path, {"B_r": 1e-2})).read_text())
+    data["integrals"]["B_r"]["regions"]["B_rm.h:10"]["value_range_ok_for_float"] = False
+    rp = tmp_path / "report_range.json"
+    rp.write_text(json.dumps(data))
+    table = {
+        ("B_r", "baseline"): _base(5.0),
+        # deliberately NO ("B_r","qf") entry: a qf measure would KeyError, which is
+        # the assertion — the guard must prevent the call from happening at all.
+        ("B_r", "dd"): _cand(5.0, 15.9),
+        ("B_r", "ff"): _cand(5.0, 4.0),
+    }
+    calls = []
+    result, _ = run_tu(tmp_path, str(rp), make_measure_fn(table, calls=calls))
+    assert result["tu_routing"]["B_r"] == "dd"
+    assert ("B_r", "qf") not in calls
+
+
+def test_correctness_walk_is_cheapest_first():
+    from agents.strategy.tu_walk import CORRECTNESS_WALK
+    from agents.strategy.models import LADDER
+    # qf must precede dd, and that order must agree with the cost ladder.
+    assert CORRECTNESS_WALK == ("qf", "dd")
+    assert [LADDER.index(p) for p in CORRECTNESS_WALK] == sorted(
+        LADDER.index(p) for p in CORRECTNESS_WALK)
+
+
+def test_range_unsafe_integral_skips_both_speedup_rungs(tmp_path):
+    # float AND ff are both fp32-family, so a range-unsafe integral demotes to
+    # neither — the accuracy signal (predicted_rel_err_if_float) does not override
+    # a range verdict, because it does not model over/underflow at all.
+    data = json.loads(Path(write_report(tmp_path, {"B_s": 1e-30})).read_text())
+    data["integrals"]["B_s"]["regions"]["B_sm.h:10"]["value_range_ok_for_float"] = False
+    rp = tmp_path / "report_range_speedup.json"
+    rp.write_text(json.dumps(data))
+    # Baseline clears the bar, so correctness is a no-op and only speedup is in play.
+    # No ("B_s","float"/"ff") entries: a call would KeyError, which is the assertion.
+    table = {("B_s", "baseline"): _base(12.0)}
+    calls = []
+    result, _ = run_tu(tmp_path, str(rp), make_measure_fn(table, calls=calls))
+    assert result["tu_routing"]["B_s"] == "double"
+    assert not any(t in ("float", "ff") for _, t in calls)
+
+
+def test_range_safe_integral_still_downshifts(tmp_path):
+    # control for the test above: the guard must not block a range-SAFE integral.
+    report = write_report(tmp_path, {"B_s": 1e-30})
+    table = {("B_s", "baseline"): _base(12.0),
+             ("B_s", "float"): _cand(12.0, 4.0),
+             ("B_s", "ff"): _cand(12.0, 9.0)}
+    result, _ = run_tu(tmp_path, report, make_measure_fn(table))
+    assert result["tu_routing"]["B_s"] == "ff"

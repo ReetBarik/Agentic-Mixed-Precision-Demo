@@ -190,10 +190,26 @@ int run_app(int argc, char* argv[]) {
         // hi=v, lo=0), so the exact double is `v` for double and `.hi` for ddouble.
         // `if constexpr` keeps each instantiation compiling (the untaken branch is
         // discarded — no `.hi` on a plain double in the vanilla build).
+        //
+        // The branches are selected by LAYOUT (a C++20 `requires` probe for the limb
+        // members), not by naming a scalar type, so a new extended precision needs no
+        // edit here unless its limb layout is genuinely new.  QuadFloat is such a case:
+        // it carries four FP32 words f0..f3 and defines no `.hi`/`.lo` at all, and one
+        // FP32 word cannot hold the source double — so its branch must sum all four
+        // (QuadFloat(double) splits across the words and the sum reconstructs the
+        // double exactly).  The two-limb branch deliberately still returns `.hi` alone,
+        // unchanged, so the dd/ff INP fingerprints stay byte-identical.
         auto to_d = [](auto v) -> double {
-            if constexpr (std::is_same_v<decltype(v), double>) return v;
-            else if constexpr (std::is_same_v<decltype(v), float>) return static_cast<double>(v);
-            else return v.hi;   // two-limb (ddouble/ffloat): the high limb is the double value
+            using V = std::decay_t<decltype(v)>;
+            if constexpr (std::is_same_v<V, double>) return v;
+            else if constexpr (std::is_same_v<V, float>) return static_cast<double>(v);
+            else if constexpr (requires { v.hi; v.lo; })
+                return v.hi;    // two-limb (ddouble/ffloat): the high limb is the double
+            else if constexpr (requires { v.f0; v.f1; v.f2; v.f3; })
+                return static_cast<double>(v.f0) + static_cast<double>(v.f1)
+                     + static_cast<double>(v.f2) + static_cast<double>(v.f3);
+            else static_assert(sizeof(V) == 0,
+                               "to_d: unrecognised extended scalar limb layout");
         };
 
         auto run_integral = [&](const std::string& name,

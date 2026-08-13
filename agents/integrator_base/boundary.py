@@ -478,24 +478,51 @@ def _apply_spans(text: str, edits: list[tuple[int, int, str]]) -> str:
     return "".join(out)
 
 
-def narrow_two_limb_scalar(expr: str, caller_type: str, two_limb: bool = True) -> str:
-    """Reconstruct a caller-precision scalar from an extended (two-limb) scalar ``expr``.
+# The limb members of the two-limb extended scalars (``DoubleDouble`` / ``FloatFloat``),
+# most-significant first.  Named here so the two-limb spelling has one definition.
+TWO_LIMB_MEMBERS: tuple[str, ...] = ("hi", "lo")
 
-    THE single source of truth for the dd/ff → caller two-limb reconstruction idiom
-    (``static_cast<T>(e.hi) + static_cast<T>(e.lo)``) — the extended scalar types have no
-    ``operator double``, so the boundary rebuilds the value from its two limbs.  A native
-    single-limb scalar (plain ``float``) has no ``.hi``/``.lo`` and is a plain cast.
 
-    Exposed so every dd→caller narrowing — the element-promotion designed-exit
-    (:func:`_demote_expr` / :func:`_demote_complex_value`) AND the Phase-1 template-arg
-    flip's app-output boundary (the per-integral dd TU's narrowing printer) — shares ONE
-    reconstruction primitive rather than re-deriving the idiom per site (STOP #TT: no
-    one-off boundary narrowing).  ``expr`` is any well-formed sub-expression naming the
-    extended value (a name, a ``name.real()``, a driver printer's ``v``)."""
-    if not two_limb:
+def narrow_extended_scalar(expr: str, caller_type: str,
+                           limbs: tuple[str, ...] = TWO_LIMB_MEMBERS) -> str:
+    """Reconstruct a caller-precision scalar from a multi-limb extended scalar ``expr``.
+
+    THE single source of truth for the extended → caller reconstruction idiom (STOP #TT:
+    no one-off boundary narrowing).  The extended scalar types define no ``operator
+    double``, so the boundary rebuilds the value by summing its limbs:
+
+        ("hi", "lo")               -> static_cast<T>(e.hi) + static_cast<T>(e.lo)
+        ("f0", "f1", "f2", "f3")   -> static_cast<T>(e.f0) + ... + static_cast<T>(e.f3)
+        ()                         -> static_cast<T>(e)          (native single scalar)
+
+    ``limbs`` is the type's own limb members in MOST-SIGNIFICANT-FIRST order, and the sum
+    is emitted in that order.  That ordering is what the two-limb profiles have always
+    emitted, so dd/ff drivers stay byte-identical; for a four-limb ``QuadFloat`` it costs
+    at most a sub-ulp difference against summing the tail first (the limbs are
+    non-overlapping and decreasing, so every ordering lands within one ulp of the
+    correctly-rounded caller-precision value — immaterial against a ~31-digit oracle).
+
+    **Every limb is summed — no limb is dropped.** Truncating a ``QuadFloat`` to ``f0``
+    alone would silently deliver ~7 digits where the type carries ~29.
+
+    ``expr`` is any well-formed sub-expression naming the extended value (a name, a
+    ``name.real()``, a driver printer's ``v``)."""
+    if not limbs:
         return f"static_cast<{caller_type}>({expr})"
-    return (f"static_cast<{caller_type}>({expr}.hi) + "
-            f"static_cast<{caller_type}>({expr}.lo)")
+    return " + ".join(f"static_cast<{caller_type}>({expr}.{m})" for m in limbs)
+
+
+def narrow_two_limb_scalar(expr: str, caller_type: str, two_limb: bool = True) -> str:
+    """Two-limb (or native) spelling of :func:`narrow_extended_scalar`.
+
+    The boolean-flavoured entry point the regional / fan-out / chain boundary machinery
+    passes its ``two_limb`` flag to.  That flag is genuinely binary on those paths: they
+    serve ``DoubleDouble`` / ``FloatFloat`` (``.hi``/``.lo``) or a native ``float``, and
+    no four-limb type reaches them.  A caller that knows its type's limb members — the
+    Phase-1 whole-TU flip printer, which also serves ``QuadFloat`` — should call
+    :func:`narrow_extended_scalar` with an explicit ``limbs`` instead."""
+    return narrow_extended_scalar(expr, caller_type,
+                                  TWO_LIMB_MEMBERS if two_limb else ())
 
 
 def _demote_expr(name: str, caller_type: str, two_limb: bool = True) -> str:

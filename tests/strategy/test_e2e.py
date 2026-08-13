@@ -142,7 +142,7 @@ def test_e2e_three_region_run(repo, report_path, tmp_path):
     report = json.loads(Path(res["report_json_path"]).read_text())
     assert report["status"] == "success"
     assert report["tolerance"] == 6.0
-    assert report["precision_distribution"] == {"float": 0, "ff": 1, "double": 0, "dd": 2}
+    assert report["precision_distribution"] == {"float": 0, "ff": 1, "double": 0, "qf": 0, "dd": 2}
 
     # precision assignments: A=dd (ceiling-retained), B=dd (accept), C=ff (speedup)
     prec = {a["file"]: a["precision"] for a in report["precision_assignment"]}

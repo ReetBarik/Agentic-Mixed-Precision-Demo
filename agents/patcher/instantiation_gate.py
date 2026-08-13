@@ -36,6 +36,12 @@ error text.  The four shapes (taxonomy: ``STOP_A_DISPATCH_FIX_2026-07-28.md`` §
 
 Anything the classifier cannot bucket is :data:`SHAPE_UNKNOWN` — the caller MUST
 treat that as STOP #BB (catalog the class, hand back), never a silent fallback.
+
+The four shapes are named after dd because dd is where they were catalogued, but they
+describe an *extended* value meeting a caller-precision sink and are precision-agnostic.
+The recognised vocabulary therefore spans dd (current + legacy spellings) and qf
+(``QuadFloat`` / ``QuadFloatComplex`` and their ``ql::qfun`` aliases); see
+:data:`_EXT_SCALARS` / :data:`_EXT_COMPLEXES`.
 """
 
 from __future__ import annotations
@@ -67,6 +73,17 @@ _CURLY = {"‘": "'", "’": "'", "“": '"', "”": '"'}
 _DD_SCALAR = "Kokkos::Experimental::DoubleDouble"
 _DD_COMPLEX = "Kokkos::Experimental::DoubleDoubleComplex"
 
+# The qf type spellings (quad-float, 4xFP32).  QF has no legacy vocabulary — it was
+# vendored after the Kokkos::Experimental rename, so no archived log names it any other
+# way.  Both the underlying names and the ql::qfun aliases are listed: g++ usually
+# prints the underlying class, but a diagnostic quoting the declared type of a variable
+# can echo the alias, and a missed spelling here is a SHAPE_UNKNOWN -> STOP #BB, i.e. a
+# spurious hard stop rather than a silent miss.
+_QF_SCALAR = "Kokkos::Experimental::QuadFloat"
+_QF_COMPLEX = "Kokkos::Experimental::QuadFloatComplex"
+_QF_SCALAR_ALIAS = "ql::qfun::qfloat"
+_QF_COMPLEX_ALIAS = "ql::qfun::qfcomplex"
+
 # Pre-refresh spellings. This module classifies COMPILER DIAGNOSTIC TEXT, and
 # build logs captured before third_party/include was refreshed from
 # kokkos-extended-precision-demo@5ae2f80 name the old types — including the
@@ -80,6 +97,15 @@ _DD_COMPLEX_LEGACY = "quad::ddfun::ddcomplex"
 _DD_SCALARS = (_DD_SCALAR, _DD_SCALAR_LEGACY)
 _DD_COMPLEXES = (_DD_COMPLEX, _DD_COMPLEX_LEGACY)
 
+# Every extended-precision spelling the classifier recognises.  The SHAPE_* tags keep
+# their historical dd-flavoured names (``shape1_dd_to_caller_complex`` etc.) because they
+# are stable identifiers in reports and archived logs — but the defect shapes are about
+# an EXTENDED value meeting a caller-precision sink, which is precision-independent, so
+# the vocabulary is not.  A qf value landing in a ``Kokkos::complex<double>`` is the same
+# Shape 1 hole as a dd one.
+_EXT_SCALARS = (*_DD_SCALARS, _QF_SCALAR, _QF_SCALAR_ALIAS)
+_EXT_COMPLEXES = (*_DD_COMPLEXES, _QF_COMPLEX, _QF_COMPLEX_ALIAS)
+
 
 def _alt(*names: str) -> str:
     """Regex alternation over the accepted spellings of a type."""
@@ -91,7 +117,7 @@ def _has(message: str, *names: str) -> bool:
 
 
 # Any Kokkos/std complex container wrapping the dd complex — the double-widen symptom.
-_NESTED_RE = re.compile(r"(?:Kokkos|std)::complex<\s*" + _alt(*_DD_COMPLEXES) + r"\s*>")
+_NESTED_RE = re.compile(r"(?:Kokkos|std)::complex<\s*" + _alt(*_EXT_COMPLEXES) + r"\s*>")
 
 
 def _normalise(text: str) -> str:
@@ -128,32 +154,32 @@ def classify_error(message: str) -> str:
     # --- Shape 1: dd value -> caller-precision complex<double> ---------------
     # construction: Kokkos::complex<double>::complex(<dd scalar or dd complex>)
     if re.search(r"complex<double>::complex\(\s*" +
-                 _alt(*_DD_SCALARS, *_DD_COMPLEXES) + r"\s*\)", m):
+                 _alt(*_EXT_SCALARS, *_EXT_COMPLEXES) + r"\s*\)", m):
         return SHAPE_1_EXIT_NARROW
     # decl/return conversion: DoubleDoubleComplex/DoubleDouble -> (const) Kokkos::complex<double>
-    if _has(m, *("conversion from '" + t for t in (*_DD_COMPLEXES, *_DD_SCALARS))) \
+    if _has(m, *("conversion from '" + t for t in (*_EXT_COMPLEXES, *_EXT_SCALARS))) \
             and "Kokkos::complex<double>" in m:
         return SHAPE_1_EXIT_NARROW
     # assignment either direction between DoubleDoubleComplex/DoubleDouble and complex<double>
     if "operator=" in m and "Kokkos::complex<double>" in m and \
-            _has(m, *_DD_COMPLEXES, *_DD_SCALARS):
+            _has(m, *_EXT_COMPLEXES, *_EXT_SCALARS):
         return SHAPE_1_EXIT_NARROW
     # could-not-convert complex<double> -> DoubleDoubleComplex (a caller value into a dd sink at
     # the exit line — the mirror of the narrowing hole, still an exit-boundary defect)
     if "could not convert" in m and "Kokkos::complex<double>" in m and \
-            _has(m, *_DD_COMPLEXES):
+            _has(m, *_EXT_COMPLEXES):
         return SHAPE_1_EXIT_NARROW
 
     # --- Shape 2: dd value -> bare double (missing interior/callee widen) -----
-    if re.search(r"invalid cast from type '" + _alt(*_DD_SCALARS) +
+    if re.search(r"invalid cast from type '" + _alt(*_EXT_SCALARS) +
                  r"' to type 'double'", m):
         return SHAPE_2_INTERIOR_WIDEN
-    if re.search(r"cannot convert '" + _alt(*_DD_SCALARS) +
+    if re.search(r"cannot convert '" + _alt(*_EXT_SCALARS) +
                  r"' to 'const double'", m):
         return SHAPE_2_INTERIOR_WIDEN
-    if re.search(r"reference of type 'const double&'.*'" + _alt(*_DD_SCALARS) + r"'", m):
+    if re.search(r"reference of type 'const double&'.*'" + _alt(*_EXT_SCALARS) + r"'", m):
         return SHAPE_2_INTERIOR_WIDEN
-    if _has(m, *("cannot convert '" + t for t in _DD_SCALARS)) and "'double'" in m:
+    if _has(m, *("cannot convert '" + t for t in _EXT_SCALARS)) and "'double'" in m:
         return SHAPE_2_INTERIOR_WIDEN
 
     return SHAPE_UNKNOWN

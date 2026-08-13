@@ -189,9 +189,12 @@ def test_float_group_driver_shape():
     assert "#include <Kokkos_Complex.hpp>" in d
 
 
-def test_profiles_declare_all_three_targets():
-    # The table is parameterized across all three precisions from the start.
-    assert set(PROFILES) == {TargetPrecision.DD, TargetPrecision.FF, TargetPrecision.FLOAT}
+def test_profiles_declare_every_ladder_target():
+    # The table is parameterized across every precision the ladder can target.  QF
+    # joined at the QF integration; it is declared here even while unavailable, which
+    # is what lets profile_for fail loud instead of KeyError-ing.
+    assert set(PROFILES) == {TargetPrecision.DD, TargetPrecision.QF,
+                             TargetPrecision.FF, TargetPrecision.FLOAT}
 
 
 # --------------------------------------------------------------------------- #
@@ -291,3 +294,123 @@ def test_emit_rejects_non_tree(tmp_path):
     empty.mkdir()
     with pytest.raises(TUEmitError):
         emit_flip_tu(empty, "box/B1m.h", tmp_path / "drv")
+
+
+# --------------------------------------------------------------------------- #
+# QF (quad-float, 4xFP32) — the rung between double and dd
+# --------------------------------------------------------------------------- #
+
+def test_qf_profile_available_via_enrichment():
+    # QF is served by its static enrichment header kokkosMaths_qf.h — a static-header
+    # profile like dd/ff (NOT shim synthesis), on the custom ql::qfun::qfcomplex
+    # container (QuadFloatComplex), which is QF's answer to the same STOP #EEE that
+    # forced ff off Kokkos::complex.
+    prof = PROFILES[TargetPrecision.QF]
+    assert prof.available
+    assert not prof.shim_synthesis
+    assert prof.maths_header == "kokkosMaths_qf.h"
+    assert prof.define_macro == "USE_QF_COMPLEX"
+    assert prof.cpp_output == "ql::qfun::qfcomplex"
+    assert prof.cpp_scalar == "ql::qfun::qfloat"
+    assert prof.printer_name == "QFPrinter"
+    assert profile_for(TargetPrecision.QF).precision is TargetPrecision.QF
+
+
+def test_qf_group_driver_shape():
+    d = render_group_driver("box/B1m.h", TargetPrecision.QF)
+    assert '#include "box/B1m.h"' in d
+    assert "#define USE_QF_COMPLEX" in d
+    assert "ql::qfun::qfcomplex" in d
+    assert "ql::qfun::qfloat" in d
+    assert "QFPrinter" in d
+    assert "run_app<" in d
+    # QF is an extended aggregate, so the driver must NOT pull in Kokkos_Complex.hpp
+    # (that include is for the native-scalar profiles' Kokkos::complex<float>).
+    assert "#include <Kokkos_Complex.hpp>" not in d
+
+
+def test_unavailable_target_still_fails_loud():
+    # Reverse-STOP #SS: the fail-loud path must survive QF becoming available — an
+    # undeclared/unavailable target raises rather than silently degrading to dd.
+    from dataclasses import replace as _replace
+    prof = PROFILES[TargetPrecision.QF]
+    PROFILES[TargetPrecision.QF] = _replace(prof, available=False)
+    try:
+        with pytest.raises(TUEmitError):
+            profile_for(TargetPrecision.QF)
+        with pytest.raises(TUEmitError):
+            render_group_driver("box/B1m.h", TargetPrecision.QF)
+    finally:
+        PROFILES[TargetPrecision.QF] = prof
+
+
+def test_qf_is_four_limb_not_two():
+    # The crux of the profile: QF IS an extended aggregate (two_limb=True, meaning
+    # "not a native scalar"), but its limbs are f0..f3 — it has no .hi/.lo at all, so
+    # the two-limb spelling would not compile against it.
+    prof = PROFILES[TargetPrecision.QF]
+    assert prof.two_limb
+    assert prof.limbs == ("f0", "f1", "f2", "f3")
+    assert PROFILES[TargetPrecision.DD].limbs == ("hi", "lo")
+    assert PROFILES[TargetPrecision.FF].limbs == ("hi", "lo")
+    assert PROFILES[TargetPrecision.FLOAT].limbs == ()
+
+
+def test_qf_printer_sums_every_limb():
+    # The QF narrowing printer must sum ALL FOUR limbs.  Truncating to f0 would deliver
+    # ~7 digits from a type that carries ~29, and would do so silently.
+    from agents.patcher.tu_emit import _printer_struct
+    body = _printer_struct(PROFILES[TargetPrecision.QF])
+    for limb in ("f0", "f1", "f2", "f3"):
+        assert f"static_cast<double>(v.{limb})" in body
+    assert body.count("static_cast<double>") == 4
+    assert ".hi" not in body and ".lo" not in body
+
+
+def test_dd_and_ff_printers_unchanged_by_the_limb_generalization():
+    # Regression guard: generalizing the narrowing primitive to a limb list must leave
+    # the dd/ff drivers byte-identical, or the routing baseline moves under us.
+    from agents.patcher.tu_emit import _printer_struct
+    assert ("out += dhex(static_cast<double>(v.hi) + static_cast<double>(v.lo));"
+            in _printer_struct(PROFILES[TargetPrecision.DD]))
+    assert ("out += dhex(static_cast<double>(v.hi) + static_cast<double>(v.lo));"
+            in _printer_struct(PROFILES[TargetPrecision.FF]))
+    # FLOAT narrows to caller_type "double" too — a plain cast, no limb members.
+    assert ("out += dhex(static_cast<double>(v));"
+            in _printer_struct(PROFILES[TargetPrecision.FLOAT]))
+
+
+def test_qf_arm_present_in_the_wrapper_ladder():
+    # Now that QF is available it must contribute its own arm — and the arm must be
+    # distinct from the CUDA __nv_fp128 USE_QUAD_COMPLEX arm, which is a different
+    # precision that merely reads as "quad".
+    w = render_wrapper(TargetPrecision.DD)
+    assert "defined(USE_QF_COMPLEX)" in w
+    assert '#include "kokkosMaths_qf.h"' in w
+    assert "defined(USE_QUAD_COMPLEX)" in w
+    assert '#include "kokkosMaths_quad.h"' in w
+    assert w.index("USE_QF_COMPLEX") != w.index("USE_QUAD_COMPLEX")
+
+
+def test_wrapper_arm_doc_is_generated_from_available_profiles():
+    # The doc block is generated, so it cannot drift from the ladder beneath it:
+    # every available macro profile gets exactly one "-> <scalar>" line.
+    w = render_wrapper(TargetPrecision.DD)
+    for prof in PROFILES.values():
+        if prof.available and prof.define_macro is not None:
+            assert f"-> {prof.cpp_scalar} ({prof.maths_header})" in w
+
+
+def test_unavailable_arm_absent_from_the_wrapper_ladder():
+    # The converse: an unavailable profile contributes neither an arm nor a doc line.
+    from dataclasses import replace as _replace
+    prof = PROFILES[TargetPrecision.QF]
+    PROFILES[TargetPrecision.QF] = _replace(prof, available=False)
+    try:
+        w = render_wrapper(TargetPrecision.DD)
+        assert "#if defined(USE_QF_COMPLEX)" not in w
+        assert "#elif defined(USE_QF_COMPLEX)" not in w
+        assert '#include "kokkosMaths_qf.h"' not in w
+        assert "-> ql::qfun::qfloat" not in w
+    finally:
+        PROFILES[TargetPrecision.QF] = prof
