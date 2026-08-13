@@ -125,27 +125,33 @@
   </g>
 
   <!-- Precision containers (dependency, small, above Patcher, with vertical gap) -->
-  <g transform="translate(585, 280)">
+  <g transform="translate(540, 280)">
     <rect x="0" y="0" width="80" height="50" rx="6" class="container-box"/>
     <text x="40" y="20" text-anchor="middle" class="sub-sm" font-weight="700">dd_math</text>
     <text x="40" y="36" text-anchor="middle" class="sub-sm">.hpp</text>
   </g>
-  <g transform="translate(675, 280)">
+  <g transform="translate(630, 280)">
+    <rect x="0" y="0" width="80" height="50" rx="6" class="container-box"/>
+    <text x="40" y="20" text-anchor="middle" class="sub-sm" font-weight="700">qf_math</text>
+    <text x="40" y="36" text-anchor="middle" class="sub-sm">.hpp</text>
+  </g>
+  <g transform="translate(720, 280)">
     <rect x="0" y="0" width="80" height="50" rx="6" class="container-box"/>
     <text x="40" y="20" text-anchor="middle" class="sub-sm" font-weight="700">ff_math</text>
     <text x="40" y="36" text-anchor="middle" class="sub-sm">.hpp</text>
   </g>
-  <path d="M625 330 L 640 360" stroke="#475569" stroke-width="1.2" stroke-dasharray="3 3" fill="none" marker-end="url(#arrow)"/>
-  <path d="M715 330 L 700 360" stroke="#475569" stroke-width="1.2" stroke-dasharray="3 3" fill="none" marker-end="url(#arrow)"/>
+  <path d="M580 330 L 612 358" stroke="#475569" stroke-width="1.2" stroke-dasharray="3 3" fill="none" marker-end="url(#arrow)"/>
+  <path d="M670 330 L 670 358" stroke="#475569" stroke-width="1.2" stroke-dasharray="3 3" fill="none" marker-end="url(#arrow)"/>
+  <path d="M760 330 L 728 358" stroke="#475569" stroke-width="1.2" stroke-dasharray="3 3" fill="none" marker-end="url(#arrow)"/>
 
   <!-- Validator -->
   <g transform="translate(140, 360)">
     <rect x="0" y="0" width="220" height="100" rx="8" class="val-box"/>
-    <text x="110" y="26" text-anchor="middle" class="lbl">Validator</text>
-    <text x="110" y="46" text-anchor="middle" class="sub-sm">candidate + dd oracle</text>
-    <text x="110" y="62" text-anchor="middle" class="sub-sm">random battery (n=1000)</text>
-    <text x="110" y="82" text-anchor="middle" class="sub-sm">tolerance floor +</text>
-    <text x="110" y="98" text-anchor="middle" class="sub-sm">regression guard</text>
+    <text x="110" y="24" text-anchor="middle" class="lbl">Validator</text>
+    <text x="110" y="44" text-anchor="middle" class="sub-sm">candidate vs dd oracle over</text>
+    <text x="110" y="60" text-anchor="middle" class="sub-sm">all N characterization samples</text>
+    <text x="110" y="78" text-anchor="middle" class="sub-sm">(OpenMP-parallel, seed 12345)</text>
+    <text x="110" y="94" text-anchor="middle" class="sub-sm">digit floor + regression guard</text>
   </g>
 
   <!-- Strategy → Patcher (candidate) -->
