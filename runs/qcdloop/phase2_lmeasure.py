@@ -212,7 +212,8 @@ def main(argv=None) -> int:
     oracle_tree = out / "dd_oracle_tree"
     oracle_tree.mkdir()
     _git_archive(Path(args.dd_repo), args.dd_ref, "src/qcdloop", oracle_tree)
-    oracle_headers = oracle_tree / "src" / "qcdloop"
+    # Repoint at third_party/include — the fork ships shadowing dd_/ff_ primitives.
+    oracle_headers = _runner.stage_dd_headers(oracle_tree / "src" / "qcdloop")
     dd_bin = _runner.build_driver(oracle_headers, "dd", out / "dd_build", kokkos)
     ref = _coeffs(dd_bin, total)
 

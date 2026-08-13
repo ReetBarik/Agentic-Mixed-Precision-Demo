@@ -516,7 +516,9 @@ def _build_dd_binary(dd_repo: Path, dd_ref: str, kokkos_root: Path,
     tree = scratch / "ddtree"
     tree.mkdir(parents=True, exist_ok=True)
     _git_archive(dd_repo, dd_ref, "src/qcdloop", tree)
-    dd_headers = tree / "src" / "qcdloop"
+    # Repoint the archived tree at third_party/include (the fork ships shadowing
+    # dd_/ff_ primitives that a quoted #include would otherwise win).
+    dd_headers = runner.stage_dd_headers(tree / "src" / "qcdloop")
     # dd_integrator stub: verify the DD triple is present (raises loudly if not).
     dd_integrator.integrate(dd_headers, dd_headers / "boxGPU.h")
     return runner.build_driver(dd_headers, "dd", scratch / "build", kokkos_root)

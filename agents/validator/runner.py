@@ -1,9 +1,12 @@
 """Build + run the Validator's app drivers, aggregating coeffs into flat arrays.
 
-Two responsibilities:
+Three responsibilities:
 
 * :func:`build_driver` — cmake-configure + build ``runs/qcdloop/app`` for one mode
   (``vanilla`` / ``dd``) against a given header tree, returning the binary path.
+* :func:`stage_dd_headers` — repoint a freshly-archived ``ddfun_enabled`` tree at
+  the repo-vendored DD primitives, so the DD oracle and the candidate builds share
+  one set of extended-precision headers.
 * :func:`run_and_aggregate` — run the binary over ``[0, total)`` samples in
   bit-exact chunks (``--sample-offset``), optionally across a process pool, and
   fold the ``RES`` output into per-integral flat ``array('d')`` buffers indexed by
@@ -42,6 +45,90 @@ def _bash(cmd: str, **kw) -> subprocess.CompletedProcess:
     """Run a command under the module env in a login shell."""
     return subprocess.run(["bash", "-lc", f"{MODULE_PRELUDE} && {cmd}"],
                           capture_output=True, text=True, **kw)
+
+
+# ---------------------------------------------------------------------------
+# DD oracle header staging
+# ---------------------------------------------------------------------------
+# The qcdloop@ddfun_enabled fork ships its OWN dd_math/dd_complex/ff_math/
+# ff_complex under ``namespace ql::ddfun``, sitting next to kokkosMaths_dd.h.
+# Those shadow the repo-vendored copies two ways: app/CMakeLists.txt lists
+# ${QL_HEADERS} ahead of ${_vendored_include}, AND kokkosMaths_dd.h reaches them
+# with a QUOTED #include, which searches the includer's own directory before any
+# -I path — so include-order alone cannot dislodge them.
+#
+# The effect was that the DD oracle silently ignored third_party/include: a
+# refresh there moved the candidate builds but left the oracle on the fork's
+# frozen copies (documented in reports/HEADER_REFRESH_2026-08-13.md).
+#
+# Fix: delete the shadowing primitives from the ARCHIVED tree (never from
+# ~/qcdloop — the archive is a throwaway staging dir), which makes the quoted
+# include fall through to -I third_party/include, then inject the ql::ddfun
+# alias namespace the fork's sources expect. The fork authors ql::ddfun natively
+# via its own dd_math.hpp, so removing that file removes the namespace too; the
+# shim below restores it over Kokkos::Experimental. Same shape as the checked-in
+# runs/qcdloop_headers_full/kokkosMaths_dd.h mirror.
+#
+# Injected rather than overwriting kokkosMaths_dd.h wholesale, so that any future
+# change on the fork side (new Chebyshev tables, tolerances) is preserved.
+_DD_SHADOWING_PRIMITIVES = ("dd_math.hpp", "dd_complex.hpp",
+                            "ff_math.hpp", "ff_complex.hpp")
+
+_QL_DDFUN_SHIM = """
+// ---- injected by agents/validator/runner.stage_dd_headers ----
+// The vendored primitives live under Kokkos::Experimental; this restores the
+// ql::ddfun spelling the fork's sources are written against. A real namespace,
+// not an alias: an alias cannot host using-declarations or the make_dd/dd_pi
+// wrappers, and the fork calls both.
+namespace ql {
+namespace ddfun {
+using namespace ::Kokkos::Experimental;
+using ddouble   = ::Kokkos::Experimental::DoubleDouble;
+using ddcomplex = ::Kokkos::Experimental::DoubleDoubleComplex;
+KOKKOS_INLINE_FUNCTION ddouble make_dd(uint64_t hi_bits, uint64_t lo_bits) {
+    return ::Kokkos::Experimental::DoubleDouble::from_bits(hi_bits, lo_bits);
+}
+KOKKOS_INLINE_FUNCTION ddouble dd_pi() { return ::Kokkos::Experimental::DoubleDouble_pi(); }
+}  // namespace ddfun
+}  // namespace ql
+// ---- end injected shim ----
+"""
+
+_SHIM_MARKER = "injected by agents/validator/runner.stage_dd_headers"
+
+
+def stage_dd_headers(dd_headers: Path) -> Path:
+    """Repoint an archived ``ddfun_enabled:src/qcdloop`` tree at the vendored DD headers.
+
+    Mutates ``dd_headers`` in place (it must be a throwaway archive dir, never a
+    real checkout) and returns it, so callers can wrap their existing path:
+
+        dd_headers = runner.stage_dd_headers(tree / "src" / "qcdloop")
+
+    Idempotent. Raises if the tree does not look like a ddfun_enabled checkout.
+    """
+    dd_headers = Path(dd_headers).resolve()
+    maths_dd = dd_headers / "kokkosMaths_dd.h"
+    if not maths_dd.is_file():
+        raise RuntimeError(
+            f"{dd_headers} has no kokkosMaths_dd.h — not a ddfun_enabled src/qcdloop tree")
+
+    for name in _DD_SHADOWING_PRIMITIVES:
+        (dd_headers / name).unlink(missing_ok=True)
+
+    text = maths_dd.read_text()
+    if _SHIM_MARKER in text:
+        return dd_headers                      # already staged
+
+    # Anchor after the primitive includes so the shim sees the types it aliases.
+    anchor = '#include "dd_complex.hpp"'
+    if anchor not in text:
+        raise RuntimeError(
+            f'{maths_dd} lacks the expected `{anchor}` include — the fork layout '
+            "changed; update stage_dd_headers rather than guessing an anchor.")
+    text = text.replace(anchor, anchor + "\n" + _QL_DDFUN_SHIM, 1)
+    maths_dd.write_text(text)
+    return dd_headers
 
 
 def build_driver(

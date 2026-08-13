@@ -30,7 +30,10 @@ No build failures, no all-integrals drift, no p100 collapse. Nothing meets the S
 ## tu_routing diff
 
 Baseline: `runs/qcdloop/PHASE_2_TU_E2E_REFSCALE_2026-07-30_report.json` (`c6f1f20`, tol 7.0).
-New: `runs/qcdloop/strategy/20260813_051335_3e3fe3bc/report.json` (tol 7.0, 5000 samples, seed 12345).
+New: `runs/qcdloop/strategy/20260813_053248_3c0ffa83/report.json` (tol 7.0, 5000 samples,
+seed 12345) — the authoritative run, with the DD oracle sourced from
+`third_party/include` (see below). An earlier run with the oracle still on the fork's
+copies (`20260813_051335_3e3fe3bc`) gives identical numbers.
 
 **Every integral: unchanged.** `ff=14 · dd=3 · double=4`, same per-integral assignment.
 
@@ -101,29 +104,45 @@ A refresh that never reached the compiler would produce exactly this table, so:
    Upstream's change is an API reorganisation, not a numerics change, for everything
    this workload touches.
 
-## Correction to the task premise: the DD oracle was never fed by `third_party/include`
+## The DD oracle now tracks `third_party/include` (premise corrected, then fixed)
 
 The plan stated that refreshing `third_party/include/` refreshes the DD oracle in one
-shot. **It does not.** `runs/qcdloop/app/CMakeLists.txt` orders includes `QL_HEADERS`
+shot. **It did not.** `runs/qcdloop/app/CMakeLists.txt` orders includes `QL_HEADERS`
 *before* `_vendored_include`, and the oracle builds with
 `QL_HEADERS=~/qcdloop/src/qcdloop@ddfun_enabled`, which ships its **own**
 `dd_math.hpp`, `dd_complex.hpp`, `ff_math.hpp`, `ff_complex.hpp` under
-`namespace ql::ddfun`. Those shadow the vendored copies.
+`namespace ql::ddfun`. Those shadowed the vendored copies, so the first refresh moved
+the candidate builds but left the oracle on the fork's frozen headers.
+
+Include order alone could not fix it: `kokkosMaths_dd.h` reaches the primitives with a
+**quoted** `#include "dd_math.hpp"`, and a quoted include searches the includer's own
+directory before any `-I` path. Reordering `_vendored_include` first changes nothing.
+
+**Fix — `agents/validator/runner.stage_dd_headers()`.** After the tree is
+`git archive`d into a throwaway staging dir (never `~/qcdloop` itself), it:
+
+1. deletes the four shadowing primitives, so the quoted include falls through to
+   `-I third_party/include`; then
+2. injects the `ql::ddfun` alias namespace over `Kokkos::Experimental` — necessary
+   because the fork authors `ql::ddfun` natively *inside* its own `dd_math.hpp`, so
+   removing that file removes the namespace with it.
+
+Injected rather than overwriting `kokkosMaths_dd.h` wholesale, so future fork-side
+changes (new Chebyshev tables, tolerances) survive. Idempotent, and it raises rather
+than guessing if the fork's include layout changes. Wired into all four stagers:
+`validator/validate.py`, `tu_provider.py`, `phase1_lmeasure.py`, `phase2_lmeasure.py`.
 
 | build | `QL_HEADERS` | resolves dd/ff primitives from |
 |---|---|---|
-| DD oracle | `~/qcdloop/src/qcdloop` | **`~/qcdloop`'s own copies** — untouched by this work |
-| vanilla + candidate flips | headers repo (no dd/ff primitives) | `third_party/include` — refreshed |
+| DD oracle | staged `~/qcdloop/src/qcdloop` (primitives stripped) | **`third_party/include`** |
+| vanilla + candidate flips | headers repo (no dd/ff primitives) | `third_party/include` |
 
-Consequences:
-
-* The oracle is **unchanged** by this refresh — a useful control: the measuring stick
-  held still while the thing being measured was replaced.
-* `~/qcdloop`'s `dd_complex.hpp` already carries the hypot-style `abs`, so the oracle
-  stays hypot-aligned regardless, consistent with the baseline.
-* A future refresh intending to move the oracle must update `~/qcdloop@ddfun_enabled`,
-  or drop the shadowing copies so `_vendored_include` wins. Worth deciding deliberately
-  rather than inheriting.
+**The switch is numerically inert.** Old oracle binary vs new, 5000 samples:
+**105,000 / 105,000 output lines bitwise identical.** That is the good outcome — the
+oracle keeps the exact ground truth the routing baseline was measured against, while
+now actually tracking the vendored headers, so the next refresh cannot silently miss
+it. (It holds because `~/qcdloop`'s `dd_complex.hpp` already carried the hypot `abs`,
+so both sources agree.)
 
 ## Local patch set
 
@@ -162,8 +181,10 @@ Persistent delta vs pristine upstream: `dd_math +20/-0`, `dd_complex +33/-2`,
 | local patches compile | pass — probe exercises every re-applied block |
 | old `quad::` spelling rejected post-T4 | pass — `'quad' has not been declared` |
 | numeric equivalence, old vs new headers | 320/320 values bitwise identical |
+| DD oracle: fork-sourced vs `third_party`-sourced | 105,000/105,000 output lines bitwise identical |
 | pytest (patcher/strategy/validator/dd_/ff_/chain) | **581 passed, 0 failed** |
 | tu_only e2e, tol 7.0 | routing identical, 0/42 digit pairs drifted |
+| tu_only e2e re-run with oracle on `third_party/include` | routing identical, 0/42 drifted |
 
 ### T5 straggler grep
 
@@ -197,9 +218,8 @@ retargeted at the `ql::ddfun` surface it actually exercises. It is the only such
 
 ## Follow-ups
 
-1. Decide whether the DD oracle should track `third_party/include` rather than
-   `~/qcdloop`'s shadowing copies — today the premise in the task description does not
-   hold, and any future refresh will silently miss the oracle again.
+1. ~~Decide whether the DD oracle should track `third_party/include`~~ — **done.**
+   `stage_dd_headers()` repoints it; verified bitwise-identical oracle output.
 2. Consider upstreaming the six local patches so a future refresh is genuinely verbatim.
    The hypot `abs` in particular fixes a real overflow (`sqrt(FLT_MAX) ≈ 1.84e19`) that
    upstream still carries.

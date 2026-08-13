@@ -203,7 +203,11 @@ class TUMeasureProvider:
             shutil.rmtree(oracle_tree)
         oracle_tree.mkdir(parents=True)
         _git_archive(self.dd_repo, self.dd_ref, "src/qcdloop", oracle_tree)
-        dd_bin = _runner.build_driver(oracle_tree / "src" / "qcdloop", "dd",
+        # Repoint the archived tree at third_party/include so the oracle and the
+        # candidate flips share one set of DD primitives (the fork ships shadowing
+        # copies that a quoted #include would otherwise win).
+        oracle_headers = _runner.stage_dd_headers(oracle_tree / "src" / "qcdloop")
+        dd_bin = _runner.build_driver(oracle_headers, "dd",
                                       self.out_dir / "dd_build", self.kokkos)
         self._ref = _coeffs(dd_bin, self.total)
 
