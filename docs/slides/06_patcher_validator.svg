@@ -33,7 +33,7 @@
 
   <!-- Title -->
   <text x="40" y="44" class="title">Patcher &amp; Validator — inside one walk step</text>
-  <text x="40" y="66" class="sub">Zoom into R4's correctness-phase attempt (double → dd): shim generation, build, validation, verdict.</text>
+  <text x="40" y="66" class="sub">Zoom into R4's correctness-phase attempt (double → qf): shim generation, build, validation, verdict.</text>
 
   <!-- =================== TOP ROW: Strategy handoff =================== -->
   <g transform="translate(40, 110)">
@@ -48,7 +48,7 @@
     <rect x="0" y="0" width="290" height="74" rx="6" class="box"/>
     <text x="12" y="20" class="code">candidate = {</text>
     <text x="12" y="36" class="code">  region:  R4,</text>
-    <text x="12" y="52" class="code">  target:  dd,</text>
+    <text x="12" y="52" class="code">  target:  qf,</text>
     <text x="12" y="68" class="code">  headers: [kernel.hpp], shims: [] }</text>
   </g>
 
@@ -57,21 +57,27 @@
   <path d="M580 145 L 680 250" class="edge"/>
 
   <!-- =================== Precision containers ABOVE Patcher =================== -->
-  <g transform="translate(700, 100)">
+  <text x="660" y="92" class="sub-sm" fill="#5b6475">precision containers (app-side headers) — one per rung above/below double</text>
+  <g transform="translate(660, 100)">
     <rect x="0" y="0" width="150" height="60" rx="8" class="integrator-box"/>
     <text x="75" y="24" text-anchor="middle" class="lbl">dd_math.hpp</text>
     <text x="75" y="44" text-anchor="middle" class="sub-sm">pair-of-doubles</text>
   </g>
-  <g transform="translate(870, 100)">
+  <g transform="translate(830, 100)">
+    <rect x="0" y="0" width="150" height="60" rx="8" class="integrator-box"/>
+    <text x="75" y="24" text-anchor="middle" class="lbl">qf_math.hpp</text>
+    <text x="75" y="44" text-anchor="middle" class="sub-sm">four-float (4×FP32)</text>
+  </g>
+  <g transform="translate(1000, 100)">
     <rect x="0" y="0" width="150" height="60" rx="8" class="integrator-box"/>
     <text x="75" y="24" text-anchor="middle" class="lbl">ff_math.hpp</text>
     <text x="75" y="44" text-anchor="middle" class="sub-sm">pair-of-floats</text>
   </g>
-  <text x="860" y="180" text-anchor="middle" class="sub-sm" fill="#5b6475">precision containers (app-side headers)</text>
 
   <!-- Arrows from containers into Patcher block (top edge of dashed pink) -->
-  <path d="M775 160 L 800 240" stroke="#475569" stroke-width="1.4" stroke-dasharray="3 3" fill="none" marker-end="url(#arrow)"/>
-  <path d="M945 160 L 920 240" stroke="#475569" stroke-width="1.4" stroke-dasharray="3 3" fill="none" marker-end="url(#arrow)"/>
+  <path d="M735 160 L 770 238" stroke="#475569" stroke-width="1.4" stroke-dasharray="3 3" fill="none" marker-end="url(#arrow)"/>
+  <path d="M905 160 L 890 238" stroke="#475569" stroke-width="1.4" stroke-dasharray="3 3" fill="none" marker-end="url(#arrow)"/>
+  <path d="M1075 160 L 1000 238" stroke="#475569" stroke-width="1.4" stroke-dasharray="3 3" fill="none" marker-end="url(#arrow)"/>
 
   <!-- =================== MIDDLE: Patcher (retry loop) =================== -->
   <g transform="translate(660, 240)">
@@ -83,7 +89,7 @@
     <rect x="30" y="42" width="140" height="72" rx="8" class="llm-box"/>
     <text x="100" y="68" text-anchor="middle" class="lbl">LLM call</text>
     <text x="100" y="86" text-anchor="middle" class="sub-sm">generate shim</text>
-    <text x="100" y="102" text-anchor="middle" class="sub-sm">R4_dd.hpp</text>
+    <text x="100" y="102" text-anchor="middle" class="sub-sm">R4_qf.hpp</text>
 
     <!-- Arrow to build -->
     <path d="M170 78 L 210 78" class="edge"/>
@@ -103,50 +109,54 @@
 
 
   <!-- On-success text OUTSIDE the Patcher container -->
-  <text x="850" y="440" text-anchor="middle" class="sub">On success: built binary → Validator.</text>
-  <text x="850" y="458" text-anchor="middle" class="sub-sm">On k = dr_k exhausted: report failure to strategy; region parks at safest known rung.</text>
+  <text x="850" y="434" text-anchor="middle" class="sub">On success: built binary → Validator.</text>
+  <text x="850" y="452" text-anchor="middle" class="sub-sm">On k = dr_k exhausted: report failure to strategy; region parks at safest known rung.</text>
 
   <!-- =================== VERTICAL arrow down to Validator (candidate side, right end) =================== -->
-  <path d="M960 470 L 960 490" class="edge"/>
+  <path d="M960 460 L 960 476" class="edge"/>
 
   <!-- =================== BOTTOM: Validator (RIGHT-to-LEFT flow) =================== -->
-  <g transform="translate(300, 480)">
+  <g transform="translate(240, 478)">
     <!-- Validator container -->
-    <rect x="0" y="0" width="760" height="200" rx="10" fill="none" stroke="#0f766e" stroke-width="1.4" stroke-dasharray="4 3"/>
-    <text x="380" y="22" text-anchor="middle" class="lbl" fill="#0f766e">Validator</text>
+    <rect x="0" y="0" width="820" height="212" rx="10" fill="none" stroke="#0f766e" stroke-width="1.4" stroke-dasharray="4 3"/>
+    <text x="410" y="22" text-anchor="middle" class="lbl" fill="#0f766e">Validator</text>
 
     <!-- Verdict box (LEFTMOST) -->
-    <rect x="20" y="60" width="160" height="80" rx="8" class="verdict-accept-box"/>
-    <text x="100" y="86" text-anchor="middle" class="lbl">Verdict: accept</text>
-    <text x="100" y="106" text-anchor="middle" class="sub-sm">R4 rel-err ≤ tol</text>
-    <text x="100" y="122" text-anchor="middle" class="sub-sm">no regression</text>
+    <rect x="16" y="62" width="170" height="84" rx="8" class="verdict-accept-box"/>
+    <text x="101" y="90" text-anchor="middle" class="lbl">Verdict: accept</text>
+    <text x="101" y="110" text-anchor="middle" class="sub-sm">R4 clears tol = 7</text>
+    <text x="101" y="126" text-anchor="middle" class="sub-sm">no regression</text>
 
-    <!-- Random battery (MIDDLE) -->
-    <rect x="240" y="45" width="220" height="120" rx="8" class="val-box"/>
-    <text x="350" y="72" text-anchor="middle" class="lbl">Random battery</text>
-    <text x="350" y="92" text-anchor="middle" class="sub-sm">n=1000 seeded inputs</text>
-    <text x="350" y="110" text-anchor="middle" class="sub-sm">per-output-component rel-err vs oracle</text>
-    <text x="350" y="132" text-anchor="middle" class="sub-sm">absolute floor: tol = 7</text>
-    <text x="350" y="150" text-anchor="middle" class="sub-sm">regression guard vs baseline</text>
+    <!-- Whole-sample-space validation (MIDDLE) -->
+    <rect x="246" y="34" width="316" height="146" rx="8" class="val-box"/>
+    <text x="404" y="58" text-anchor="middle" class="lbl">Whole-sample-space replay</text>
+    <text x="260" y="82" class="sub-sm">All N characterization samples — no subsampling</text>
+    <text x="260" y="102" class="sub-sm">seed 12345, replayed OpenMP-parallel across cores</text>
+    <text x="260" y="122" class="sub-sm">per-output-component precise digits vs dd oracle</text>
+    <text x="260" y="142" class="sub-sm">absolute floor: tol = 7 digits</text>
+    <text x="260" y="162" class="sub-sm">regression guard vs the current baseline</text>
 
     <!-- Candidate binary (TOP RIGHT) -->
-    <rect x="530" y="45" width="200" height="55" rx="8" class="build-box"/>
-    <text x="630" y="70" text-anchor="middle" class="lbl">Candidate binary</text>
-    <text x="630" y="88" text-anchor="middle" class="sub-sm">R4 = dd</text>
+    <rect x="622" y="44" width="188" height="56" rx="8" class="build-box"/>
+    <text x="716" y="69" text-anchor="middle" class="lbl">Candidate binary</text>
+    <text x="716" y="87" text-anchor="middle" class="sub-sm">R4 = qf</text>
 
     <!-- DD oracle (BOTTOM RIGHT) -->
-    <rect x="530" y="115" width="200" height="55" rx="8" class="oracle-box"/>
-    <text x="630" y="140" text-anchor="middle" class="lbl">dd oracle</text>
-    <text x="630" y="158" text-anchor="middle" class="sub-sm">all regions at dd</text>
+    <rect x="622" y="118" width="188" height="56" rx="8" class="oracle-box"/>
+    <text x="716" y="143" text-anchor="middle" class="lbl">dd oracle</text>
+    <text x="716" y="161" text-anchor="middle" class="sub-sm">all regions at dd</text>
 
-    <!-- Right-to-left arrows: candidate & oracle → battery → verdict -->
-    <path d="M530 72 L 460 90" class="edge"/>
-    <path d="M530 142 L 460 130" class="edge"/>
-    <path d="M240 100 L 180 100" class="edge"/>
+    <!-- Right-to-left arrows: candidate & oracle → replay → verdict -->
+    <path d="M622 72 L 562 92" class="edge"/>
+    <path d="M622 146 L 562 126" class="edge"/>
+    <path d="M246 104 L 186 104" class="edge"/>
+
+    <!-- Oracle note -->
+    <text x="246" y="200" class="sub-sm">dd stays the oracle at every rung — the qf candidate is scored against dd, never against itself.</text>
   </g>
 
   <!-- =================== FEEDBACK arrow: verdict left edge → strategy bottom edge (2 segments) =================== -->
-  <path d="M320 580 L 155 580 L 155 180" class="edge-back"/>
+  <path d="M256 582 L 155 582 L 155 180" class="edge-back"/>
   <text x="170" y="340" class="lbl" style="fill:#166534">strategy commits state</text>
-  <text x="170" y="358" class="sub-sm">{accept: R4 → dd} ; dequeues next region</text>
+  <text x="170" y="358" class="sub-sm">{accept: R4 → qf} ; dequeues next region</text>
 </svg>
