@@ -3,8 +3,8 @@
 
 Two panels in one SVG, both describing the CURRENT routing (no before/after):
 
-  left   share of math OPS by precision rung   — wedge size = op count
-  right  share of INTEGRALS by rung            — 21 equal wedges, one per integral
+  left   share of INTEGRALS by rung            — 21 equal wedges, one per integral
+  right  share of math OPS by precision rung   — wedge size = op count
 
 Read together they are the point: the same three rungs, weighted two different ways.
 The five double-routed integrals are 23.8% of the integrals but 51.5% of the ops, and
@@ -13,6 +13,16 @@ a rung-share pie alone cannot show that.
 Op counts come from the per-region ``ops`` counters in the characterization report,
 summed per integral and grouped by the run's ``tu_routing``.  Valid because tu_only
 flips a whole TU, so every op in an integral executes at that integral's rung.
+
+COLOR MUST STAY ON THE ELEMENTS.  Every fill/stroke is a literal hex *presentation
+attribute*; the stylesheet only carries the dark-mode override.  An earlier version
+put the palette in CSS custom properties (``fill="var(--s-double)"``) and rendered as
+a SOLID BLACK BOX anywhere custom properties are unsupported — PowerPoint's importer,
+and librsvg here — because an unresolvable fill falls back to the initial value, which
+is black.  Presentation attributes sit at the bottom of the CSS cascade, so browsers
+still apply the dark-mode rules, while importers that ignore CSS entirely (including
+PowerPoint's "Convert to Shape") get correct light-theme colors.  Do not reintroduce
+var() here.
 
 Deliberately dependency-free: this box has no matplotlib/numpy/node, and a committed
 SVG renders on GitHub and in any local markdown previewer, which a mermaid block does
@@ -49,6 +59,12 @@ FILL_LIGHT = {"float": "#4a3aa7", "ff": "#eb6834", "double": "#2a78d6",
               "qf": "#1baf7a", "dd": "#e87ba4"}
 FILL_DARK = {"float": "#9085e9", "ff": "#d95926", "double": "#3987e5",
              "qf": "#199e70", "dd": "#d55181"}
+SURFACE_L, INK_L, INK2_L = "#fcfcfb", "#0b0b0b", "#52514e"
+SURFACE_D, INK_D, INK2_D = "#1a1a19", "#ffffff", "#c3c2b7"
+
+# PowerPoint on Windows resolves Segoe UI; the -apple-system / BlinkMacSystemFont
+# keywords are meaningless to it, so lead with a real family name.
+FONT = "'Segoe UI', Helvetica, Arial, sans-serif"
 
 # Wedge order in BOTH panels, so a rung starts at the same clock position in each
 # and the reader can see its arc grow or shrink between them.
@@ -57,9 +73,9 @@ DRAW_ORDER = ["double", "ff", "qf", "dd", "float"]
 # Layout.  Generous margins are load-bearing, not taste: an early cut of this chart
 # cleared its subtitle by 0.2px and the neighbouring panel's label by 1px, which no
 # rasteriser would have honoured.  _assert_layout re-checks on every run.
-W, H = 1000, 470
-CY, R, LAB_GAP = 252.0, 118.0, 26.0
-CENTRES = [260.0, 740.0]
+W, H = 1140, 470
+CY, R, LAB_GAP = 252.0, 118.0, 20.0
+CENTRES = [260.0, 880.0]
 Y_TITLE, Y_SUB = 28, 52
 Y_LEG_RECT, Y_LEG_TEXT, Y_CAP = 412, 422, 452
 MIN_GAP = 8.0                                    # px of clear space demanded anywhere
@@ -104,9 +120,9 @@ def _box(text: str, x: float, y: float, size: float, anchor: str) -> tuple:
 
 def _wedge(cx: float, a0: float, a1: float, rung: str) -> str:
     # 2px surface-colored stroke = the mandated gap between adjacent fills.  In the
-    # right-hand panel it is also what makes the 21 individual wedges countable.
-    return (f'    <path d="{_arc(cx, CY, R, a0, a1)}" fill="var(--s-{rung})" '
-            f'stroke="var(--surface)" stroke-width="2"/>')
+    # integrals panel it is also what makes the 21 individual wedges countable.
+    return (f'    <path d="{_arc(cx, CY, R, a0, a1)}" class="s-{rung} sep" '
+            f'fill="{FILL_LIGHT[rung]}" stroke="{SURFACE_L}" stroke-width="2"/>')
 
 
 def _arc_label(cx: float, a0: float, a1: float, text: str, boxes: list) -> str:
@@ -117,12 +133,13 @@ def _arc_label(cx: float, a0: float, a1: float, text: str, boxes: list) -> str:
     boxes.append(_box(text, lx, ly, 13.0, anchor))
     head, _, tail = text.partition(" ")
     # Labels wear text ink, never the series color.
-    return (f'    <text x="{lx:.1f}" y="{ly:.1f}" text-anchor="{anchor}" '
-            f'class="lbl">{head} <tspan class="pct">{tail}</tspan></text>')
+    return (f'    <text x="{lx:.1f}" y="{ly:.1f}" text-anchor="{anchor}" class="ink" '
+            f'font-size="13" font-weight="600" fill="{INK_L}">{head} '
+            f'<tspan class="ink2" font-weight="400" fill="{INK2_L}">{tail}</tspan></text>')
 
 
 def panel_ops(cx: float, by: dict[str, int], total: int, boxes: list) -> list[str]:
-    """Left panel — wedge size proportional to op count."""
+    """Wedge size proportional to op count."""
     out, angle = [], 0.0
     for rung in DRAW_ORDER:
         v = by.get(rung, 0)
@@ -137,7 +154,7 @@ def panel_ops(cx: float, by: dict[str, int], total: int, boxes: list) -> list[st
 
 
 def panel_integrals(cx: float, routing: dict[str, str], boxes: list) -> list[str]:
-    """Right panel — one equal wedge per integral, colored by its rung."""
+    """One equal wedge per integral, colored by its rung."""
     n = len(routing)
     step = 360.0 / n
     out, angle = [], 0.0
@@ -183,16 +200,16 @@ def build_svg(per_integral: dict[str, int], routing: dict[str, str]) -> str:
 
     body, boxes = [], []
     panels = [
-        ("math operations", f"{total:,} ops · wedge = op count",
-         lambda cx: panel_ops(cx, by_ops, total, boxes)),
         ("integrals", f"{n} integrals · one equal wedge each",
          lambda cx: panel_integrals(cx, routing, boxes)),
+        ("math operations", f"{total:,} ops · wedge = op count",
+         lambda cx: panel_ops(cx, by_ops, total, boxes)),
     ]
     for (title, sub, draw), cx in zip(panels, CENTRES):
-        body.append(f'    <text x="{cx}" y="{Y_TITLE}" text-anchor="middle" '
-                    f'class="ttl">{title}</text>')
-        body.append(f'    <text x="{cx}" y="{Y_SUB}" text-anchor="middle" '
-                    f'class="sub">{sub}</text>')
+        body.append(f'    <text x="{cx}" y="{Y_TITLE}" text-anchor="middle" class="ink" '
+                    f'font-size="17" font-weight="600" fill="{INK_L}">{title}</text>')
+        body.append(f'    <text x="{cx}" y="{Y_SUB}" text-anchor="middle" class="ink2" '
+                    f'font-size="12.5" fill="{INK2_L}">{sub}</text>')
         boxes.append(_box(title, cx, Y_TITLE, 17.0, "middle"))
         boxes.append(_box(sub, cx, Y_SUB, 12.5, "middle"))
         body.extend(draw(cx))
@@ -206,55 +223,47 @@ def build_svg(per_integral: dict[str, int], routing: dict[str, str]) -> str:
     legend, x = [], (W - span) / 2
     for (rung, text), w in zip(entries, widths):
         legend.append(f'    <rect x="{x:.1f}" y="{Y_LEG_RECT}" width="12" height="12" '
-                      f'rx="3" fill="var(--s-{rung})"/>')
-        tail = "" if by_ops[rung] else ' <tspan class="legp">0.00%</tspan>'
-        legend.append(f'    <text x="{x + 19:.1f}" y="{Y_LEG_TEXT}" '
-                      f'class="leg">{rung}{tail}</text>')
+                      f'rx="3" class="s-{rung}" fill="{FILL_LIGHT[rung]}"/>')
+        tail = ("" if by_ops[rung] else
+                f' <tspan class="ink2" fill="{INK2_L}">0.00%</tspan>')
+        legend.append(f'    <text x="{x + 19:.1f}" y="{Y_LEG_TEXT}" class="ink" '
+                      f'font-size="12.5" fill="{INK_L}">{rung}{tail}</text>')
         boxes.append(_box(text, x, Y_LEG_TEXT, 12.5, "start"))
         x += w + 30
-
-    _assert_layout(boxes)
 
     cap = (f"The {n_double} double-routed integrals are "
            f"{100.0 * n_double / n:.1f}% of the integrals but "
            f"{100.0 * by_ops['double'] / total:.1f}% of the ops. "
            f"Op counts, not cost; every integral sampled equally.")
-    css_light = "\n".join(f"      --s-{k}: {v};" for k, v in FILL_LIGHT.items())
-    css_dark = "\n".join(f"        --s-{k}: {v};" for k, v in FILL_DARK.items())
+    boxes.append(_box(cap, W / 2, Y_CAP, 12.0, "middle"))
+
+    _assert_layout(boxes)
+    dark = "\n".join(f"      .s-{k} {{ fill: {v}; }}" for k, v in FILL_DARK.items())
     return f"""<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 {W} {H}"
      width="{W}" height="{H}" role="img"
-     aria-label="Precision assignment for the qcdloop workload, two pie charts. By math
-     operations: double 51.53 percent, ff 38.36 percent, qf 10.11 percent of {total:,}
-     ops. By integral count: ff 14 of {n}, double 5 of {n}, qf 2 of {n}. float and dd
-     are unused. {cap}">
+     aria-label="Precision assignment for the qcdloop workload, two pie charts. By
+     integral count: ff 14 of {n}, double 5 of {n}, qf 2 of {n}. By math operations:
+     double 51.53 percent, ff 38.36 percent, qf 10.11 percent of {total:,} ops. float
+     and dd are unused. {cap}">
   <style>
-    :root {{
-      --surface: #fcfcfb;
-      --ink: #0b0b0b;
-      --ink2: #52514e;
-{css_light}
-    }}
+    /* Light theme lives on the elements as presentation attributes, so renderers that
+       ignore CSS (PowerPoint) still get real colors.  This block only overrides for
+       dark mode; presentation attributes lose to any selector, so browsers apply it. */
     @media (prefers-color-scheme: dark) {{
-      :root {{
-        --surface: #1a1a19;
-        --ink: #ffffff;
-        --ink2: #c3c2b7;
-{css_dark}
-      }}
+      .bg   {{ fill: {SURFACE_D}; }}
+      .sep  {{ stroke: {SURFACE_D}; }}
+      .ink  {{ fill: {INK_D}; }}
+      .ink2 {{ fill: {INK2_D}; }}
+{dark}
     }}
-    text {{ font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif; }}
-    .ttl  {{ font-size: 17px; font-weight: 600; fill: var(--ink); }}
-    .sub  {{ font-size: 12.5px; fill: var(--ink2); }}
-    .lbl  {{ font-size: 13px; font-weight: 600; fill: var(--ink); }}
-    .pct  {{ font-weight: 400; fill: var(--ink2); }}
-    .leg  {{ font-size: 12.5px; fill: var(--ink); }}
-    .legp {{ fill: var(--ink2); }}
-    .cap  {{ font-size: 12px; fill: var(--ink2); }}
   </style>
-  <rect width="{W}" height="{H}" fill="var(--surface)"/>
+  <rect class="bg" width="{W}" height="{H}" fill="{SURFACE_L}"/>
+  <g font-family="{FONT}">
 {chr(10).join(body)}
 {chr(10).join(legend)}
-  <text x="{W // 2}" y="{Y_CAP}" text-anchor="middle" class="cap">{cap}</text>
+    <text x="{W // 2}" y="{Y_CAP}" text-anchor="middle" class="ink2" font-size="12"
+          fill="{INK2_L}">{cap}</text>
+  </g>
 </svg>
 """
 
@@ -273,11 +282,11 @@ def main() -> int:
     for integral, ops in per_integral.items():
         by_ops[routing[integral]] += ops
         by_cnt[routing[integral]] += 1
-    print(f"{'rung':8} {'ops':>12} {'op share':>9} {'ints':>5} {'int share':>10}")
+    print(f"{'rung':8} {'ints':>5} {'int share':>10} {'ops':>12} {'op share':>9}")
     for rung in LADDER:
-        print(f"{rung:8} {by_ops[rung]:>12,} {100.0 * by_ops[rung] / total:8.2f}% "
-              f"{by_cnt[rung]:>5} {100.0 * by_cnt[rung] / n:9.2f}%")
-    print(f"{'TOTAL':8} {total:>12,} {'100.00%':>9} {n:>5} {'100.00%':>10}")
+        print(f"{rung:8} {by_cnt[rung]:>5} {100.0 * by_cnt[rung] / n:9.2f}% "
+              f"{by_ops[rung]:>12,} {100.0 * by_ops[rung] / total:8.2f}%")
+    print(f"{'TOTAL':8} {n:>5} {'100.00%':>10} {total:>12,} {'100.00%':>9}")
 
     if not args.check:
         OUT.write_text(build_svg(per_integral, routing))

@@ -102,9 +102,9 @@ The routing table counts *integrals*; this counts the **math operations** behind
 Because `tu_only` flips a whole TU, every op in an integral executes at that integral's
 routed precision, so op counts map onto rungs without ambiguity.
 
-![Precision assignment for the qcdloop workload, two pie charts. By math operations:
-double 51.53%, ff 38.36%, qf 10.11% of 19,443,258 ops. By integral count: ff 14 of 21,
-double 5 of 21, qf 2 of 21. float and dd unused.](op_share.svg)
+![Precision assignment for the qcdloop workload, two pie charts. Left, by integral count:
+ff 14 of 21, double 5 of 21, qf 2 of 21. Right, by math operations: double 51.53%,
+ff 38.36%, qf 10.11% of 19,443,258 ops. float and dd unused.](op_share.svg)
 
 The chart describes the **current routing** only — it is a general picture of where this
 workload's precision sits, not a QF before/after; the controlled diff is the table below.
@@ -113,7 +113,7 @@ between them is the substance: **the five double-routed integrals are 23.8% of t
 integrals but 51.5% of the ops.** `float` and `dd` are carried in the legend at 0.00%
 because a rung being *available and unused* is a result, not an absence.
 
-Regenerate with `python scripts/one_off/gen_op_share_svg.py` (`--check` prints both
+Regenerate with `.venv/bin/python scripts/one_off/gen_op_share_svg.py` (`--check` prints both
 distributions without writing). The figures are read from source on every run and are
 never hand-edited into the SVG; the generator also asserts its own label geometry and
 refuses to emit a chart with an overflow or a near-collision.
@@ -178,10 +178,10 @@ Four caveats, because the number is easy to over-read:
    (`samples_seen` is uniform across all 21). So this is the op mix of a workload that
    exercises all 21 integrals equally, **not** of any real physics run, where call
    frequencies differ by orders of magnitude. Re-weighting by a real workload's integral
-   histogram would move these percentages substantially. The chart's **right panel is
-   the control for this**: it gives every integral one equal wedge, so the left panel's
+   histogram would move these percentages substantially. The chart's **left panel is
+   the control for this**: it gives every integral one equal wedge, so the right panel's
    op weighting is visible as the difference between the two rather than hidden inside a
-   single number. What the right panel *cannot* correct for is call frequency — it says
+   single number. What the left panel *cannot* correct for is call frequency — it says
    each integral counts once, which is a different claim from each integral running once.
 3. **Source is the characterization run** (`runs/qcdloop/report_smoke.json`, 1000
    samples/integral), not the 5000-sample validation run that produced the digits. Op mix
