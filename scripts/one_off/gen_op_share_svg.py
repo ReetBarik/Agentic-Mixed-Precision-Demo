@@ -1,14 +1,34 @@
 #!/usr/bin/env python3
 """Render the precision-assignment charts for the qcdloop workload.
 
-Two panels in one SVG, both describing the CURRENT routing (no before/after):
+Three panels in one SVG, all describing the CURRENT routing (no before/after):
 
-  left   share of INTEGRALS by rung            — 21 equal wedges, one per integral
-  right  share of math OPS by precision rung   — wedge size = op count
+  top-left   share of INTEGRALS by rung          — 21 equal wedges, one per integral
+  top-right  share of math OPS by precision rung — wedge size = op count
+  bottom     expected per-integral SPEEDUP on an NVIDIA GB300
 
-Read together they are the point: the same three rungs, weighted two different ways.
-The five double-routed integrals are 23.8% of the integrals but 51.5% of the ops, and
-a rung-share pie alone cannot show that.
+The two pies read together are the first point: the same three rungs, weighted two
+different ways.  The five double-routed integrals are 23.8% of the integrals but
+51.5% of the ops, and a rung-share pie alone cannot show that.
+
+The bar panel is the second, sharper point: op share is not cost share either.  Bar
+heights come from gb300_cost_model, which weights each op by what it actually costs
+(counted from the vendored emulation headers) against GB300's ~62:1 FP32:FP64 vector
+ratio.  Weighted that way the picture inverts — log and atan2 are ~3% of ops but
+~69% of modelled time, so the transcendental-heavy integrals barely gain (B15 1.38x)
+while the arithmetic-heavy ones do well (B6 3.61x).
+
+Bars are quoted against an ISO-ACCURACY baseline: the cheapest rung clearing the same
+7.0-digit tolerance gate.  That is double for 19 integrals, but dd for B12/B16, which
+score 3.69 and 6.57 digits at double and so FAIL there — an all-double baseline for
+those two would compare against a run you would have to throw away.  Because that
+makes their bars the tallest in the chart while measuring something different, each
+carries a dashed GHOST bar at its vs-double value (0.23x, 0.16x): the same flip read
+as a pure cost, with the accuracy it buys not counted.  Both readings are true and
+the pair is the honest way to show it.
+
+The bottom panel is full-width rather than a third column: 21 bars across a third of
+1140px is a ~18px pitch, which cannot carry readable category labels.
 
 Op counts come from the per-region ``ops`` counters in the characterization report,
 summed per integral and grouped by the run's ``tu_routing``.  Valid because tu_only
@@ -40,7 +60,11 @@ import argparse
 import json
 import math
 import re
+import sys
 from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+import gb300_cost_model as gb300           # noqa: E402  (needs the path above)
 
 _REPO = Path(__file__).resolve().parents[2]
 _QCD = _REPO / "runs" / "qcdloop"
@@ -73,12 +97,21 @@ DRAW_ORDER = ["double", "ff", "qf", "dd", "float"]
 # Layout.  Generous margins are load-bearing, not taste: an early cut of this chart
 # cleared its subtitle by 0.2px and the neighbouring panel's label by 1px, which no
 # rasteriser would have honoured.  _assert_layout re-checks on every run.
-W, H = 1140, 470
+W, H = 1140, 848
 CY, R, LAB_GAP = 252.0, 118.0, 20.0
 CENTRES = [260.0, 880.0]
 Y_TITLE, Y_SUB = 28, 52
 Y_LEG_RECT, Y_LEG_TEXT, Y_CAP = 412, 422, 452
 MIN_GAP = 8.0                                    # px of clear space demanded anywhere
+
+# Bottom (speedup) panel.
+Y_T3, Y_S3 = 512, 536                            # title / subtitle
+BAR_TOP, BAR_BASE = 560, 770                     # plot box; BAR_BASE is y=0
+Y_XLAB, Y_CAP3, Y_CAP4 = 788, 809, 831
+PAD_L, PAD_R = 62.0, 24.0
+Y_MAX = 8.0                                      # axis top, comfortably over B12@7.67
+GRID = [0, 2, 4, 6, 8]
+BAR_W, PAIR_GAP = 20.0, 6.0                      # a qf slot holds two BAR_W bars
 
 
 def _natural(name: str) -> tuple:
@@ -172,6 +205,92 @@ def panel_integrals(cx: float, routing: dict[str, str], boxes: list) -> list[str
     return out
 
 
+def _bar_y(v: float) -> float:
+    return BAR_BASE - (v / Y_MAX) * (BAR_BASE - BAR_TOP)
+
+
+def _bar_path(x: float, w: float, v: float) -> str:
+    """Bar with 4px rounded top corners, square where it meets the baseline.
+
+    rx on a <rect> would round the BOTTOM corners too, which detaches the mark from
+    its own axis.  The radius clamps on short bars so the two ghosts (0.16x, 0.23x)
+    stay rectangles instead of collapsing to lozenges.
+    """
+    top = _bar_y(v)
+    r = min(4.0, max(0.0, (BAR_BASE - top) / 2.0))
+    return (f"M {x:.1f} {BAR_BASE:.1f} L {x:.1f} {top + r:.1f} "
+            f"Q {x:.1f} {top:.1f} {x + r:.1f} {top:.1f} "
+            f"L {x + w - r:.1f} {top:.1f} "
+            f"Q {x + w:.1f} {top:.1f} {x + w:.1f} {top + r:.1f} "
+            f"L {x + w:.1f} {BAR_BASE:.1f} Z")
+
+
+def panel_speedup(speed: dict, boxes: list) -> list:
+    """Per-integral iso-accuracy speedup; qf slots carry a dashed vs-double ghost."""
+    names = sorted(speed, key=_natural)
+    pitch = (W - PAD_L - PAD_R) / len(names)
+    out = []
+
+    # Grid first, so bars paint over it.  The 1.0x line is the break-even reference
+    # and is drawn heavier than the rest — below it a flip costs more than it saves.
+    for g in GRID:
+        y = _bar_y(g)
+        out.append(f'    <line x1="{PAD_L:.1f}" y1="{y:.1f}" x2="{W - PAD_R:.1f}" '
+                   f'y2="{y:.1f}" class="grid" stroke="{INK2_L}" stroke-width="1" '
+                   f'stroke-opacity="0.18"/>')
+        out.append(f'    <text x="{PAD_L - 10:.1f}" y="{y + 4:.1f}" text-anchor="end" '
+                   f'class="ink2" font-size="11.5" fill="{INK2_L}">{g}&#215;</text>')
+        boxes.append(_box(f"{g}x", PAD_L - 10, y + 4, 11.5, "end"))
+    y1 = _bar_y(1.0)
+    out.append(f'    <line x1="{PAD_L:.1f}" y1="{y1:.1f}" x2="{W - PAD_R:.1f}" '
+               f'y2="{y1:.1f}" class="grid" stroke="{INK_L}" stroke-width="1.25" '
+               f'stroke-dasharray="5 4" stroke-opacity="0.55"/>')
+    out.append(f'    <text x="{W - PAD_R:.1f}" y="{y1 - 7:.1f}" text-anchor="end" '
+               f'class="ink2" font-size="11" fill="{INK2_L}">1&#215; break-even</text>')
+    boxes.append(_box("1x break-even", W - PAD_R, y1 - 7, 11.0, "end"))
+
+    ffs = {n: speed[n]["iso"] for n in names if speed[n]["rung"] == "ff"}
+    # Selective direct labels only: both qf bars (they are the ones measuring
+    # something different), plus the ff extremes that carry the panel's message.
+    label = {max(ffs, key=ffs.get), min(ffs, key=ffs.get)}
+
+    for i, n in enumerate(names):
+        rec = speed[n]
+        rung, iso = rec["rung"], rec["iso"]
+        cx = PAD_L + (i + 0.5) * pitch
+        paired = rung == "qf"
+        x = cx - (BAR_W + PAIR_GAP / 2 if paired else BAR_W / 2)
+
+        out.append(f'    <path d="{_bar_path(x, BAR_W, iso)}" class="s-{rung}" '
+                   f'fill="{FILL_LIGHT[rung]}"/>')
+        if paired or n in label:
+            out.append(f'    <text x="{x + BAR_W / 2:.1f}" y="{_bar_y(iso) - 7:.1f}" '
+                       f'text-anchor="middle" class="ink" font-size="11.5" '
+                       f'font-weight="600" fill="{INK_L}">{iso:.2f}&#215;</text>')
+            boxes.append(_box(f"{iso:.2f}x", x + BAR_W / 2, _bar_y(iso) - 7, 11.5,
+                              "middle"))
+
+        if paired:
+            gx, gv = cx + PAIR_GAP / 2, rec["vs_double"]
+            out.append(f'    <path d="{_bar_path(gx, BAR_W, gv)}" class="k-{rung}" '
+                       f'fill="none" stroke="{FILL_LIGHT[rung]}" stroke-width="1.5" '
+                       f'stroke-dasharray="3 2"/>')
+            out.append(f'    <text x="{gx + BAR_W / 2:.1f}" y="{_bar_y(gv) - 7:.1f}" '
+                       f'text-anchor="middle" class="ink2" font-size="10.5" '
+                       f'fill="{INK2_L}">{gv:.2f}&#215;</text>')
+            boxes.append(_box(f"{gv:.2f}x", gx + BAR_W / 2, _bar_y(gv) - 7, 10.5,
+                              "middle"))
+
+        out.append(f'    <text x="{cx:.1f}" y="{Y_XLAB}" text-anchor="middle" '
+                   f'class="ink2" font-size="11" fill="{INK2_L}">{n}</text>')
+        boxes.append(_box(n, cx, Y_XLAB, 11.0, "middle"))
+
+    out.append(f'    <line x1="{PAD_L:.1f}" y1="{BAR_BASE:.1f}" x2="{W - PAD_R:.1f}" '
+               f'y2="{BAR_BASE:.1f}" class="grid" stroke="{INK2_L}" '
+               f'stroke-width="1.25" stroke-opacity="0.5"/>')
+    return out
+
+
 def _assert_layout(boxes: list) -> None:
     """Fail loudly on overflow or near-collision — the eyeball check this box can't do."""
     problems = []
@@ -190,7 +309,8 @@ def _assert_layout(boxes: list) -> None:
         raise SystemExit("LAYOUT CHECK FAILED\n  " + "\n  ".join(problems))
 
 
-def build_svg(per_integral: dict[str, int], routing: dict[str, str]) -> str:
+def build_svg(per_integral: dict[str, int], routing: dict[str, str],
+              speed: dict) -> str:
     total = sum(per_integral.values())
     n = len(routing)
     by_ops: dict[str, int] = {r: 0 for r in LADDER}
@@ -213,6 +333,19 @@ def build_svg(per_integral: dict[str, int], routing: dict[str, str]) -> str:
         boxes.append(_box(title, cx, Y_TITLE, 17.0, "middle"))
         boxes.append(_box(sub, cx, Y_SUB, 12.5, "middle"))
         body.extend(draw(cx))
+
+    whole = (sum(v["t_base"] for v in speed.values())
+             / sum(v["t_now"] for v in speed.values()))
+    t3 = "expected speedup on NVIDIA GB300"
+    s3 = (f"iso-accuracy baseline · whole app {whole:.2f}× · "
+          f"dashed ghost = qf measured against double instead of dd")
+    body.append(f'    <text x="{W / 2}" y="{Y_T3}" text-anchor="middle" class="ink" '
+                f'font-size="17" font-weight="600" fill="{INK_L}">{t3}</text>')
+    body.append(f'    <text x="{W / 2}" y="{Y_S3}" text-anchor="middle" class="ink2" '
+                f'font-size="12.5" fill="{INK2_L}">{s3}</text>')
+    boxes.append(_box(t3, W / 2, Y_T3, 17.0, "middle"))
+    boxes.append(_box(s3, W / 2, Y_S3, 12.5, "middle"))
+    body.extend(panel_speedup(speed, boxes))
 
     # Legend spans the full ladder.  float and dd carry an explicit 0.00% — they are
     # zero in BOTH panels, so the number is unambiguous; the three rungs in use are
@@ -237,14 +370,36 @@ def build_svg(per_integral: dict[str, int], routing: dict[str, str]) -> str:
            f"Op counts, not cost; every integral sampled equally.")
     boxes.append(_box(cap, W / 2, Y_CAP, 12.0, "middle"))
 
+    # Two lines: one 12px run of this length overflows 1140px, and _assert_layout
+    # rightly refuses it.
+    cap3 = ("log and atan2 are 3% of ops but 69% of modelled time, so the "
+            "transcendental-heavy integrals gain least.")
+    cap4 = ("Throughput model only — no occupancy or register pressure, which would "
+            "cost the 4-limb qf integrals most.")
+    boxes.append(_box(cap3, W / 2, Y_CAP3, 12.0, "middle"))
+    boxes.append(_box(cap4, W / 2, Y_CAP4, 12.0, "middle"))
+
+    # Screen readers get every bar; the visual panel direct-labels only four.
+    aria_bars = ", ".join(
+        f"{k} {speed[k]['iso']:.2f}"
+        + (f" against dd, {speed[k]['vs_double']:.2f} against double"
+           if speed[k]["rung"] == "qf" else "")
+        for k in sorted(speed, key=_natural))
+
     _assert_layout(boxes)
     dark = "\n".join(f"      .s-{k} {{ fill: {v}; }}" for k, v in FILL_DARK.items())
+    # Ghost bars carry the rung color as a STROKE, so the fill override above cannot
+    # reach them; they need their own rule or they stay light-theme orange on dark.
+    dark += "\n" + "\n".join(f"      .k-{k} {{ stroke: {v}; }}"
+                             for k, v in FILL_DARK.items())
     return f"""<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 {W} {H}"
      width="{W}" height="{H}" role="img"
-     aria-label="Precision assignment for the qcdloop workload, two pie charts. By
-     integral count: ff 14 of {n}, double 5 of {n}, qf 2 of {n}. By math operations:
-     double 51.53 percent, ff 38.36 percent, qf 10.11 percent of {total:,} ops. float
-     and dd are unused. {cap}">
+     aria-label="Precision assignment and expected GB300 speedup for the qcdloop
+     workload. Two pie charts and a bar chart. By integral count: ff 14 of {n},
+     double 5 of {n}, qf 2 of {n}. By math operations: double 51.53 percent, ff 38.36
+     percent, qf 10.11 percent of {total:,} ops. float and dd are unused. {cap}
+     Per-integral iso-accuracy speedup on GB300, whole app {whole:.2f} times:
+     {aria_bars}. {cap3}">
   <style>
     /* Light theme lives on the elements as presentation attributes, so renderers that
        ignore CSS (PowerPoint) still get real colors.  This block only overrides for
@@ -254,6 +409,7 @@ def build_svg(per_integral: dict[str, int], routing: dict[str, str]) -> str:
       .sep  {{ stroke: {SURFACE_D}; }}
       .ink  {{ fill: {INK_D}; }}
       .ink2 {{ fill: {INK2_D}; }}
+      .grid {{ stroke: {INK2_D}; }}
 {dark}
     }}
   </style>
@@ -263,6 +419,10 @@ def build_svg(per_integral: dict[str, int], routing: dict[str, str]) -> str:
 {chr(10).join(legend)}
     <text x="{W // 2}" y="{Y_CAP}" text-anchor="middle" class="ink2" font-size="12"
           fill="{INK2_L}">{cap}</text>
+    <text x="{W // 2}" y="{Y_CAP3}" text-anchor="middle" class="ink2" font-size="12"
+          fill="{INK2_L}">{cap3}</text>
+    <text x="{W // 2}" y="{Y_CAP4}" text-anchor="middle" class="ink2" font-size="12"
+          fill="{INK2_L}">{cap4}</text>
   </g>
 </svg>
 """
@@ -288,8 +448,18 @@ def main() -> int:
               f"{by_ops[rung]:>12,} {100.0 * by_ops[rung] / total:8.2f}%")
     print(f"{'TOTAL':8} {n:>5} {'100.00%':>10} {total:>12,} {'100.00%':>9}")
 
+    speed = gb300.per_integral_speedup()
+    whole = (sum(v["t_base"] for v in speed.values())
+             / sum(v["t_now"] for v in speed.values()))
+    print(f"\n{'integral':9} {'rung':7} {'iso base':>9} {'iso':>8} {'vs double':>10}")
+    for name in sorted(speed, key=_natural):
+        rec = speed[name]
+        print(f"{name:9} {rec['rung']:7} {rec['iso_base']:>9} "
+              f"{rec['iso']:7.2f}x {rec['vs_double']:9.2f}x")
+    print(f"{'WHOLE APP':9} {'':7} {'':>9} {whole:7.2f}x")
+
     if not args.check:
-        OUT.write_text(build_svg(per_integral, routing))
+        OUT.write_text(build_svg(per_integral, routing, speed))
         print(f"wrote {OUT.relative_to(_REPO)}")
     return 0
 
