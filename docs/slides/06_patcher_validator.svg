@@ -33,7 +33,7 @@
 
   <!-- Title -->
   <text x="40" y="44" class="title">Patcher &amp; Validator — inside one walk step</text>
-  <text x="40" y="66" class="sub">Zoom into R4's correctness-phase attempt (double → qf): shim generation, build, validation, verdict.</text>
+  <text x="40" y="66" class="sub">Zoom into R4's upshift-phase attempt (double → qf): shim generation, build, validation, verdict.</text>
 
   <!-- =================== TOP ROW: Strategy handoff =================== -->
   <g transform="translate(40, 110)">

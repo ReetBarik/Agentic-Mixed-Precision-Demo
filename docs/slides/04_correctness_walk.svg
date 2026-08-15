@@ -24,7 +24,7 @@
     .arrow-speed { stroke: #166534; stroke-width: 1.8; fill: none; stroke-dasharray: 5 4; }
     .verdict-accept { font-weight: 700; fill: #166534; }
     .verdict-reject { font-weight: 700; fill: #991b1b; }
-    .verdict-upbump { font-weight: 700; fill: #166534; }
+    .verdict-upshift { font-weight: 700; fill: #166534; }
     .verdict-prune  { font-weight: 700; fill: #64748b; }
     .th { font-size: 12px; font-weight: 700; fill: #172033; }
     .td { font-size: 12px; fill: #172033; }
@@ -39,8 +39,8 @@
   </defs>
 
   <!-- Title -->
-  <text x="40" y="44" class="title">Strategy walk — <tspan style="fill:#b45309">correctness</tspan> phase</text>
-  <text x="40" y="66" class="sub">Queue 1 of 2 — only the regions that miss tolerance at double. Each is up-bumped to the cheapest rung that clears.</text>
+  <text x="40" y="44" class="title">Strategy walk — <tspan style="fill:#b45309">upshift</tspan> phase</text>
+  <text x="40" y="66" class="sub">Queue 1 of 2 — only the regions that miss tolerance at double. Each is upshifted to the cheapest rung that clears.</text>
 
   <!-- ============ LEFT: precision ladder ============ -->
   <text x="40" y="108" class="h">Precision ladder</text>
@@ -71,14 +71,14 @@
     <text x="100" y="354" text-anchor="middle" class="rung-lbl">float</text>
     <text x="100" y="374" text-anchor="middle" class="rung-sub">24-bit mantissa · fastest</text>
 
-    <!-- Correctness arrows (solid): one rung up, inner lane -->
+    <!-- Upshift arrows (solid): one rung up, inner lane -->
     <!-- double → qf -->
     <path d="M215 179 C 275 179, 275 112, 215 112" class="arrow-corr" marker-end="url(#arrow-corr-m)"/>
     <!-- qf → dd -->
     <path d="M215 97 C 275 97, 275 30, 215 30" class="arrow-corr" marker-end="url(#arrow-corr-m)"/>
 
 
-    <!-- Speedup arrows (dotted): one rung down; same arc radius, arced further out than correctness -->
+    <!-- Downshift arrows (dotted): one rung down; same arc radius, arced further out than upshift -->
     <!-- dd → qf -->
     <path d="M215 30 C 385 30, 385 112, 215 112" class="arrow-speed" marker-end="url(#arrow-speed-m)"/>
     <!-- qf → double -->
@@ -90,22 +90,22 @@
 
 
     <!-- Legend under the ladder -->
-    <text x="0" y="414" class="sub">↑ safer / slower</text>
-    <text x="0" y="430" class="sub">↓ faster / riskier</text>
+    <text x="0" y="414" class="sub">↑ upshift: wider / safer</text>
+    <text x="0" y="430" class="sub">↓ downshift: narrower / riskier</text>
 
     <!-- Escalation note: the walk climbs in cost order, cheapest-sufficient -->
-    <text x="0" y="454" class="sub-sm">correctness climbs in cost order — qf first, and dd only if</text>
+    <text x="0" y="454" class="sub-sm">upshift climbs in cost order — qf first, and dd only if</text>
     <text x="0" y="470" class="sub-sm">the qf rung is unavailable (see trace 2a → 2b).</text>
 
     <!-- Phase legend -->
     <line x1="0" y1="496" x2="36" y2="496" class="arrow-corr" marker-end="url(#arrow-corr-m)"/>
-    <text x="46" y="500" class="lbl" style="fill:#b45309">correctness</text>
+    <text x="46" y="500" class="lbl" style="fill:#b45309">upshift</text>
     <line x1="0" y1="520" x2="36" y2="520" class="arrow-speed" marker-end="url(#arrow-speed-m)"/>
-    <text x="46" y="524" class="lbl" style="fill:#166534">speedup</text>
+    <text x="46" y="524" class="lbl" style="fill:#166534">downshift</text>
   </g>
 
-  <!-- ============ MIDDLE: correctness queue ============ -->
-  <text x="500" y="108" class="h">Correctness queue  (dequeue-order)</text>
+  <!-- ============ MIDDLE: upshift queue ============ -->
+  <text x="500" y="108" class="h">Upshift queue  (dequeue-order)</text>
 
   <g transform="translate(500, 130)">
     <rect x="0" y="0" width="320" height="490" rx="8" class="queue-box"/>
@@ -115,20 +115,20 @@
     <!-- queue entries (widened) -->
     <g transform="translate(16, 48)">
       <rect x="0" y="0" width="288" height="46" rx="6" class="rnode-safe"/>
-      <text x="10" y="18" class="lbl">1.  R4   double → qf  (up-bump)</text>
+      <text x="10" y="18" class="lbl">1.  R4   double → qf  (upshift)</text>
       <text x="10" y="36" class="sub-sm">1 div, 1 add, 1 sub  ·  cascade from R1 + R2</text>
     </g>
     <g transform="translate(16, 106)">
       <rect x="0" y="0" width="288" height="46" rx="6" class="rnode-warn"/>
-      <text x="10" y="18" class="lbl">2.  R2   double → dd  (up-bump)</text>
+      <text x="10" y="18" class="lbl">2.  R2   double → dd  (upshift)</text>
       <text x="10" y="36" class="sub-sm">2 mul, 1 sub  ·  cancellation, max_cond 7e3</text>
     </g>
 
     <!-- The other four regions never enter this queue -->
     <line x1="16" y1="176" x2="304" y2="176" stroke="#b45309" stroke-width="1" stroke-dasharray="4 3"/>
-    <text x="16" y="198" class="lbl">Deferred — speedup queue (slide 5)</text>
-    <text x="16" y="216" class="sub-sm">the two queues are disjoint: a region up-bumped here</text>
-    <text x="16" y="232" class="sub-sm">is never demoted later in the same run</text>
+    <text x="16" y="198" class="lbl">Deferred — downshift queue (slide 5)</text>
+    <text x="16" y="216" class="sub-sm">the two queues are disjoint: a region upshifted here</text>
+    <text x="16" y="232" class="sub-sm">is never downshifted later in the same run</text>
 
     <g transform="translate(16, 244)">
       <rect x="0" y="0" width="288" height="24" rx="4" class="rnode-safe"/>
@@ -177,9 +177,9 @@
       <text x="10" y="46">1</text>
       <text x="50" y="46">R4</text>
       <text x="115" y="46">double → qf</text>
-      <text x="240" y="46" class="verdict-upbump">accept ↑</text>
+      <text x="240" y="46" class="verdict-upshift">accept ↑</text>
       <text x="320" y="46">R4 = qf</text>
-      <text x="50" y="64" class="sub-sm" font-style="italic">up-bump: cascade from R1+R2 pushes rel-err past tol at double</text>
+      <text x="50" y="64" class="sub-sm" font-style="italic">upshift: cascade from R1+R2 pushes rel-err past tol at double</text>
 
       <!-- step 2a: R2's qf rung is pruned before any attempt is spent -->
       <rect x="0" y="72" width="410" height="28" fill="#fde68a" stroke="#fcd34d"/>
@@ -194,7 +194,7 @@
       <text x="10" y="120">2b</text>
       <text x="50" y="120">R2</text>
       <text x="115" y="120">double → dd</text>
-      <text x="240" y="120" class="verdict-upbump">accept ↑</text>
+      <text x="240" y="120" class="verdict-upshift">accept ↑</text>
       <text x="320" y="120">R2 = dd</text>
       <text x="50" y="138" class="sub-sm" font-style="italic">float / ff / qf are all built from FP32 words, so all three</text>
       <text x="50" y="154" class="sub-sm" font-style="italic">share float's range — R2 overflows it; dd is the next rung.</text>
@@ -210,24 +210,24 @@
     </g>
   </g>
 
-  <!-- Precision distribution after correctness phase -->
+  <!-- Precision distribution after upshift phase -->
   <g transform="translate(850, 500)">
-    <text x="0" y="0" class="h">State after <tspan style="fill:#b45309">correctness</tspan> phase</text>
+    <text x="0" y="0" class="h">State after <tspan style="fill:#b45309">upshift</tspan> phase</text>
     <rect x="0" y="14" width="410" height="124" rx="6" class="box"/>
 
     <text x="16" y="38" class="lbl">dd: 1</text>
     <text x="120" y="38" class="sub">R2  (cancellation hotspot, qf barred by range)</text>
 
     <text x="16" y="60" class="lbl">qf: 1</text>
-    <text x="120" y="60" class="sub">R4  (up-bumped from double; dd not needed)</text>
+    <text x="120" y="60" class="sub">R4  (upshifted from double; dd not needed)</text>
 
     <text x="16" y="82" class="lbl">double: 4</text>
     <text x="120" y="82" class="sub">R1, R3, R5, R6  —  untouched, still at baseline</text>
 
     <text x="16" y="104" class="lbl">ff: 0</text>
-    <text x="120" y="104" class="sub">correctness only ever moves up the ladder</text>
+    <text x="120" y="104" class="sub">upshift only ever moves up the ladder</text>
 
     <text x="16" y="126" class="lbl">float: 0</text>
-    <text x="120" y="126" class="sub">the speedup phase is where these fill in</text>
+    <text x="120" y="126" class="sub">the downshift phase is where these fill in</text>
   </g>
 </svg>

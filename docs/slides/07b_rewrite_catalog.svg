@@ -83,8 +83,8 @@
   <!-- =================== MIDDLE: Optimization loop =================== -->
   <rect x="20" y="260" width="1240" height="270" rx="10" fill="none" stroke="#94a3b8" stroke-width="1.2" stroke-dasharray="6 4"/>
   <text x="40" y="278" class="h">Optimization loop</text>
-  <text x="40" y="296" class="h">(Phase 1: <tspan style="fill:#b45309">Correctness</tspan>,</text>
-  <text x="40" y="314" class="h">Phase 2: <tspan style="fill:#166534">Speedup</tspan>)</text>
+  <text x="40" y="296" class="h">(Phase 1: <tspan style="fill:#b45309">Upshift</tspan>,</text>
+  <text x="40" y="314" class="h">Phase 2: <tspan style="fill:#166534">Downshift</tspan>)</text>
 
   <!-- Strategy walk (name-only) -->
   <g transform="translate(980, 360)">

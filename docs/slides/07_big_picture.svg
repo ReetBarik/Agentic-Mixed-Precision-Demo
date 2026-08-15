@@ -102,14 +102,14 @@
   <!-- =================== MIDDLE: Optimization loop (dashed container) =================== -->
   <rect x="20" y="260" width="1240" height="270" rx="10" fill="none" stroke="#94a3b8" stroke-width="1.2" stroke-dasharray="6 4"/>
   <text x="40" y="286" class="h">Optimization loop</text>
-  <text x="40" y="306" class="h">(Phase 1: <tspan style="fill:#b45309">Correctness</tspan>,  Phase 2: <tspan style="fill:#166534">Speedup</tspan>)</text>
+  <text x="40" y="306" class="h">(Phase 1: <tspan style="fill:#b45309">Upshift</tspan>,  Phase 2: <tspan style="fill:#166534">Downshift</tspan>)</text>
 
   <!-- Strategy walk -->
   <g transform="translate(980, 360)">
     <rect x="0" y="0" width="220" height="100" rx="8" class="strat-box"/>
     <text x="110" y="26" text-anchor="middle" class="lbl">Strategy walk</text>
-    <text x="110" y="46" text-anchor="middle" class="sub-sm">correctness (safety-ordered)</text>
-    <text x="110" y="62" text-anchor="middle" class="sub-sm">+ speedup (flop-weighted)</text>
+    <text x="110" y="46" text-anchor="middle" class="sub-sm">upshift (safety-ordered)</text>
+    <text x="110" y="62" text-anchor="middle" class="sub-sm">+ downshift (flop-weighted)</text>
     <text x="110" y="82" text-anchor="middle" class="sub-sm">prunes: float_range_ok,</text>
     <text x="110" y="98" text-anchor="middle" class="sub-sm">chain-dedup</text>
   </g>
@@ -174,7 +174,7 @@
   <g transform="translate(870, 585)">
     <rect x="0" y="0" width="400" height="90" rx="8" class="box"/>
     <text x="200" y="24" text-anchor="middle" class="lbl">Loop drains when both phase budgets exhausted</text>
-    <text x="200" y="46" text-anchor="middle" class="sub-sm">correctness_max_iters + speedup_max_iters</text>
+    <text x="200" y="46" text-anchor="middle" class="sub-sm">upshift budget + downshift budget</text>
     <text x="200" y="66" text-anchor="middle" class="sub-sm">→ terminal status: success</text>
     <text x="200" y="82" text-anchor="middle" class="sub-sm">strategy commits final precision distribution</text>
   </g>

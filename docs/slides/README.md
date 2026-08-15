@@ -18,11 +18,11 @@ the picture clearer than the code would.
 3. `03_characterizer_report.svg` — **Characterizer: sweep → journal →
    report.** Sampled sweep at plain double, journal keyed back to region
    scopes, forward-error cascade formula.
-4. `04_correctness_walk.svg` — **Strategy walk, correctness phase.** Queue
-   1 of 2: the regions that miss tolerance at double, each up-bumped to the
+4. `04_correctness_walk.svg` — **Strategy walk, upshift phase.** Queue
+   1 of 2: the regions that miss tolerance at double, each upshifted to the
    cheapest rung that clears. R4 double → qf accepts; R2 double → qf is
    pruned by the range guard before any build, then double → dd accepts.
-5. `05_speedup_walk.svg` — **Strategy walk, speedup phase.** Queue 2 of 2:
+5. `05_speedup_walk.svg` — **Strategy walk, downshift phase.** Queue 2 of 2:
    the regions that already meet tolerance at double, heaviest first, each
    single-stepping down until a rung rejects. R6 → float, R5 rejects its
    first step and settles at double, R1 → float, R3 → ff.
@@ -35,6 +35,15 @@ the picture clearer than the code would.
 8. `07b_rewrite_catalog.svg` — **Future work: algorithmic rewrite
    catalog.** Same loop, but the Patcher attempts a compensated-arithmetic
    rewrite first and treats the precision containers as fallbacks.
+
+The deck calls the two phases **upshift** and **downshift**, which is the
+code's own direction axis — `LiftDirection.UPSHIFT` / `LiftDirection.DOWNSHIFT`,
+glossed against exactly these phases at `agents/strategy/agent.py:255,290` and
+`agents/strategy/tu_walk.py:29,38`. The source still names the *phases*
+`INTENT_CORRECTNESS` / `INTENT_SPEEDUP`; the slides prefer the direction word
+because phase 2 is accepted on digits alone. Its queue order comes from a
+static flop weight and no wall-clock is ever measured, so "speedup" would name
+an outcome the pipeline never checks.
 
 ## Two things worth knowing before presenting
 

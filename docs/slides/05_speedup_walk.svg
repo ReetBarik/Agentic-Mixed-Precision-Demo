@@ -37,7 +37,7 @@
   </defs>
 
   <!-- Title -->
-  <text x="40" y="44" class="title">Strategy walk — <tspan style="fill:#166534">speedup</tspan> phase</text>
+  <text x="40" y="44" class="title">Strategy walk — <tspan style="fill:#166534">downshift</tspan> phase</text>
   <text x="40" y="66" class="sub">Queue 2 of 2 — the four regions that already meet tolerance at double. Each single-steps down until a rung rejects.</text>
 
   <!-- ============ LEFT: precision ladder ============ -->
@@ -69,14 +69,14 @@
     <text x="100" y="354" text-anchor="middle" class="rung-lbl">float</text>
     <text x="100" y="374" text-anchor="middle" class="rung-sub">24-bit mantissa · fastest</text>
 
-    <!-- Correctness arrows (solid): one rung up, inner lane -->
+    <!-- Upshift arrows (solid): one rung up, inner lane -->
     <!-- double → qf -->
     <path d="M215 179 C 275 179, 275 112, 215 112" class="arrow-corr" marker-end="url(#arrow-corr-m)"/>
     <!-- qf → dd -->
     <path d="M215 97 C 275 97, 275 30, 215 30" class="arrow-corr" marker-end="url(#arrow-corr-m)"/>
 
 
-    <!-- Speedup arrows (dotted): one rung down; same arc radius, arced further out than correctness -->
+    <!-- Downshift arrows (dotted): one rung down; same arc radius, arced further out than upshift -->
     <!-- dd → qf -->
     <path d="M215 30 C 385 30, 385 112, 215 112" class="arrow-speed" marker-end="url(#arrow-speed-m)"/>
     <!-- qf → double -->
@@ -88,22 +88,22 @@
 
 
     <!-- Legend under the ladder -->
-    <text x="0" y="414" class="sub">↑ safer / slower</text>
-    <text x="0" y="430" class="sub">↓ faster / riskier</text>
+    <text x="0" y="414" class="sub">↑ upshift: wider / safer</text>
+    <text x="0" y="430" class="sub">↓ downshift: narrower / riskier</text>
 
     <!-- Settle rule: one rung at a time, stop at the first reject -->
-    <text x="0" y="454" class="sub-sm">speedup single-steps down and stops at the first reject —</text>
+    <text x="0" y="454" class="sub-sm">downshift single-steps down and stops at the first reject —</text>
     <text x="0" y="470" class="sub-sm">the region settles at the last rung that was accepted.</text>
 
     <!-- Phase legend -->
     <line x1="0" y1="496" x2="36" y2="496" class="arrow-corr" marker-end="url(#arrow-corr-m)"/>
-    <text x="46" y="500" class="lbl" style="fill:#b45309">correctness</text>
+    <text x="46" y="500" class="lbl" style="fill:#b45309">upshift</text>
     <line x1="0" y1="520" x2="36" y2="520" class="arrow-speed" marker-end="url(#arrow-speed-m)"/>
-    <text x="46" y="524" class="lbl" style="fill:#166534">speedup</text>
+    <text x="46" y="524" class="lbl" style="fill:#166534">downshift</text>
   </g>
 
-  <!-- ============ MIDDLE: speedup queue ============ -->
-  <text x="500" y="108" class="h">Speedup queue  (flop-weighted)</text>
+  <!-- ============ MIDDLE: downshift queue ============ -->
+  <text x="500" y="108" class="h">Downshift queue  (flop-weighted)</text>
 
   <g transform="translate(500, 130)">
     <rect x="0" y="0" width="320" height="490" rx="8" class="queue-box"/>
@@ -113,45 +113,45 @@
     <!-- queue entries: first single-step only; the walk decides how far each goes -->
     <g transform="translate(16, 48)">
       <rect x="0" y="0" width="288" height="46" rx="6" class="rnode-safe"/>
-      <text x="10" y="18" class="lbl">1.  R6   double → ff  (demote)</text>
+      <text x="10" y="18" class="lbl">1.  R6   double → ff  (downshift)</text>
       <text x="10" y="36" class="sub-sm">flop weight: 200  ·  1 mul, 1 add, 1 sub</text>
     </g>
     <g transform="translate(16, 104)">
       <rect x="0" y="0" width="288" height="46" rx="6" class="rnode-safe"/>
-      <text x="10" y="18" class="lbl">2.  R5   double → ff  (demote)</text>
+      <text x="10" y="18" class="lbl">2.  R5   double → ff  (downshift)</text>
       <text x="10" y="36" class="sub-sm">flop weight: 80  ·  1 sqrt, 1 mul, 1 add</text>
     </g>
     <g transform="translate(16, 160)">
       <rect x="0" y="0" width="288" height="46" rx="6" class="rnode-safe"/>
-      <text x="10" y="18" class="lbl">3.  R1   double → ff  (demote)</text>
+      <text x="10" y="18" class="lbl">3.  R1   double → ff  (downshift)</text>
       <text x="10" y="36" class="sub-sm">flop weight: 50  ·  2 add, 2 mul</text>
     </g>
     <g transform="translate(16, 216)">
       <rect x="0" y="0" width="288" height="46" rx="6" class="rnode-sing"/>
-      <text x="10" y="18" class="lbl">4.  R3   double → ff  (demote)</text>
+      <text x="10" y="18" class="lbl">4.  R3   double → ff  (downshift)</text>
       <text x="10" y="36" class="sub-sm">flop weight: 45  ·  1 log, 1 add  (log)</text>
     </g>
 
-    <!-- The two correctness regions are removed before this queue is ordered -->
+    <!-- The two upshift regions are removed before this queue is ordered -->
     <line x1="16" y1="280" x2="304" y2="280" stroke="#166534" stroke-width="1" stroke-dasharray="4 3"/>
-    <text x="16" y="300" class="lbl">Excluded — correctness set (slide 4)</text>
-    <text x="16" y="318" class="sub-sm">the correctness set is removed before this queue is</text>
+    <text x="16" y="300" class="lbl">Excluded — upshift set (slide 4)</text>
+    <text x="16" y="318" class="sub-sm">the upshift set is removed before this queue is</text>
     <text x="16" y="334" class="sub-sm">ordered — a region is never in both</text>
 
     <g transform="translate(16, 344)">
       <rect x="0" y="0" width="288" height="24" rx="4" class="rnode-warn"/>
-      <text x="10" y="16" class="sub-sm">R2 · now at dd · up-bumped, not a candidate</text>
+      <text x="10" y="16" class="sub-sm">R2 · now at dd · upshifted, not a candidate</text>
     </g>
     <g transform="translate(16, 372)">
       <rect x="0" y="0" width="288" height="24" rx="4" class="rnode-safe"/>
-      <text x="10" y="16" class="sub-sm">R4 · now at qf · up-bumped, not a candidate</text>
+      <text x="10" y="16" class="sub-sm">R4 · now at qf · upshifted, not a candidate</text>
     </g>
 
     <!-- Prune-check callout -->
     <g transform="translate(16, 424)">
       <text x="0" y="0" class="lbl">Prune check at dequeue</text>
       <text x="0" y="18" class="sub-sm">float_range_ok ✗ on R2 never fires here — R2 was</text>
-      <text x="0" y="34" class="sub-sm">claimed by correctness and is not in this queue.</text>
+      <text x="0" y="34" class="sub-sm">claimed by upshift and is not in this queue.</text>
       <text x="0" y="52" class="sub-sm">chain-dedup: R1, R3, R6 reuse one ff shim</text>
     </g>
   </g>
@@ -242,16 +242,16 @@
     </g>
   </g>
 
-  <!-- Precision distribution after speedup phase -->
+  <!-- Precision distribution after downshift phase -->
   <g transform="translate(850, 546)">
-    <text x="0" y="0" class="h">State after <tspan style="fill:#166534">speedup</tspan> phase</text>
+    <text x="0" y="0" class="h">State after <tspan style="fill:#166534">downshift</tspan> phase</text>
     <rect x="0" y="14" width="410" height="124" rx="6" class="box"/>
 
     <text x="16" y="38" class="lbl">dd: 1</text>
-    <text x="120" y="38" class="sub">R2  (correctness; qf barred by range)</text>
+    <text x="120" y="38" class="sub">R2  (upshift; qf barred by range)</text>
 
     <text x="16" y="60" class="lbl">qf: 1</text>
-    <text x="120" y="60" class="sub">R4  (correctness; dd not needed)</text>
+    <text x="120" y="60" class="sub">R4  (upshift; dd not needed)</text>
 
     <text x="16" y="82" class="lbl">double: 1</text>
     <text x="120" y="82" class="sub">R5  (ff rejected — settles at baseline)</text>
