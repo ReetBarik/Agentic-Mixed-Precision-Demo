@@ -23,9 +23,15 @@ Bars are quoted against an ISO-ACCURACY baseline: the cheapest rung clearing the
 score 3.69 and 6.57 digits at double and so FAIL there — an all-double baseline for
 those two would compare against a run you would have to throw away.  Because that
 makes their bars the tallest in the chart while measuring something different, each
-carries a dashed GHOST bar at its vs-double value (0.23x, 0.16x): the same flip read
-as a pure cost, with the accuracy it buys not counted.  Both readings are true and
-the pair is the honest way to show it.
+carries a DASHED bar at its vs-double value (0.23x, 0.16x): the same flip read as a
+pure cost, with the accuracy it buys not counted.  Both readings are true and the
+pair is the honest way to show it.
+
+The y-axis is LOG.  Spanning 0.16x to 7.67x linearly leaves the sub-1x readings as
+unreadable stubs, and the panel's job is the ratio, which a log axis reads directly.
+The cost is the zero baseline: bars are anchored at the axis floor (Y_MIN), not at
+zero, so bar AREA is not proportional to value here — only the top edge is meaningful,
+against the gridlines.
 
 The bottom panel is full-width rather than a third column: 21 bars across a third of
 1140px is a ~18px pitch, which cannot carry readable category labels.
@@ -97,7 +103,7 @@ DRAW_ORDER = ["double", "ff", "qf", "dd", "float"]
 # Layout.  Generous margins are load-bearing, not taste: an early cut of this chart
 # cleared its subtitle by 0.2px and the neighbouring panel's label by 1px, which no
 # rasteriser would have honoured.  _assert_layout re-checks on every run.
-W, H = 1140, 848
+W, H = 1140, 806
 CY, R, LAB_GAP = 252.0, 118.0, 20.0
 CENTRES = [260.0, 880.0]
 Y_TITLE, Y_SUB = 28, 52
@@ -107,10 +113,13 @@ MIN_GAP = 8.0                                    # px of clear space demanded an
 # Bottom (speedup) panel.
 Y_T3, Y_S3 = 512, 536                            # title / subtitle
 BAR_TOP, BAR_BASE = 560, 770                     # plot box; BAR_BASE is y=0
-Y_XLAB, Y_CAP3, Y_CAP4 = 788, 809, 831
+Y_XLAB = 788
 PAD_L, PAD_R = 62.0, 24.0
-Y_MAX = 8.0                                      # axis top, comfortably over B12@7.67
-GRID = [0, 2, 4, 6, 8]
+# Log y-axis: the panel spans 0.16x (the B16 vs-double reading) to 7.67x, and on a
+# linear axis the sub-1x bars are 2px stubs.  A log axis costs the zero baseline --
+# bars are anchored at Y_MIN, the axis floor, NOT at zero, which is off at -inf.
+Y_MIN, Y_MAX = 0.1, 10.0
+GRID = [0.1, 0.2, 0.5, 1.0, 2.0, 5.0, 10.0]
 BAR_W, PAIR_GAP = 20.0, 6.0                      # a qf slot holds two BAR_W bars
 
 
@@ -205,16 +214,25 @@ def panel_integrals(cx: float, routing: dict[str, str], boxes: list) -> list[str
     return out
 
 
+_LOG_SPAN = math.log10(Y_MAX) - math.log10(Y_MIN)
+
+
 def _bar_y(v: float) -> float:
-    return BAR_BASE - (v / Y_MAX) * (BAR_BASE - BAR_TOP)
+    """Log position, clamped at the axis floor (v <= Y_MIN would run to -inf)."""
+    frac = (math.log10(max(v, Y_MIN)) - math.log10(Y_MIN)) / _LOG_SPAN
+    return BAR_BASE - frac * (BAR_BASE - BAR_TOP)
+
+
+def _tick(v: float) -> str:
+    return f"{v:g}"
 
 
 def _bar_path(x: float, w: float, v: float) -> str:
     """Bar with 4px rounded top corners, square where it meets the baseline.
 
     rx on a <rect> would round the BOTTOM corners too, which detaches the mark from
-    its own axis.  The radius clamps on short bars so the two ghosts (0.16x, 0.23x)
-    stay rectangles instead of collapsing to lozenges.
+    its own axis.  The radius clamps on short bars so the shortest dashed bar
+    (0.16x) stays a rectangle instead of collapsing to a lozenge.
     """
     top = _bar_y(v)
     r = min(4.0, max(0.0, (BAR_BASE - top) / 2.0))
@@ -226,21 +244,25 @@ def _bar_path(x: float, w: float, v: float) -> str:
 
 
 def panel_speedup(speed: dict, boxes: list) -> list:
-    """Per-integral iso-accuracy speedup; qf slots carry a dashed vs-double ghost."""
+    """Per-integral iso-accuracy speedup; qf slots carry a dashed vs-double bar."""
     names = sorted(speed, key=_natural)
     pitch = (W - PAD_L - PAD_R) / len(names)
     out = []
 
     # Grid first, so bars paint over it.  The 1.0x line is the break-even reference
     # and is drawn heavier than the rest — below it a flip costs more than it saves.
+    # It is skipped here so the heavier dashed rule below is not double-struck, but
+    # its tick label is still emitted with the others.
     for g in GRID:
         y = _bar_y(g)
-        out.append(f'    <line x1="{PAD_L:.1f}" y1="{y:.1f}" x2="{W - PAD_R:.1f}" '
-                   f'y2="{y:.1f}" class="grid" stroke="{INK2_L}" stroke-width="1" '
-                   f'stroke-opacity="0.18"/>')
+        if g != 1.0:
+            out.append(f'    <line x1="{PAD_L:.1f}" y1="{y:.1f}" x2="{W - PAD_R:.1f}" '
+                       f'y2="{y:.1f}" class="grid" stroke="{INK2_L}" stroke-width="1" '
+                       f'stroke-opacity="0.18"/>')
         out.append(f'    <text x="{PAD_L - 10:.1f}" y="{y + 4:.1f}" text-anchor="end" '
-                   f'class="ink2" font-size="11.5" fill="{INK2_L}">{g}&#215;</text>')
-        boxes.append(_box(f"{g}x", PAD_L - 10, y + 4, 11.5, "end"))
+                   f'class="ink2" font-size="11.5" fill="{INK2_L}">'
+                   f'{_tick(g)}&#215;</text>')
+        boxes.append(_box(f"{_tick(g)}x", PAD_L - 10, y + 4, 11.5, "end"))
     y1 = _bar_y(1.0)
     out.append(f'    <line x1="{PAD_L:.1f}" y1="{y1:.1f}" x2="{W - PAD_R:.1f}" '
                f'y2="{y1:.1f}" class="grid" stroke="{INK_L}" stroke-width="1.25" '
@@ -249,11 +271,8 @@ def panel_speedup(speed: dict, boxes: list) -> list:
                f'class="ink2" font-size="11" fill="{INK2_L}">1&#215; break-even</text>')
     boxes.append(_box("1x break-even", W - PAD_R, y1 - 7, 11.0, "end"))
 
-    ffs = {n: speed[n]["iso"] for n in names if speed[n]["rung"] == "ff"}
-    # Selective direct labels only: both qf bars (they are the ones measuring
-    # something different), plus the ff extremes that carry the panel's message.
-    label = {max(ffs, key=ffs.get), min(ffs, key=ffs.get)}
-
+    # No direct value labels: the log gridlines carry the reading, and the aria
+    # description below gives screen readers every number.
     for i, n in enumerate(names):
         rec = speed[n]
         rung, iso = rec["rung"], rec["iso"]
@@ -263,23 +282,12 @@ def panel_speedup(speed: dict, boxes: list) -> list:
 
         out.append(f'    <path d="{_bar_path(x, BAR_W, iso)}" class="s-{rung}" '
                    f'fill="{FILL_LIGHT[rung]}"/>')
-        if paired or n in label:
-            out.append(f'    <text x="{x + BAR_W / 2:.1f}" y="{_bar_y(iso) - 7:.1f}" '
-                       f'text-anchor="middle" class="ink" font-size="11.5" '
-                       f'font-weight="600" fill="{INK_L}">{iso:.2f}&#215;</text>')
-            boxes.append(_box(f"{iso:.2f}x", x + BAR_W / 2, _bar_y(iso) - 7, 11.5,
-                              "middle"))
 
         if paired:
             gx, gv = cx + PAIR_GAP / 2, rec["vs_double"]
             out.append(f'    <path d="{_bar_path(gx, BAR_W, gv)}" class="k-{rung}" '
                        f'fill="none" stroke="{FILL_LIGHT[rung]}" stroke-width="1.5" '
                        f'stroke-dasharray="3 2"/>')
-            out.append(f'    <text x="{gx + BAR_W / 2:.1f}" y="{_bar_y(gv) - 7:.1f}" '
-                       f'text-anchor="middle" class="ink2" font-size="10.5" '
-                       f'fill="{INK2_L}">{gv:.2f}&#215;</text>')
-            boxes.append(_box(f"{gv:.2f}x", gx + BAR_W / 2, _bar_y(gv) - 7, 10.5,
-                              "middle"))
 
         out.append(f'    <text x="{cx:.1f}" y="{Y_XLAB}" text-anchor="middle" '
                    f'class="ink2" font-size="11" fill="{INK2_L}">{n}</text>')
@@ -337,8 +345,8 @@ def build_svg(per_integral: dict[str, int], routing: dict[str, str],
     whole = (sum(v["t_base"] for v in speed.values())
              / sum(v["t_now"] for v in speed.values()))
     t3 = "expected speedup on NVIDIA GB300"
-    s3 = (f"iso-accuracy baseline · whole app {whole:.2f}× · "
-          f"dashed ghost = qf measured against double instead of dd")
+    s3 = ("iso-accuracy baseline · log scale · "
+          "dashed bar = qf measured against double instead of dd")
     body.append(f'    <text x="{W / 2}" y="{Y_T3}" text-anchor="middle" class="ink" '
                 f'font-size="17" font-weight="600" fill="{INK_L}">{t3}</text>')
     body.append(f'    <text x="{W / 2}" y="{Y_S3}" text-anchor="middle" class="ink2" '
@@ -370,16 +378,7 @@ def build_svg(per_integral: dict[str, int], routing: dict[str, str],
            f"Op counts, not cost; every integral sampled equally.")
     boxes.append(_box(cap, W / 2, Y_CAP, 12.0, "middle"))
 
-    # Two lines: one 12px run of this length overflows 1140px, and _assert_layout
-    # rightly refuses it.
-    cap3 = ("log and atan2 are 3% of ops but 69% of modelled time, so the "
-            "transcendental-heavy integrals gain least.")
-    cap4 = ("Throughput model only — no occupancy or register pressure, which would "
-            "cost the 4-limb qf integrals most.")
-    boxes.append(_box(cap3, W / 2, Y_CAP3, 12.0, "middle"))
-    boxes.append(_box(cap4, W / 2, Y_CAP4, 12.0, "middle"))
-
-    # Screen readers get every bar; the visual panel direct-labels only four.
+    # Screen readers get every bar; the visual panel carries no value labels at all.
     aria_bars = ", ".join(
         f"{k} {speed[k]['iso']:.2f}"
         + (f" against dd, {speed[k]['vs_double']:.2f} against double"
@@ -398,8 +397,8 @@ def build_svg(per_integral: dict[str, int], routing: dict[str, str],
      workload. Two pie charts and a bar chart. By integral count: ff 14 of {n},
      double 5 of {n}, qf 2 of {n}. By math operations: double 51.53 percent, ff 38.36
      percent, qf 10.11 percent of {total:,} ops. float and dd are unused. {cap}
-     Per-integral iso-accuracy speedup on GB300, whole app {whole:.2f} times:
-     {aria_bars}. {cap3}">
+     Per-integral iso-accuracy speedup on GB300, log scale, whole app
+     {whole:.2f} times: {aria_bars}.">
   <style>
     /* Light theme lives on the elements as presentation attributes, so renderers that
        ignore CSS (PowerPoint) still get real colors.  This block only overrides for
@@ -419,10 +418,6 @@ def build_svg(per_integral: dict[str, int], routing: dict[str, str],
 {chr(10).join(legend)}
     <text x="{W // 2}" y="{Y_CAP}" text-anchor="middle" class="ink2" font-size="12"
           fill="{INK2_L}">{cap}</text>
-    <text x="{W // 2}" y="{Y_CAP3}" text-anchor="middle" class="ink2" font-size="12"
-          fill="{INK2_L}">{cap3}</text>
-    <text x="{W // 2}" y="{Y_CAP4}" text-anchor="middle" class="ink2" font-size="12"
-          fill="{INK2_L}">{cap4}</text>
   </g>
 </svg>
 """
