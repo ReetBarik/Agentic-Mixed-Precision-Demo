@@ -7,8 +7,7 @@ The characterizer report's ``region_local_vars`` is a region's *reads* (the name
 source vars its ops consume as leaf operands).  The ff/dd boundary patch also
 needs the region's *writes* — the tracked-typed locals the region *computes*,
 which downstream code reads and which the boundary patch must demote to the
-caller's precision on region exit.  As flagged in HANDOFF.md ("Where journal data
-was insufficient"), the write set is **not recoverable from the tracked-datatype
+caller's precision on region exit.  As flagged in docs/KNOWN_LIMITATIONS.md, the write set is **not recoverable from the tracked-datatype
 journal**: ``LogRecord`` has no LHS field, ``track()`` emits no record, and
 ``prov_vars`` entries carry no scope.
 
@@ -30,7 +29,7 @@ without its include context (the type's header is missing).  clang then
 mis-recovers ``Tracked<double> a = …`` as ``int a`` and reports zero writes.  We
 guard against that: an *empty* libclang result over a region whose text still
 contains ``tracked_type<`` is treated as a resolution failure and handed to the
-include-free lexer.  See HANDOFF.md for the full note.
+include-free lexer.  See docs/KNOWN_LIMITATIONS.md.
 
 Semantics
 ---------

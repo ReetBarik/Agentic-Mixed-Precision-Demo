@@ -105,7 +105,7 @@ def next_down(precision: str) -> str | None:
 # Remediation-kind vocabulary (P1 + P3).
 #
 # 13 transition kinds + 2 reformulate kinds = 15 total.  `float-to-ff` is the
-# single-step up-rung the P3 table omits (see HANDOFF.md); it is required for a
+# single-step up-rung the P3 table omits; it is required for a
 # cost-ladder walk that starts from a float region.  The three "skip"
 # transitions (float-to-double, double-to-float, ff-to-dd) are valid Patcher
 # kinds but are NOT emitted by the current single-step walk.

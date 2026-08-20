@@ -15,8 +15,8 @@ corruption modes that motivated the AST decision split in two:
 We keep libclang as the *preferred* backend (imported lazily) so the AST path is
 used wherever the bindings are installed; when they are absent we fall back to the
 keyword-token rewriter, which gives the same corruption-safety guarantee for this
-specific ``float``⇄``double`` keyword swap.  See HANDOFF.md for the environment
-note (the bindings are not installed on the current cluster image).
+specific ``float``⇄``double`` keyword swap.  See docs/KNOWN_LIMITATIONS.md (the
+bindings are not installed on the current cluster image).
 """
 
 from __future__ import annotations

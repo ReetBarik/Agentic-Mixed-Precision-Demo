@@ -1380,7 +1380,7 @@ def widen_decl_type_line(line: str, orig_type: str, dd_type: str) -> str | None:
 def _insert_shim_include(lines: list[str], shim_include: str) -> list[str]:
     """Insert ``#include "<shim>"`` into a target header (idempotent).
 
-    Placement (design fix, HANDOFF 2026-07-19): the shim *specializes* templates
+    Placement (design fix, 2026-07-19): the shim *specializes* templates
     (``Constants<...>``, the extended-precision ops) that the header's own app
     ``#include``s declare.  If the shim lands before those includes, the compiler
     sees the specialization before the primary template — ``"Constants is not a

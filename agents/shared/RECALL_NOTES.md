@@ -1,11 +1,11 @@
 # Recall verifier — notes & findings
 
-Companion to `agents/shared/recall_verifier.py`. Implements the
-"End-to-end signal usefulness" layer of **PLAN_implementation.md §6**:
-for each validation fixture, recall = fraction of `symbolic_hints[*].location`
-covered by `sensitivity_profile.top_hotspots[*].location`, grouped by severity.
+Companion to `agents/shared/recall_verifier.py` — the end-to-end signal
+usefulness check: for each validation fixture, recall = fraction of
+`symbolic_hints[*].location` covered by
+`sensitivity_profile.top_hotspots[*].location`, grouped by severity.
 
-Pass criteria (§6): **≥80% recall on `high`, ≥50% on `medium`, precision
+Pass criteria: **≥80% recall on `high`, ≥50% on `medium`, precision
 unbounded** (false positives acceptable). Surfaced as a non-blocking `pass`
 status; the script never exits non-zero on a threshold miss (only on
 structural errors — missing files, malformed JSON).

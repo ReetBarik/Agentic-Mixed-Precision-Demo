@@ -112,7 +112,7 @@ class ChainRecord:
         sub-region is the representative target.  The promoted precision is
         distributed to ALL ``lines`` afterward — the representative is a driver
         for the walk, not the assignment scope.  (Real multi-line chain intents
-        for Patcher are deferred; see HANDOFF.md.)
+        for Patcher are deferred; see docs/KNOWN_LIMITATIONS.md.)
         """
         rep = self.lines[0]
         return RegionRecord(
@@ -278,7 +278,7 @@ def _region_vars(region: dict) -> list[str]:
     Prefer ``region_local_vars`` — the tight set of source vars used as direct
     leaf operands at the line — over ``prov_vars`` (the full transitive
     provenance union).  ff_integrator / dd_integrator want the region-local set,
-    not the DAG closure (see HANDOFF.md: consumer migration).  Falls back to
+    not the DAG closure (consumer migration is not modeled).  Falls back to
     ``prov_vars`` for reports predating the ``region_local_vars`` field.
     """
     if "region_local_vars" in region:

@@ -1,10 +1,10 @@
-"""Recall verifier — end-to-end signal usefulness check (PLAN_implementation.md §6).
+"""Recall verifier — end-to-end signal usefulness check.
 
 For each validation fixture, recall = fraction of ``symbolic_hints[*].location``
 that is covered by some ``sensitivity_profile.top_hotspots[*].location``,
 grouped by hint ``severity``.
 
-Pass criteria (PLAN_implementation.md §6): ≥0.80 recall on ``high`` severity,
+Pass criteria: ≥0.80 recall on ``high`` severity,
 ≥0.50 on ``medium``, precision unbounded (false positives acceptable).  These
 are surfaced as a non-blocking ``pass`` status — a threshold miss never makes
 the script exit non-zero.  Only structural errors (missing files, malformed
@@ -30,12 +30,12 @@ against a hotspot location if EITHER:
       location.
 
 Rule (b) is what lets ``cancellation_check:2-4`` match
-``…/cancellation.cpp:cancellation_check:9`` (shared function-name token).  It
-deliberately does NOT match when the hint names the *kernel* function but the
-profile attributes ops to *driver-shim* functions (e.g. hint
-``log_sum_exp_naive`` vs hotspots ``exp``/``log``) — that genuine
-attribution-format mismatch is reported in ``findings`` rather than papered
-over.  Precision is unbounded by spec, so leniency here is acceptable.
+``…/cancellation.cpp:cancellation_check:9`` (shared function-name token) — since
+the call-site ``TRACKED_HERE`` forwarding pass, hotspots carry the *kernel*
+function name, so any shared identifier token ≥ 3 chars matches.  When a kernel
+calls ``std::`` math that cannot be forwarded, ops stay shim-attributed and the
+resulting misses are reported in ``findings`` rather than papered over.
+Precision is unbounded by spec, so leniency here is acceptable.
 """
 
 from __future__ import annotations
@@ -47,7 +47,7 @@ from pathlib import Path
 
 SCHEMA_VERSION = 1
 
-# Pass thresholds per PLAN_implementation.md §6. `low` is reported but ungated.
+# Pass thresholds. `low` is reported but ungated.
 THRESHOLDS = {"high": 0.80, "medium": 0.50}
 SEVERITIES = ("high", "medium", "low")
 
@@ -190,8 +190,7 @@ def _fmt_recall(v) -> str:
 
 
 def print_report(summary: dict) -> None:
-    print("Recall verifier — symbolic_hints vs top_hotspots "
-          "(PLAN_implementation.md §6)")
+    print("Recall verifier — symbolic_hints vs top_hotspots")
     print(f"  thresholds: high ≥ {THRESHOLDS['high']:.0%}, "
           f"medium ≥ {THRESHOLDS['medium']:.0%}; precision unbounded\n")
     header = f"  {'fixture':<16} {'high':>10} {'medium':>10} {'low':>10}   status"

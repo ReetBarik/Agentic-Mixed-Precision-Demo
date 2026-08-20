@@ -39,7 +39,7 @@ from agents.integrator_base.region import RegionIntegrationResult
 _NOT_IMPLEMENTED_MSG = (
     "ff_integrator.integrate (whole-app) is not implemented: only the *regional* "
     "float-float promotion path (integrate_region) is built. Whole-app ff mode is "
-    "a documented follow-up (see HANDOFF.md); the regional path is what the Patcher "
+    "a documented follow-up (see docs/KNOWN_LIMITATIONS.md); the regional path is what the Patcher "
     "drives per remediation intent."
 )
 

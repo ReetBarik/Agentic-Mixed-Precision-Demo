@@ -14,7 +14,7 @@ gate** (Reet 2026-07-24, Stage-2 prep — replaces the Stage-1 absolute p100≥6
     terminate when the queue is exhausted.
 
 No joint re-measurement, no strategy combining, no re-characterization between
-accepts (v1 keeps it simple — PLAN_overview §Loop semantics).
+accepts (v1 keeps it simple — README §Loop semantics).
 
 **Regression-relative gate (Reet's call, Stage-2 prep).**  A candidate is accepted
 iff it does not *worsen* the whole-app worst-case precise-digits (p100) by more

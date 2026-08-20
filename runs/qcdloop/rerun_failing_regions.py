@@ -69,7 +69,7 @@ def _shim_health_report(shim_paths: list[str]) -> str:
     return "; ".join(bits)
 
 
-# The shim-include ORDERING blocker (HANDOFF, e1d774a rerun): the boundary patch
+# The shim-include ORDERING blocker (e1d774a rerun): the boundary patch
 # spliced the shim #include BEFORE the header's own app includes that declare the
 # templates the shim specializes, so the compiler saw the specialization first.
 _ORDERING_ERROR = "is not a class template"

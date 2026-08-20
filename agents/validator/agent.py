@@ -5,7 +5,7 @@ Two things live here:
 * :func:`run` — the (now vestigial) LangGraph node.  Strategy drives the Validator
   as a callable (Q5), so the graph no longer routes through this node.
 * :func:`make_validator_fn` — the adapter that reconciles the two contracts
-  (Strategy HANDOFF item 9).  Strategy calls ``validator_fn(candidate_sha, ctx)``
+  (the two contracts differ).  Strategy calls ``validator_fn(candidate_sha, ctx)``
   with a **SHA on the strategy branch**; the real
   :func:`agents.validator.validate.validate` takes a **candidate patch** (a
   unified diff vs the pristine vanilla tree).  The adapter turns the SHA into that

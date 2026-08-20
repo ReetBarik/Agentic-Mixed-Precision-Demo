@@ -7,7 +7,7 @@ output (DISCRIM).  This module is pure data: it reads assembled scorer-manifest
 rows and produces a ranked, deduplicated ``Candidate`` list plus the excluded
 sets (for the run report).  No git, no build, no LLM.
 
-Locked policy (Reet 2026-07-24, PLAN_overview §Loop semantics):
+Locked policy (Reet 2026-07-24, README §Loop semantics):
 
 * Rank cheapest→most-conservative: ``float < ff < dd``.  Never past ``dd``.
 * Only ``measured`` cells compete; a region with no measured **DISCRIM** rung

@@ -5,8 +5,8 @@ whole-app binary over a disjoint slice of the input space, then reduces its own
 (possibly enormous, transient) ``journal.jsonl`` **in-process** to a small,
 mergeable report.  A separate *merge* step combines the per-shard reports into a
 single consolidated report handed to the Strategy Agent.  The journal itself is
-never moved or concatenated — only the reductions are (see PLAN_implementation.md
-"Execution model": "per-chunk metadata ... reduces cleanly across chunks").
+never moved or concatenated — only the reductions are (per-chunk metadata reduces
+cleanly across chunks).
 
 Two things this computes that a flat per-line rollup cannot:
 
@@ -228,7 +228,7 @@ def _region_local_reads(rec: dict, source_ids: set[str],
     textually used at this source line.  It is by construction a subset of
     ``prov_vars`` — the "filter to in-scope variables" the region contract wants.
 
-    Caveat (see HANDOFF.md): the journal has no LHS/assignment-target field and
+    Caveat (see docs/KNOWN_LIMITATIONS.md): the journal has no LHS/assignment-target field and
     ``track()`` emits no record, so the *declared/assigned* (written) variable of
     a region — the intermediate ff_integrator ultimately stores — is not
     nameable.  This is the tightest region-scoped *named* variable set the data
