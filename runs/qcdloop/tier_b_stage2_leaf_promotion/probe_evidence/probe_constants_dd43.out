@@ -1,7 +1,0 @@
-num_C = 43  (expect 43)
-C[0]  hi=0.42996693560813698 lo=-7.726e-18  bit-exact=1
-C[18] hi=-1.4226020855112447e-16 lo=4.699e-33  bit-exact=1
-C[42] hi=-1.11772e-35 lo=4.466e-52  bit-exact=1
-_pi() hi=3.1415926535897931 lo=1.225e-16  bit-exact dd_pi=1
-sum_C(43) hi=0.8224670334241132 lo=1.520e-17
-P5 PASS: enriched source provides 43-coeff dd table

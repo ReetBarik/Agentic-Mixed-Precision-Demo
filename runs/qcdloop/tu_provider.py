@@ -2,8 +2,8 @@
 """qcdloop whole-TU measure provider — the injectable ``tu_measure_fn`` for the
 Strategy ``strategy_mode="tu_only"`` walk.
 
-This is the L-measure recipe (``phase1_lmeasure.py`` + ``phase2_lmeasure.py``)
-packaged as the provider contract the generic Strategy walk consumes:
+This is the whole-TU L-measure recipe packaged as the provider contract the
+generic Strategy walk consumes:
 
     tu_measure_fn(integral, target) -> dict
         target == "baseline"               -> {"built", "baseline_digits"}

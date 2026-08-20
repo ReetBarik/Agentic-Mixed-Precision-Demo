@@ -1,7 +1,0 @@
-# Build artifacts
-build/
-
-# The spike journal at sample_count=256 regenerates locally from the committed
-# driver + shim; keep it (and any larger Phase 0 runs) out of git.
-journal.jsonl
-run.log

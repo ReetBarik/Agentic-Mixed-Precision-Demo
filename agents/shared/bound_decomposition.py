@@ -1,10 +1,9 @@
 """Bound-decomposition arithmetic — the Item 6/7 first-order forward-cone model.
 
-Extracted (Phase 2f) from ``runs/qcdloop/bound_decomposition_all_21.py`` so the
-SAME arithmetic drives both the read-only analysis script AND the live chain-dd
-candidate selection in the pipeline (``solver.queue`` / ``strategy.ranking``).
+Shared arithmetic for the live chain-dd candidate selection in the pipeline
+(``solver.queue`` / ``strategy.ranking``).
 
-Framework (Item 6-revised — see the reducer header / bound_decomposition_all_21.py):
+Framework (Item 6-revised — see the ``stability_reducer`` header):
   * ``max_sensitivity = cond * amp`` — first-order forward-cone amplification of a
     machine-eps roundoff to the observable output.  cond and amp are properties of
     the *math function* -> precision-invariant; only the injected U changes per rung.

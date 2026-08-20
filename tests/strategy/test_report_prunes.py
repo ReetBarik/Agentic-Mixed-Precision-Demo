@@ -125,8 +125,8 @@ def test_wi1_fail_open_when_field_missing(tmp_path):
 #
 # pred_float is a local per-region bound; the Validator accepts on global
 # min-precise-digits, so a hard pred_float gate over-blocks float with no
-# correctness benefit (13/86 CALIBRATION_v2 float regions had pred_float 6–14%
-# yet lost 0 global digits). WI2 therefore only *counts* the flag; float is still
+# correctness benefit (on the 10k calibration re-run, 13/86 float regions had
+# pred_float 6–14% yet lost 0 global digits). WI2 therefore only *counts* the flag; float is still
 # attempted and the Validator decides.
 # ---------------------------------------------------------------------------
 

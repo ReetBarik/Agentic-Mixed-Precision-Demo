@@ -7,11 +7,9 @@ state) and the tolerance gate (:mod:`agents.patcher.flip_gate`).  There is **no
 Patcher LLM**, no region walk, and no chain walk — those live on the ``"region"``
 path (retained for Phase-2.2 region-level demotion, never invoked here).
 
-This is the same recipe the L-measure scripts (``runs/qcdloop/phase1_lmeasure.py``
-+ ``phase2_lmeasure.py``) run, lifted into the agentic pipeline so the whole-TU
-route is exercised end-to-end by the same Strategy the region walk uses.  The
-qcdloop-specific build/oracle/measure is **not** here — it is injected as
-``tu_measure_fn`` so this module (and all of ``agents/strategy``) stays generic
+The qcdloop-specific build/oracle/measure is **not** here — it is injected as
+``tu_measure_fn`` (the qcdloop provider is ``runs/qcdloop/tu_provider.py``) so
+this module (and all of ``agents/strategy``) stays generic
 (feedback_no_placeholder_patterns).
 
 Provider contract (``tu_measure_fn(integral, target) -> dict``):
