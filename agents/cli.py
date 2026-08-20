@@ -77,7 +77,9 @@ def _run_characterize(args: argparse.Namespace) -> None:
 
     cfg = PipelineConfig(**cfg_kwargs)
 
-    graph = build_graph()
+    # Characterize-only: the strategy node needs injected callables + a fixed
+    # report (driven by runs/qcdloop/run_strategy_e2e.py, not by this CLI).
+    graph = build_graph(through_strategy=False)
 
     initial_state: PipelineState = {
         "source_files": [str(Path(k).resolve()) for k in args.kernel],

@@ -21,14 +21,25 @@ from agents.strategy import agent as strategy_agent
 from agents.state import PipelineState
 
 
-def build_graph():
+def build_graph(*, through_strategy: bool = True):
+    """Compile the pipeline graph.
+
+    ``through_strategy=False`` builds the characterize-only graph.  The strategy
+    node requires injected callables on the state (``patcher_fn`` /
+    ``validator_fn``, or ``tu_measure_fn`` in ``tu_only`` mode) plus a fixed
+    characterization report — callers that cannot supply those (e.g. the
+    ``agents.cli`` characterizer front door) stop after characterize.
+    """
     g = StateGraph(PipelineState)
 
     g.add_node("characterize", characterizer_agent.run)
-    g.add_node("strategy", strategy_agent.run)
-
     g.set_entry_point("characterize")
-    g.add_edge("characterize", "strategy")
-    g.add_edge("strategy", END)
+
+    if through_strategy:
+        g.add_node("strategy", strategy_agent.run)
+        g.add_edge("characterize", "strategy")
+        g.add_edge("strategy", END)
+    else:
+        g.add_edge("characterize", END)
 
     return g.compile()
