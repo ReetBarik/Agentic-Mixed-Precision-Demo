@@ -1,6 +1,6 @@
-"""P3 dispatch — map a ``kind`` to one of four code paths and run its generator.
+"""P3 dispatch — map a ``kind`` to one of five code paths and run its generator.
 
-The 11 kinds collapse to four dispatch paths (design §P3 "Four dispatch paths"):
+The 15 kinds collapse to five dispatch paths (design §P3 "Five dispatch paths"):
 
 * **regional-integrator** — ``float-to-ff``, ``double-to-ff`` (→ ff shim),
   ``double-to-dd`` (→ dd shim), and ``ff-to-dd`` (composite: revert ff, then

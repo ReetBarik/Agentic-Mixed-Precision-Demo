@@ -80,7 +80,8 @@ def flop_weighted_score(region: RegionRecord, weights: dict,
 
     ``sum(ops[op] * weight[target_column][op])`` — high-throughput regions
     (div/log-heavy) score far above add-heavy regions of equal op_count, so the
-    speedup queue front-loads where hardware savings actually live (RATIO_REPORT).
+    speedup queue front-loads where hardware savings actually live (per the
+    op-share throughput accounting behind ``ratio_multipliers.json``).
     An op absent from the column defaults to weight 1 (native cost).
     """
     col = weights.get(_WEIGHT_COLUMN.get(target_datatype, target_datatype), {})
@@ -134,7 +135,8 @@ def build_speedup_queue(regions: list[RegionRecord], tolerance: float,
 
     Ordering (Wave-3 WI3): when ``flop_weights`` is supplied, rank by
     flop-weighted throughput (``div``/``log``-heavy regions first — that is where
-    the hardware savings concentrate, per RATIO_REPORT).  Without it, fall back to
+    the hardware savings concentrate, per the op-share accounting behind
+    ``ratio_multipliers.json``).  Without it, fall back to
     the historical raw ``op_count desc`` — a strict superset-compatible default.
     ``location`` breaks ties for determinism either way.
     """

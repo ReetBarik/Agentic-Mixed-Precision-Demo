@@ -10,11 +10,17 @@ the **lowest-precision assignment per region** such that global
 min-precise-digits ≥ tolerance. Precision ladder:
 
 ```
-float  ~7 digits   →   ff (float-float)  ~14 digits   →   double  ~15-16   →   dd (double-double)  ~30-31
+float  ~7   →   ff (float-float)  ~14   →   double  ~15-16   →   qf (quad-float)  ~29   →   dd (double-double)  ~30-31
 ```
 
-**No quad.** CUDA fp128 requires Blackwell-only sm_100 hardware; DD is the
-best portable ceiling.
+**No fp128.** CUDA fp128 requires Blackwell-only sm_100 hardware; DD is the
+portable ceiling. **Amended (QF integration, 2026-08):** a *software*
+quad-float rung (`qf`, 4×FP32, ~29 digits, **FP32 exponent range**) sits
+between `double` and `dd` (`agents/strategy/models.py::LADDER`). qf is
+whole-TU-flip-only: `models.REGION_REALIZABLE` excludes it from the region
+walk (there is no qf integrator), and the regional dispatch hard-fails on
+it. The FP32 family (`float`, `ff`, `qf`) shares one exponent-range ceiling;
+the range guard keys on `models.FP32_FAMILY`, not on `float` alone.
 
 Algorithmic rewrites (Kahan, algebraic identities) are orthogonal to
 precision and applied when a region's signal class demands it.
@@ -50,8 +56,17 @@ Loop, not one-shot. Each iteration:
 3. `log_near_root` regions with `max_rel_err > 10^-tolerance`.
 4. `stable` regions that surprisingly show `max_rel_err > 10^-tolerance`.
 
-**Speedup queue:** `stable` regions with `predicted_rel_err_if_float`
-well below tolerance, ranked by op_count descending.
+**Speedup queue:** `stable` regions admitted on `predicted_rel_err_if_ff`
+(the loosest cheaper-than-double rung, so it subsumes the float gate).
+Ordering is flop-weighted by op mix (`ratio_multipliers.json`) when
+available, falling back loudly to op_count descending.
+
+**Report-mining prunes (Wave-3, on by default;**
+`STRATEGY_DISABLE_REPORT_PRUNES=1` **is the single kill switch):** WI1
+`value_range_ok_for_float` hard range gate on the FP32 family; WI2
+`predicted_rel_err_if_float` telemetry-only flag (a local bound must not
+gate the global-min metric — the Validator stays the authority); WI3
+flop-weighted speedup ordering.
 
 Downstream-leverage tiebreaker (walk `prov_vars` DAG to prefer upstream
 causes over downstream symptoms) is **deferred** — start simpler, add
@@ -76,6 +91,19 @@ if needed.
 
 Retry regen with LLM temperature variation deferred; mechanical walk
 comes first.
+
+**Amendments (as-built):**
+
+- **FP32-family range guard (Wave-3 WI1, hard gate).** When a region's
+  `value_range_ok_for_float` is false, every `FP32_FAMILY` rung (`float`,
+  `ff`, `qf`) is pruned from the walk in *both* directions — an
+  over/underflow risk the Validator's finite random sample can miss.
+- **Whole-TU mode.** `strategy_mode="tu_only"` (the current default,
+  `agents/config.py`) replaces the region walk entirely: per integral, a
+  cheapest-sufficient **upshift** walk `(qf, dd)` and a **downshift** walk
+  `(float, ff)` driven through an injected `tu_measure_fn`
+  (`agents/strategy/tu_walk.py`) — no Patcher LLM, no region or chain walk.
+  The region path below remains the `strategy_mode="region"` behavior.
 
 ## Re-characterization policy (locked)
 
@@ -140,14 +168,18 @@ Patcher return:
 {"status": "ok" | "build_failed" | "runtime_failed", "patch": "<unified diff>" | null, "error": "..." | null}
 ```
 
-## Inputs to Strategy (proposed, not yet locked)
+## Inputs to Strategy (as wired on `PipelineState`)
 
-1. Characterization report (path to 13GB `report_100k.json`).
+1. Characterization report path (loaded whole via `json.loads` — see
+   `docs/KNOWN_LIMITATIONS.md` before pointing it at a full-scale report).
 2. Precision tolerance (scalar, default 10).
 3. Working tree (path or commit SHA).
-4. Budget knobs (max iterations, wall-clock, LLM tokens).
+4. Budget knobs (max iterations with a correctness/speedup phase split,
+   wall-clock, LLM tokens).
 5. Re-characterization trigger N (large, effectively disabled).
-6. Handles to Patcher + Validator.
+6. Handles to Patcher + Validator (`patcher_fn` / `validator_fn`).
+7. For `strategy_mode="tu_only"`: `tu_measure_fn` (required) and
+   `tu_promote_fn` (optional promotion into the working tree).
 
 **NOT inputs:** DD baseline/shim (Validator's problem), ladder vocabulary
 (Strategy's internal), ground-truth annotations.
@@ -248,7 +280,8 @@ on `strategy/<run_id>` branch + cumulative diff at end.**
   ```
 - Cumulative diff written to
   `runs/qcdloop/strategy/<run_id>/final.diff` at end of run.
-- Rejected patches: iteration log only, no commit.
+- Rejected patches: iteration log only. (The Patcher's candidate commit is
+  discarded by a branch reset — reflog-reachable, never on the branch tip.)
 - `git commit` failure = hard-fail run with `status: "internal_error"`.
   Silent recovery would corrupt the audit trail.
 - No batching / toggles / opt-outs. Git overhead is noise vs Validator
@@ -479,6 +512,10 @@ ff-to-dd                composite: revert ff, install dd  correctness
 double-to-float         plain-type-edit            speedup
 ff-to-float             composite: revert ff, then double→float  speedup
 dd-to-double            git-revert (strip dd)      speedup
+double-to-qf            whole-TU flip only         correctness   [added 2026-08, qf]
+qf-to-dd                whole-TU flip only         correctness   [added 2026-08, qf]
+qf-to-double            whole-TU flip only         speedup       [added 2026-08, qf]
+dd-to-qf                whole-TU flip only         speedup       [added 2026-08, qf]
 reformulate-kahan       llm-rewrite                correctness
 reformulate-identity    llm-rewrite (identity picked by Strategy)  correctness
 ```
@@ -487,6 +524,13 @@ reformulate-identity    llm-rewrite (identity picked by Strategy)  correctness
 table had 8 transition kinds and missed `float-to-ff` — needed for the
 single-step up-walk from a float baseline. Added.
 
+**Amendment 2026-08 (QF).** The four qf transitions above bring the
+vocabulary to **13 transition kinds + 2 reformulate kinds = 15 total**
+(`models.TRANSITION_KINDS` / `models.ALL_KINDS`). The intent also carries a
+`via` discriminator (`plain` | `regional` | `chain`, `models.VIA_*`) — a
+template-typed `-to-float` demotion routes `via="regional"` to the regional
+float integrator — and chain-scoped intents carry `chain_lines`.
+
 **Latent edge (not resolved):** `float-to-dd` is NOT in the vocabulary.
 A fully general correctness walk from float would need it; today the
 walk from a float baseline caps at `double` (walk status `exhausted`
@@ -494,7 +538,7 @@ if double still doesn't clear). Doesn't fire in the fixed-report
 workflow (correctness baselines are always `double`), so latent, not
 live. Revisit if a float-baseline correctness case ever surfaces.
 
-### Four dispatch paths (not ten)
+### Five dispatch paths (not ten)
 
 1. **Regional-integrator** — `float-to-ff`, `double-to-ff`,
    `double-to-dd`. Install a regional shim + boundary patch.
@@ -510,6 +554,11 @@ live. Revisit if a float-baseline correctness case ever surfaces.
    LLM generates a source rewrite; prompt gets region source +
    `variables` list + (for identity) the specific identity Strategy
    selected.
+5. **Chain** *(added Phase 2f)* — any kind with `via == "chain"`:
+   coordinated multi-region dd promotion (`agents/patcher/chain_promote.py`
+   — value closure, carrier widening, leaf promotion), one candidate per
+   chain. Chain-scope terminals surface as `chain_carrier_unwidenable` /
+   `chain_carrier_external` / `chain_closure_escapes`.
 
 ### P3a. Plain-type-edit implementation — LOCKED: AST-aware (libclang)
 
@@ -905,10 +954,8 @@ below that.
 
 ### Cascade localization (characterizer-side)
 
-Current `stability_reducer.py` marks cascades `non_localizable: True`
-with empty region key — tier 2 is dead code on real data. Localization
-algorithm (post-processing over the existing reduced report; no 100k
-re-run):
+Localization algorithm (implemented in `stability_reducer.py` as a
+post-processing pass over the reduced report; no re-run needed):
 
 1. Identify cascade victims per sample (final values with high
    rel_err + low per-op cond — already classified).
@@ -919,8 +966,8 @@ re-run):
 5. Emit chain-region record with union of contributing lines.
 
 ## Cascade region schema, `predicted_rel_err_if_ff`, and region-local
-variables — **IMPLEMENTED 2026-07-17** (characterizer post-processing pass;
-see HANDOFF.md). `cascade_chain` records, `predicted_rel_err_if_ff`, and
+variables — **IMPLEMENTED 2026-07-17** (characterizer post-processing
+pass). `cascade_chain` records, `predicted_rel_err_if_ff`, and
 `region_local_vars` land in `agents/shared/stability_reducer.py`; chain
 consumption + `required_by` bookkeeping (chain promotion, overlap→max
 precision, speedup floor) land in `agents/strategy/`.
@@ -928,8 +975,8 @@ precision, speedup floor) land in `agents/strategy/`.
 **Caveat on `region_local_vars`:** it is region-local *reads* (source vars
 used as direct leaf operands at the line), NOT declares/assigns. The journal
 has no LHS/output field and `track()` emits no record, so the *written*
-variable of a region is not nameable from journal data. See HANDOFF.md
-"Where journal data was insufficient".
+variable of a region is not nameable from journal data. See
+`docs/KNOWN_LIMITATIONS.md`.
 
 ### Region-local writes — Fix C (libclang source scan, LOCKED 2026-07-17)
 
@@ -998,7 +1045,7 @@ declared type is `Tracked<T>` via a small state-machine parse. Same
 corruption-safety story as the P3a keyword-token rewriter — works
 reliably for the constrained subset of C++ that appears in numerical
 kernels, doesn't try to handle full C++. Flag the deviation in
-HANDOFF.md the same way the P3a fallback was flagged.
+`docs/KNOWN_LIMITATIONS.md` the same way the P3a fallback was flagged.
 
 **Out of scope for Fix C** (revisit only if a real region hits them):
 - Anonymous intermediates (no LHS name)

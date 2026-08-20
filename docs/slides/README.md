@@ -38,8 +38,9 @@ the picture clearer than the code would.
 
 The deck calls the two phases **upshift** and **downshift**, which is the
 code's own direction axis — `LiftDirection.UPSHIFT` / `LiftDirection.DOWNSHIFT`,
-glossed against exactly these phases at `agents/strategy/agent.py:255,290` and
-`agents/strategy/tu_walk.py:29,38`. The source still names the *phases*
+glossed against exactly these phases in `agents/strategy/agent.py` (the two
+phase comments) and `agents/strategy/tu_walk.py` (the two phase bullets in the
+module docstring). The source still names the *phases*
 `INTENT_CORRECTNESS` / `INTENT_SPEEDUP`; the slides prefer the direction word
 because phase 2 is accepted on digits alone. Its queue order comes from a
 static flop weight and no wall-clock is ever measured, so "speedup" would name
@@ -65,11 +66,14 @@ The worked example ends with all five rungs occupied — float ×2 (R1, R6),
 ff ×1 (R3), double ×1 (R5), qf ×1 (R4), dd ×1 (R2). Showing the mixed-ness
 is the point of the deck.
 
-**Validation covers the whole sample space.** There is no random battery
-and no tail battery. The Validator replays *all N* characterization samples
+**Validation covers the whole sample space** — on the whole-TU measure path
+the deck depicts. In that mode there is no random battery and no tail
+battery (the region-path Validator has both; see `agents/validator/tail.py`).
+The measure provider replays *all N* characterization samples
 (seed 12345, OpenMP-parallel across cores), scores per-output-component
-precise digits against the dd oracle, and applies an absolute floor of
-tol = 7 digits plus a regression guard against the current baseline. dd
+precise digits against the dd oracle, and applies an absolute floor at the
+configured tolerance (tol = 7 in the depicted run; `StrategyConfig.tolerance`
+defaults to 10) plus a regression guard against the current baseline. dd
 remains the oracle at every rung — a qf candidate is scored against dd,
 never against itself.
 

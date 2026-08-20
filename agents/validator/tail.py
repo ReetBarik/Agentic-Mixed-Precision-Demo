@@ -4,7 +4,7 @@ The tail battery is the *adversarial* complement to the Validator's n=1000 rando
 battery: on every candidate it re-tests the specific per-integral input offsets
 that the characterization pass flagged as the hardest — worst achieved relative
 error, worst cancellation-conditioning, and magnitude extremes on the integral's
-output components.  ``FLOAT_RETRO_PROBE`` showed the finite random battery can
+output components.  A retro-probe of accepted float demotions showed the finite random battery can
 miss failure modes at untested inputs; rather than pile on preemptive gates, this
 upgrades the Validator's guarantee to test the known-adversarial points directly.
 

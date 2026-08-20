@@ -4,7 +4,8 @@
 Purpose
 -------
 The Validator's n=1000 random battery can miss failure modes at untested inputs
-(``FLOAT_RETRO_PROBE``).  This emitter records, per integral, the specific input
+(shown by a retro-probe of accepted float demotions).  This emitter records, per
+integral, the specific input
 *offsets* that stress the computation hardest so the Validator can re-test those
 exact points on every candidate (see ``agents/validator/tail.py``).
 
@@ -20,7 +21,7 @@ output vs the DD oracle).  So the honest realization of "characterize with
 tail-preservation" is to regenerate exactly the per-sample output signal the
 criteria need — run the vanilla + DD drivers over ``[0,total)`` and compare
 per component — rather than walk a journal that never held this data (and, for
-the CALIBRATION_v2 report, no longer exists on disk).  This is also far cheaper
+the 10k calibration report, no longer exists on disk).  This is also far cheaper
 than a full re-characterization: RES output is ~tens of MB, no journal.
 
 The offsets are per-integral ``mt19937(12345)`` stream indices, bit-identical

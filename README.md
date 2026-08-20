@@ -1,327 +1,322 @@
 # Agentic Mixed-Precision Demo
 
-An LLM-driven multi-agent pipeline that finds safe mixed-precision optimizations in C++ scientific computing kernels. Given one or more kernels, per-argument input ranges, a whole-application driver, and build instructions, the pipeline characterizes numerical sensitivity, picks fixes from a fixed catalog, applies them one at a time, and validates each against an FP128 reference.
+An LLM-assisted multi-agent pipeline that finds safe mixed-precision assignments
+for C++ scientific computing code. Given instrumented kernels and per-argument
+input ranges, it measures per-operation numerical sensitivity with the
+`Tracked<T>` library, reduces the telemetry into a per-code-region stability
+report, then walks a precision ladder per target — promoting unstable regions to
+extended precision and demoting stable ones to cheaper precision — validating
+every step against a double-double (DD) oracle.
 
-The `langgraph-agents` branch implements **v2** of the system: a LangGraph orchestrator coordinating six pieces — characterizer, strategy, patcher, validator, build/run (shared), and the orchestrator itself — built around a sibling `Tracked<T>` C++ library that records per-operation condition numbers and accumulated error.
+Everything in this README describes code that exists on this branch. Current
+gaps and deferred work live in [`docs/KNOWN_LIMITATIONS.md`](docs/KNOWN_LIMITATIONS.md).
 
 ---
 
-## v2 pipeline
+## The precision ladder
+
+`agents/strategy/models.py` defines the cost-ordered ladder:
+
+| rung | representation | ~digits | exponent range | mechanism |
+|---|---|---|---|---|
+| `float` | 1×FP32 | ~7 | FP32 | plain type edit, or regional LLM shim (`float_integrator`) |
+| `ff` | 2×FP32 (float-float) | ~14 | **FP32** | regional LLM shim (`ff_integrator`) or whole-TU flip |
+| `double` | 1×FP64 | ~15–16 | FP64 | baseline |
+| `qf` | 4×FP32 (quad-float) | ~29 | **FP32** | **whole-TU flip only** (no regional qf integrator) |
+| `dd` | 2×FP64 (double-double) | ~30–31 | FP64 | regional LLM shim (`dd_integrator`, `chain_integrator`) or whole-TU flip |
+
+Two ladder facts the code enforces:
+
+- `FP32_FAMILY = {float, ff, qf}` share FP32's exponent range. The
+  characterizer's `value_range_ok_for_float` flag is a **hard range guard** on
+  the whole family in both walk directions (a wider mantissa does not widen
+  range).
+- `REGION_REALIZABLE = {float, ff, double, dd}` — the region walk has no qf
+  integrator; qf is reachable only via the whole-TU precision flip
+  (`agents/patcher/tu_emit.py` + `third_party/include/kokkosMaths_qf.h`).
+
+The extended-precision types themselves (`Kokkos::Experimental::DoubleDouble` /
+`FloatFloat` / `QuadFloat` + complex containers + `ql::`-surface enrichment
+headers) are vendored in `third_party/include/` (provenance: `UPSTREAM.sha`).
+
+---
+
+## Pipeline
 
 ```mermaid
-%%{init: {'theme':'neutral', 'flowchart':{'curve':'basis'}, 'themeVariables':{'lineColor':'#888'}}}%%
 flowchart TB
-    U([User])
+    IN[/"Kernels + input ranges<br/>+ build env"/] --> CH
 
-    subgraph INPUTS[Inputs]
-        direction LR
-        K[/"Kernels + names + ranges"/]
-        D[/"Whole-app driver"/]
-        B[/"Build instructions"/]
-        F[/"Acceptance config<br/>(thresholds, metrics)"/]
-        BUD[/"Budget<br/>(time / iters / $)"/]
-    end
-
-    U --> INPUTS
-
-    subgraph ORCH["Orchestrator (LangGraph wiring + shared TypedDict state)"]
+    subgraph CH[Characterizer]
         direction TB
-
-        subgraph CHAR[Characterizer Agent]
-            direction TB
-            CH1["1. Spec builder<br/>parse signature, classify params,<br/>pick Tracked types"]
-            CH1 --> CH2["2. Driver generator (LLM)<br/>write micro-driver with<br/>sampling loop + interop shims"]
-            CH2 --> CH3["3. Build &amp; run<br/>compile, execute,<br/>collect journal.jsonl"]
-            CH3 -. compile fail .-> CH2
-            CH3 --> CH4["4. Log parser<br/>per-op + per-line rollup,<br/>flag hotspots above threshold"]
-            CH4 --> CH5["5. Symbolic overlay (LLM, optional)<br/>detect unstable idioms in source"]
-        end
-
-        CH4 --> PROF[/"Sensitivity profile<br/>(measured)"/]
-        CH5 --> HINTS[/"Symbolic hints<br/>(inferred, optional)"/]
-        PROF --> STRAT["Strategy Agent (LLM)<br/>match catalog,<br/>rank by gain/risk"]
-        HINTS --> STRAT
-        STRAT --> QUEUE[/"Strategy queue"/]
-
-        subgraph WALK["Strategy walk loop"]
-            direction TB
-            LOOP{Queue empty<br/>or budget hit?}
-            LOOP -->|No| PATCH["Patcher Agent (LLM)<br/>apply one strategy"]
-            PATCH --> VAL["Validator Agent<br/>build whole app, run,<br/>compare vs FP128"]
-            VAL -->|accept| KEEP["Keep patch<br/>update baseline"]
-            VAL -->|reject| FB["Revert<br/>structured failure feedback"]
-            KEEP --> STATE[("Baseline store<br/>checkpoints + history")]
-            STATE --> LOOP
-            FB --> LOOP
-        end
-
-        QUEUE --> WALK
-        FB -. update priors .-> STRAT
-        WALK --> OUT[/"Optimized kernel(s)<br/>+ JSON report"/]
+        C1["spec build (regex, pure Python)"] --> C2["micro-driver generation (LLM)"]
+        C2 --> C3["build + run (deterministic)"]
+        C3 -. configure/build fail .-> C2
+        C3 --> C4["journal parse -> sensitivity profile"]
+        C4 --> C5["symbolic overlay (LLM, optional,<br/>never gates)"]
     end
 
-    K --> CHAR
-    D -.-> CHAR
-    B -.-> CHAR
-    D --> VAL
-    B --> VAL
-    F --> VAL
-    F -.-> STRAT
-    BUD -.-> LOOP
+    CH --> RED["stability_reducer (shard map)<br/>+ fast_merge (reduce)"]
+    RED --> REP[/"stability report (schema v2):<br/>regions, cascade chains, signal class,<br/>predicted_rel_err_if_*, value_range_ok_for_float"/]
+    REP -. emit_tail_offsets.py .-> REP
 
-    BR[("Build/Run Agent<br/>shared service")]
-    CH3 -. micro-driver mode .-> BR
-    VAL -. whole-app mode .-> BR
+    REP --> STRAT
 
-    OUT --> Z([User])
+    subgraph STRAT["Strategy (mechanical — no LLM)"]
+        direction TB
+        S0{strategy_mode}
+        S0 -->|tu_only 'default'| TU["per-integral whole-TU walk:<br/>upshift (qf, dd), downshift (float, ff)<br/>via injected tu_measure_fn"]
+        S0 -->|region| RW["two-phase region walk:<br/>correctness queue then speedup queue,<br/>chains deduped by representative line"]
+        RW --> P["Patcher (LLM integrators +<br/>deterministic boundary/gates)"]
+        P --> V["Validator: 3 builds vs DD oracle,<br/>random battery + regression-relative<br/>tail battery"]
+        V --> RW
+    end
 
-    classDef agent fill:#e8f4f8,stroke:#2b6cb0,stroke-width:2px,color:#1a365d
-    classDef plumbing fill:#f7fafc,stroke:#718096,stroke-width:1px,stroke-dasharray:4 3,color:#2d3748
-    classDef io fill:#fef5e7,stroke:#b7791f,stroke-width:1px,color:#744210
-    classDef shared fill:#e6fffa,stroke:#2c7a7b,stroke-width:2px,color:#234e52
-    classDef actor fill:#faf5ff,stroke:#6b46c1,stroke-width:2px,color:#322659
-    class CHAR,STRAT,PATCH,VAL agent
-    class ORCH,WALK,LOOP,KEEP,FB plumbing
-    class K,D,B,F,BUD,PROF,HINTS,QUEUE,OUT io
-    class BR,STATE shared
-    class U,Z actor
+    STRAT --> OUT[/"report.json + report.md<br/>+ per-iteration log + cumulative diff"/]
 ```
 
-**Reading the diagram:**
-
-- Solid arrows = required data flow. Dotted arrows = optional / feedback / service calls.
-- Boxes tagged `(LLM)` make Anthropic API calls; everything else is deterministic Python.
-- The orchestrator and strategy-walk loop are LangGraph plumbing — no LLM, just routing and state.
-- The Characterizer emits two artifacts: the **sensitivity profile** (measured, always present) and **symbolic hints** (inferred via the optional LLM overlay). Both feed the Strategy Agent independently.
-- The **Baseline store** holds the accumulated patched source across iterations — each accepted patch updates it, the next strategy is tested on top.
-- Rejection feedback flows two ways: into the loop (so the queue advances) and back to the Strategy Agent (so subsequent rankings update their priors).
-- The Build/Run Agent is a shared service called by both the characterizer (micro-driver mode) and the validator (whole-app mode), not a pipeline stage.
-
----
-
-## Inputs
-
-The pipeline takes seven things from the user:
-
-| Input | Used by | Purpose |
-|-------|---------|---------|
-| Kernel source files | Characterizer | The C++ to instrument and analyze |
-| Kernel function names | Characterizer | Which functions inside the source to target |
-| Per-argument input ranges | Characterizer | Sampling intervals for each kernel argument |
-| Whole-app driver | Validator (primary), Characterizer (reference) | The real program that calls the kernels — used by the validator to test patches end-to-end and (lighter touch, planned) by the characterizer to mimic the real call convention |
-| Build instructions | Validator (primary), Characterizer (env extraction, planned) | cmake/script that builds the whole app — source of include paths, defs, link libs, flags |
-| Acceptance config | Validator, Strategy (ranking) | Metric (`min` / `p99` / `median` / `two-tier`), minimum digits, early-stop policy. Also informs Strategy's gain/risk ranking. |
-| Budget | Strategy walk loop | Time, iteration, and/or cost ceiling that stops the walk loop independent of queue exhaustion. Default: 50 iterations. |
+The LangGraph graph itself is deliberately thin — `agents/orchestrator.py`
+wires `characterize → strategy → END` over the shared `PipelineState`
+TypedDict (`agents/state.py`). The Patcher and Validator are **not** graph
+nodes: Strategy owns the remediation loop and drives them as injected
+callables (`patcher_fn` / `validator_fn`; for `tu_only` mode,
+`tu_measure_fn` / `tu_promote_fn`). Design of record:
+[`docs/strategy_patcher_design.md`](docs/strategy_patcher_design.md).
 
 ---
 
 ## Components
 
-### 1. Characterizer Agent
+### Characterizer (`agents/characterizer/`)
 
-Builds a per-kernel sensitivity profile by instrumenting the kernel with `Tracked<T>`, running it on randomly sampled inputs, and rolling up the per-operation telemetry. Five internal steps:
+1. **Spec build** — regex-based signature parse, parameter role
+   classification, framework detection (plain C++ / Kokkos serial).
+2. **Driver generation (LLM)** — writes a self-contained micro-driver that
+   includes the kernel, wraps inputs with `tracked::track()`, samples the
+   user-provided ranges, and flushes a JSONL journal. Conventions live in
+   `prompts/driver_gen.txt`.
+3. **Build + run** — via `agents/build_run/` (deterministic subprocess
+   wrapper). Configure/build failures feed stderr back to the generator and
+   retry up to `--max-driver-attempts`; runtime failures never retry.
+4. **Journal parse** — `log_parser.py` aggregates per-op / per-line /
+   per-variable condition numbers into `sensitivity_profile.json`.
+5. **Symbolic overlay (LLM, optional)** — flags known unstable idioms as
+   `symbolic_hints.json`; best-effort, never gates.
 
-1. **Spec builder** (pure Python) — parses the kernel signature, classifies each parameter as input / output / inout, picks Tracked instantiation types (real scalar or complex).
-2. **Driver generator** (LLM) — Claude writes a self-contained micro-driver that includes the kernel verbatim, wraps inputs with `tracked::track()`, calls the kernel in a sampling loop, and flushes a journal. Handles interop shims, opaque wraps, and inline reimplementations for non-templatable framework math.
-3. **Build & run** — calls the shared Build/Run agent in micro-driver mode. On configure or build failure, feeds the error back to the driver generator (multi-turn `tool_result`) and retries up to `--max-driver-attempts`.
-4. **Log parser** — reads the JSONL journal, aggregates per-op and per-line, flags ops above the condition-number threshold. Emits `sensitivity_profile.json` (always present) plus `interop_decisions.json` and per-attempt artifacts under `attempts/` with a `retry_log.json` summary.
-5. **Symbolic overlay** (LLM, optional, best-effort) — separate Claude call that inspects the kernel source for known unstable idioms (catastrophic cancellation, naive variance, log-sum-exp, large-magnitude sum, division by near-zero). Emits `symbolic_hints.json`. Never gates the pipeline.
+For whole-app characterization the tracked journal is reduced in-process by
+`agents/shared/stability_reducer.py` (mergeable per-region stability report,
+`schema_version: 2`: signal class, forward-cone `max_sensitivity`,
+`predicted_rel_err_if_{float,ff}`, `value_range_ok_for_float`, cascade
+chains) and merged by `agents/shared/fast_merge.py`.
+`runs/qcdloop/emit_tail_offsets.py` augments a report with per-integral
+adversarial `tail_samples` guarded by an input determinism hash.
 
-The sensitivity profile (measured) and symbolic hints (inferred, optional) are surfaced as two independent inputs to the Strategy Agent rather than a single merged artifact.
+### Strategy (`agents/strategy/`)
 
-### 2. Strategy Agent (LLM)
+Mechanical — no LLM calls. Two modes (`StrategyConfig.strategy_mode`):
 
-Reads the sensitivity profile (and any symbolic hints), matches hotspots against a fixed catalog of optimizations, ranks the matches by expected gain and risk, and emits a queue of strategy attempts. The catalog is closed-set in v1 — the agent picks from a menu, doesn't invent novel transformations.
+- **`tu_only`** (default): per integral, measure the baseline, then **upshift**
+  through `(qf, dd)` if below tolerance (cheapest-sufficient, first accept
+  wins) and **downshift** through `(float, ff)` if comfortably above,
+  gated by the FP32-family range guard and `predicted_rel_err_if_float`.
+  Measurement is injected (`tu_measure_fn`; qcdloop provider:
+  `runs/qcdloop/tu_provider.py`).
+- **`region`**: two-phase walk over ranked queues from the stability report —
+  a correctness queue (local cancellation, then cascade chains, then
+  log-near-root) walked **up** the ladder, then a speedup queue (stable
+  regions with `predicted_rel_err_if_ff` under threshold, flop-weight-ordered
+  via `ratio_multipliers.json`) walked **down**. Budget is split
+  correctness/speedup (70/30 by default, unused correctness iterations spill
+  forward). Cascade chains are grouped and walked once per representative
+  line; accepted precision distributes to all chain lines via a
+  `required_by` ledger.
 
-| Strategy | Patch shape | Risk |
+Report-mining prunes (WI1 hard range gate, WI2 pred-float telemetry, WI3
+flop-weighted ordering) are on by default; `STRATEGY_DISABLE_REPORT_PRUNES=1`
+is the single kill switch.
+
+### Patcher (`agents/patcher/`)
+
+Translates one remediation intent into one committed candidate; it runs
+builds as gates but renders no verdicts. Five dispatch paths
+(`dispatch.py`): plain type edit, revert, regional LLM shim, LLM line
+rewrite (`reformulate-kahan` / `reformulate-identity`), and chain-scoped
+promotion (`chain_promote.py`: value closure, carrier widening, leaf
+promotion via `clonable_leaf.py` + `integrator_base/shallow_wrapper.py`).
+The whole-TU precision flip lives in `precision_flip.py` / `tu_emit.py` /
+`flip_gate.py`. Gates: vanilla build + 1-sample smoke (compile / row-count /
+NaN), variant wiring, no-silent-bypass, `nm` symbol presence. Bounded LLM
+retry with backoff; deterministic failures never retry.
+
+### Validator (`agents/validator/`)
+
+Three builds on bit-identical inputs: DD ground truth (from the
+`ddfun_enabled` qcdloop fork, with `third_party/include/` as the header
+source of truth via `runner.materialize_dd_headers`), the current baseline,
+and the candidate. Scores per-sample precise digits against the DD oracle
+(`precise_digits.py`, per-sample `ref_scale` so analytic zeros don't
+penalize). Verdict = regression guard on combined random+tail minima, plus
+an absolute tolerance floor on the random battery. The **tail battery**
+re-tests the characterizer-flagged adversarial offsets, verifies the frozen
+input determinism hash (loud `DeterminismMismatch`, never a silent
+fallback), and is regression-relative by design — adversarial offsets embed
+workload physics ceilings no patch owns. `scorer.py` emits measurement-only
+`(region, rung) → delta` manifest cells for the solver.
+
+### Integrators (`agents/*_integrator/`, `agents/integrator_base/`)
+
+| package | regional (per-region LLM shim) | whole-app |
 |---|---|---|
-| Downcast (`double` → `float`) | Type swap | Low |
-| Float-float emulation (DD recovery) | Type swap | Low |
-| FMA insertion | Line rewrite | Low |
-| Algebraic rewrite (cancellation avoidance) | Line rewrite | Medium |
-| Horner's method | Line rewrite | Medium |
-| log-sum-exp rewrite | Multi-line | High |
-| Kahan / compensated summation | Multi-line | Medium |
-| Reassociation / pairwise summation | Multi-line | Medium |
+| `tracked_integrator` | — | real (LLM interop shim + libclang line-scope injector) |
+| `dd_integrator` | real | bounded stub (verifies the hand-written DD triple) |
+| `ff_integrator` | real | not implemented |
+| `float_integrator` | real (native target: no bridges/constants) | not implemented |
+| `chain_integrator` | real (dd ruleset + chain-boundary rule C9) | n/a by design |
 
-Each catalog entry declares its preconditions, patch shape, risk, and expected gain. On validator rejection, structured failure feedback (failing inputs, digits achieved vs required, per-variable error delta) flows back so later proposals are informed by what already failed.
+`integrator_base/` is the shared machinery: deterministic boundary-patch
+synthesis (promote reads / demote writes, multi-limb reconstruction incl.
+4-limb qf), the regional LLM engine with closed-include lint and
+namespace-qualified math bridges, compiler-error-driven int↔tracked
+annotation (C8), shim merging into one canonical per-family shim, and
+source-hash staleness caching.
 
-### 3. Patcher Agent (LLM)
+### Solver (`agents/solver/`) and per-integral orchestrator
 
-Applies one strategy at a time to the current kernel baseline. Three patch shapes supported:
+`agents/solver/` greedily layers measured scorer-manifest cells
+cheapest-first (`float < ff < dd`) onto an accumulated tree under a
+regression-relative gate (see **Loop semantics**). Drivers:
+`runs/qcdloop/run_solver_stage{1,2}.py`.
+`agents/per_integral_orchestrator/` runs a filter → clone → build-gate →
+pipeline pass per integral with a manifest (qcdloop wiring:
+`runs/qcdloop/run_all_integrals.py`).
 
-- Type swaps (one-line)
-- Single-line rewrites
-- Templated multi-line transformations (Kahan, log-sum-exp, etc.)
+## Loop semantics
 
-No free-form function-level rewrites in v1. The patcher does not run anything and does not judge anything — it only produces a new version of the source.
+Locked policy (cited by `agents/solver/`):
 
-### 4. Validator Agent
-
-Takes the patched source, invokes the shared Build/Run agent in **whole-app mode** (the user's real driver + build script, not a synthesized micro-driver), and compares the output against an FP128 reference. Comparison is deterministic — `scripts/compare_results.py` computes per-sample matching significant decimal digits.
-
-Acceptance metric is configurable: `min` / `p99` / `median` / `two-tier`. Default: **p99 ≥ 10 digits**. Regardless of which metric gates acceptance, the full distribution (min, p1, p50, p99, max) is reported. On failure, sends a structured failure report back to the strategy agent.
-
-### 5. Build/Run Agent (shared service)
-
-Owns compilation, framework detection, include paths, link libraries, module loads, and execution. Two modes:
-
-- **Micro-driver mode** — called by the characterizer. The agent is given a generated `.cpp` plus an instrumentation spec; it renders a `CMakeLists.txt`, configures, builds, runs, and returns a `RunResult` with an explicit `phase` field (`configure` / `build` / `run` / `ok`) and the journal path if the run succeeded.
-- **Whole-app mode** — called by the validator. The agent runs the user's real build script against the patched source tree.
-
-Today it is a deterministic subprocess wrapper. Planned: LLM-driven framework detection, smarter error recovery, automatic module loading. Sharing one agent across both call sites means a single source of truth for build environment and (when smarts land) a single prompt to maintain.
-
-### 6. Orchestrator (LangGraph wiring + shared TypedDict state)
-
-Top-level LangGraph graph. Holds the shared `PipelineState` TypedDict, routes data between agents, owns the strategy-walk loop (queue management, accept/revert bookkeeping, budget tracking, stop conditions). No LLM — predictable plumbing by design. Loop semantics:
-
-- **Sequential layering** — each accepted patch becomes the new baseline in the **Baseline store**; the next strategy is tested on top of the accumulated state. The store also holds per-iteration checkpoints so a walk can be inspected or resumed.
-- **No combining strategies in v1** — one at a time, validate, keep or revert.
-- **Re-characterization between accepted patches deferred** — characterize once at the start, walk the queue.
-- **Rejection feedback is two-way** — a structured failure report advances the loop (so the next queued strategy runs) *and* flows back to the Strategy Agent so subsequent rankings update their priors on what has already failed.
-
-Stop conditions: queue exhausted, budget hit (iteration / time / cost; default 50 iterations), or optional early-stop after K consecutive failures.
+- **Sequential layering** — each accepted patch becomes part of the new
+  baseline; the next candidate is tested on top of the accumulated state.
+- **No combining strategies** — one at a time, validate, keep or revert.
+- **Fixed report** — characterize once, walk the queues; re-characterization
+  between accepts is disabled (`recharacterize_after_n` is effectively ∞).
+- Stops: queue exhaustion, per-phase iteration caps, wall-clock / LLM-token
+  ceilings, or `diminishing_returns_k` consecutive non-accepts.
 
 ---
 
-## What's implemented vs stubbed today
+## Running
 
-Status on `langgraph-agents` as of this README:
+### Environment
 
-| Component | Status |
-|---|---|
-| Characterizer — spec builder, driver-gen, log parser, symbolic overlay, retry loop | **Implemented** |
-| Build/Run agent — micro-driver mode (deterministic subprocess wrapper) | **Implemented** |
-| Build/Run agent — whole-app mode | Not yet wired |
-| Build/Run agent — LLM-driven framework detection / env extraction | Planned (`PLAN_build_env.md` upcoming) |
-| Strategy agent | Stub (returns identity, empty queue) |
-| Patcher agent | Stub |
-| Validator agent | Stub |
-| Orchestrator | Wires characterizer end-to-end; downstream stages are pass-through |
+- Python ≥ 3.10 (3.12 used in practice): `pip install -r requirements-langgraph.txt`
+- CMake ≥ 3.18; for Kokkos-backed targets a Serial Kokkos install (default
+  `~/kokkos-install`)
+- An Anthropic-API-compatible endpoint for the LLM stages. Default
+  configuration targets a local Argo proxy
+  (`scripts/setup_argo_proxy.sh`): `ANTHROPIC_BASE_URL`
+  (default `http://127.0.0.1:8083/argoapi/`), `ANTHROPIC_AUTH_TOKEN` (or
+  `ARGO_USERNAME`), `ARGO_MODEL` (default `claudeopus47`). Direct Anthropic
+  use = override base URL + model.
+- `third_party/tracked/` is a git subtree (no submodule init); sync with
+  `git subtree pull --prefix=third_party/tracked https://github.com/ReetBarik/Tracked-Error-Propagation-Datatype-Demo.git main --squash`
 
-The characterizer's vertical slice is end-to-end functional: six calibration fixtures (cancellation, cancellation_out, naive_variance, log_sum_exp, kahan, cLn, Lnrat) run and produce sensitivity profiles that flag the expected hotspots. Historical slice-level plans live under `agents/characterizer/archive/` (see its `README.md` for what was implemented). The next-stage design for whole-app characterization (Range Discovery agent + tiered dependency/body profiling, with locked implementation contracts) is in [`PLAN_implementation.md`](PLAN_implementation.md).
-
----
-
-## Prerequisites
-
-- Python 3.12. Install deps: `pip install -r requirements-langgraph.txt`
-- Tracked library: vendored as a git subtree at `third_party/tracked/` (source: `ReetBarik/Tracked-Error-Propagation-Datatype-Demo@main`). A plain clone includes it — no submodule init required. Upstream sync: `git subtree pull --prefix=third_party/tracked https://github.com/ReetBarik/Tracked-Error-Propagation-Datatype-Demo.git main --squash`
-- CMake ≥ 3.18 on PATH
-- For Kokkos-backed kernels: a Serial-only Kokkos install. The Tracked repo ships `examples/cln_micro/build_kokkos_serial.sh` to produce one at `$HOME/kokkos-install`
-- Argo proxy running (same `run-argo.sh` from the v1 workflow); the characterizer's `driver_gen` and `symbolic_overlay` nodes hit it for Claude Opus 4.7
-
----
-
-## Running the characterizer slice
-
-Single fixture end-to-end:
+### Characterizer slice (single kernel)
 
 ```bash
 python -m agents.cli characterize \
   --kernel tests/agents/fixtures/kernels/cancellation.cpp \
   --kernel-name cancellation_check \
   --ranges-yaml tests/agents/fixtures/input_ranges/cancellation.yaml \
-  --samples 512 \
-  --max-driver-attempts 5 \
-  --out runs/cancellation
+  --out runs/out/cancellation
 ```
 
-Artifacts land in `runs/cancellation/`:
+The six calibration fixtures (`runs/{cancellation,cln,kahan,lnrat,log_sum_exp,naive_variance}/`)
+regenerate end-to-end with `scripts/regen_recall.sh`, which rebuilds each
+fixture, re-parses its journal (`agents.shared.regen_profile`), and checks
+hint recall (`agents.shared.recall_verifier` → `runs/recall_summary.json`).
 
-- `src/micro_driver.cpp` — winning (or last-tried) driver
-- `CMakeLists.txt` — rendered build script
-- `interop_decisions.json` — per-call strategy choices (shim / opaque / inline)
-- `journal.jsonl` — raw Tracked output
-- `sensitivity_profile.json` — characterizer's roll-up
-- `symbolic_hints.json` — LLM idiom detection (best-effort)
-- `attempts/` — per-retry driver source, stderr log, phase, returncode
-- `retry_log.json` — at-a-glance summary of the compile-retry sequence
-
-All calibration fixtures:
+### qcdloop strategy walk (whole app)
 
 ```bash
-for k in cancellation naive_variance log_sum_exp kahan; do
-  python -m agents.cli characterize \
-    --kernel tests/agents/fixtures/kernels/${k}.cpp \
-    --kernel-name $(python -c "print({'cancellation':'cancellation_check','naive_variance':'naive_variance','log_sum_exp':'log_sum_exp_naive','kahan':'kahan_sum'}['$k'])") \
-    --ranges-yaml tests/agents/fixtures/input_ranges/${k}.yaml \
-    --samples 512 \
-    --out runs/${k}
-done
+# characterize (chunked, sharded reduce):
+python runs/qcdloop/run_chunked.py ...
+# augment with adversarial tail offsets:
+python runs/qcdloop/emit_tail_offsets.py --report runs/qcdloop/report_10k.json
+# walk (production config wraps run_strategy_e2e.py):
+runs/qcdloop/run_strategy_10k.sh
 ```
 
-Each profile's `top_hotspots` (sorted by max condition number) should flag the predicted hotspot for that kernel.
-
-Kokkos kernel (Serial backend):
-
-```bash
-python -m agents.cli characterize \
-  --kernel tests/agents/fixtures/kernels/cln_kernel.hpp \
-  --kernel-name cLn \
-  --ranges-yaml tests/agents/fixtures/input_ranges/cln_kernel.yaml \
-  --samples 256 \
-  --kokkos-root $HOME/kokkos-install \
-  --out runs/cln
-```
-
-The characterizer detects the Kokkos framework from the source, picks per-call strategies for `Kokkos::log` / `Kokkos::abs` (interop shim, opaque wrap, or — preferred — decomposed real-valued tracked ops), and propagates provenance through the boundary.
+`runs/qcdloop/run_strategy_e2e.py` is the real strategy entry point: it
+assembles a `PipelineState` with a fixed report path plus the injected
+Patcher/Validator (region mode) or the TU provider (`--strategy-mode
+tu_only`, default) and calls `agents.strategy.agent.run` directly. Artifacts
+land under `runs/qcdloop/strategy/<run_id>/`.
 
 ### Tests
 
 ```bash
-pytest tests/agents/test_log_parser.py
-pytest tests/agents/test_driver_retry_loop.py
+pytest -m "not llm"      # offline suite
+pytest -m llm            # requires the live proxy (ANTHROPIC_AUTH_TOKEN set)
 ```
 
-Pure-unit tests today: log parser (13 cases) and the retry-loop control flow / tool_use_id threading / role classification. End-to-end and driver-gen snapshot tests are deferred — see `agents/characterizer/archive/NEXT.md` §3.
+Markers are registered in `tests/conftest.py` (`llm`, `kokkos`);
+kokkos-dependent tests self-skip when `~/kokkos-install` is absent.
 
 ---
 
 ## Repository layout
 
 ```
-.
-├── agents/                              # v2 multi-agent pipeline
-│   ├── cli.py                           # entry point: `python -m agents.cli characterize ...`
-│   ├── config.py                        # PipelineConfig + env defaults
-│   ├── orchestrator.py                  # LangGraph wiring
-│   ├── state.py                         # PipelineState TypedDict
-│   ├── build_run/                       # shared build/run service
-│   │   ├── agent.py                     # deterministic subprocess wrapper
-│   │   └── cmake_template.cmake         # micro-driver build template
-│   ├── characterizer/                   # characterizer agent
-│   │   ├── agent.py                     # 6-step pipeline + retry loop
-│   │   ├── driver_gen.py                # LLM micro-driver generation
-│   │   ├── log_parser.py                # journal.jsonl → SensitivityProfile
-│   │   ├── symbolic_overlay.py          # optional idiom detection
-│   │   ├── spec.py                      # InstrumentationSpec dataclass
-│   │   ├── profile.py                   # SensitivityProfile, OpRecord, etc.
-│   │   ├── prompts/                     # driver_gen.txt, symbolic_overlay.txt
-│   │   └── archive/                      # historical slice plans (see archive/README.md)
-│   ├── strategy/                        # stub
-│   ├── patcher/                         # stub
-│   └── validator/                       # stub
-├── tests/agents/                        # fixtures + unit tests
-├── runs/                                # committed run artifacts (intentional;
-│                                        # lets remote-cluster runs be shared
-│                                        # with assistants that don't have SSH)
-├── third_party/tracked/                 # sibling Tracked<T> library (submodule)
-├── src/                                 # example kernels (kokkosUtils.h)
-├── scripts/                             # compare_results.py, build env helpers
-├── requirements-langgraph.txt           # v2 deps
-├── PLAN_overview.md                     # high-level architecture plan
-└── PLAN_implementation.md               # active extension: whole-app characterization + locked contracts
+agents/
+├── cli.py, __main__.py                  # characterizer front door
+├── config.py                            # env defaults + PipelineConfig / StrategyConfig / StrategyBudget
+├── orchestrator.py                      # LangGraph graph: characterize -> strategy -> END
+├── state.py                             # PipelineState TypedDict
+├── build_run/                           # micro-driver build+run (deterministic)
+├── characterizer/                       # spec / driver-gen (LLM) / log parse / symbolic overlay (LLM)
+├── strategy/                            # models (ladder), ranking, walk, tu_walk, agent (the loop)
+├── patcher/                             # dispatch, edits, gates, rewrites, chain_promote, fanout,
+│                                        #   call_graph, tu_emit, precision_flip, flip_gate, shim_synth
+├── validator/                           # validate, runner (DD oracle staging), tail, scorer, precise_digits
+├── integrator_base/                     # boundary, regional LLM engine, c8, shim_merge, shallow_wrapper, llm
+├── tracked_integrator/ dd_integrator/ ff_integrator/ float_integrator/ chain_integrator/
+├── per_integral_orchestrator/           # per-integral pass: filter -> clone -> gate -> manifest
+├── shared/                              # stability_reducer, fast_merge, region_scan, bound_decomposition,
+│                                        #   constant_derive, recall_verifier, regen_profile, type_resolve
+└── solver/                              # greedy manifest layering (queue, solver, report)
+
+docs/
+├── strategy_patcher_design.md           # design of record (cited from code docstrings)
+├── KNOWN_LIMITATIONS.md                 # current gaps, verified against code
+└── slides/                              # 8-slide pipeline walkthrough (SVG)
+
+runs/                                    # fixtures, qcdloop tooling + validated reports (see runs/README.md)
+scripts/                                 # setup_argo_proxy.sh, regen_recall.sh, one_off/ generators
+src/                                     # test-pinned header fixtures (kokkosUtils.h)
+tests/                                   # offline suite; llm/kokkos-marked integration tests
+third_party/
+├── include/                             # vendored dd/ff/qf headers + ql:: enrichment (UPSTREAM.sha)
+└── tracked/                             # Tracked<T> instrumentation library (git subtree)
 ```
 
----
+## Status
 
-## Deferred to a future cut
+| component | status |
+|---|---|
+| Characterizer (spec, LLM driver-gen, retry loop, parser, overlay) | implemented |
+| Stability reducer + fast merge + tail-offset emitter | implemented |
+| Strategy (tu_only + region modes, two-phase walk, chains, prunes) | implemented |
+| Patcher (5 dispatch paths incl. chain promotion + whole-TU flip) | implemented |
+| Validator (3-build precise-digits, tail battery, scorer manifests) | implemented |
+| Solver + per-integral orchestrator | implemented |
+| Regional integrators (dd / ff / float / chain) | implemented |
+| Whole-app integrate() for ff / float; qf regional integrator | not implemented (see KNOWN_LIMITATIONS) |
+| Build/run agent | deterministic wrapper (no LLM env detection) |
 
-- Whole-app mode in the Build/Run agent and a real Validator agent
-- Whole-app driver + build script consumption by the characterizer (lighter-touch env extraction; design in `PLAN_build_env.md` upcoming)
-- Strategy combining (independence-class grouping using Tracked dataflow)
-- Re-characterization between accepted patches
-- Model-per-role assignment (cheap models for mechanical work, Opus for reasoning)
-- Free-form function-level rewrites
-- LLM-driven framework detection and module loading in Build/Run
+Validated runs and their write-ups live under `runs/qcdloop/`:
+`PIPELINE_v1.md` (last full region-walk validation, Wave-3 prunes + tail
+battery), `PHASE_2_TU_E2E_REFSCALE_2026-07-30.md` (whole-TU walk),
+`HEADER_REFRESH_2026-08-13.md` (vendored-header provenance), and
+`QF_INTEGRATION_2026-08-13.md` (the qf rung, current routing). The six
+design docs of record for the chain/leaf/carrier/flip machinery are the
+`*_DESIGN.md` files in the same directory.
