@@ -1,12 +1,9 @@
-# Local Kokkos clone (installed out-of-tree; sourced via scripts/prepare.sh)
+# Local Kokkos clone (installed out-of-tree)
 kokkos/
 
 # Build artifacts and logs (regenerated locally)
 build/
 build_logs/
-
-# Generated agent outputs (per-target, ephemeral verification artifacts)
-experiments/*/generated/
 
 # Validator run artifacts (baseline caches + persisted precise-digits arrays)
 runs/qcdloop/validator/cache/

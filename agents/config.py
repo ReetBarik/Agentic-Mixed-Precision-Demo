@@ -9,7 +9,7 @@ AUTH_TOKEN = (
     os.environ.get("ANTHROPIC_AUTH_TOKEN")
     or os.environ.get("ARGO_USERNAME", "")
 )
-# Argo model name — check available models via `run-argo.sh` if this needs updating
+# Argo model name — proxy bringup: scripts/setup_argo_proxy.sh
 DEFAULT_MODEL = os.environ.get("ARGO_MODEL", "claudeopus47")
 
 # Wave-3 report-field prunes (WI1 float range guard [hard gate], WI2 pred-float
