@@ -24,4 +24,8 @@ runs/qcdloop/per_integral_out/
 # Local virtual environments
 .venv/
 venv/
+.venv312/
 runs/qcdloop/.merged_all_21.cache.json
+
+# macOS Finder droppings
+.DS_Store
