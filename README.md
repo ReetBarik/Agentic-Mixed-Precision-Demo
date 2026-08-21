@@ -217,8 +217,15 @@ Locked policy (cited by `agents/solver/`):
   (default `http://127.0.0.1:8083/argoapi/`), `ANTHROPIC_AUTH_TOKEN` (or
   `ARGO_USERNAME`), `ARGO_MODEL` (default `claudeopus47`). Direct Anthropic
   use = override base URL + model.
-- `third_party/tracked/` is a git subtree (no submodule init); sync with
+- `third_party/tracked/` is a git subtree (no submodule init) of the
+  librarized Tracked repo; sync with
   `git subtree pull --prefix=third_party/tracked https://github.com/ReetBarik/Tracked-Error-Propagation-Datatype-Demo.git main --squash`
+  (the repo is slated to be renamed `Tracked-Error-Propagation-Datatype`;
+  GitHub redirects keep this URL working after the rename). The Python
+  analysis tools live in the subtree and are installed editable:
+  `pip install -e third_party/tracked/tools` — `agents/shared/stability_reducer.py`
+  and `agents/{integrator_base,tracked_integrator}` are thin wrappers over
+  the `tracked_tools` package with AMP policy baked in.
 
 ### Characterizer slice (single kernel)
 

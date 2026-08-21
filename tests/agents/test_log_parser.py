@@ -124,17 +124,21 @@ def test_opaque_coverage_below_threshold_no_note():
     assert profile.notes == []
 
 
-def test_provenance_union_and_per_variable():
-    """per_variable should map each variable to the max cond it appeared in."""
+def test_provenance_union_and_per_variable_retired():
+    """provenance_union reads v0.3 prov_vars (with a flat-prov fallback);
+    the legacy per_variable rollup is RETIRED (5.A.1) — always empty (the
+    reducer's variables{} map supersedes it)."""
     records = [
         {"op": "add", "loc": "f.cpp:g:1", "cond": 5.0,   "rel_err": 0.0, "prov": ["x", "y"]},
-        {"op": "sub", "loc": "f.cpp:g:2", "cond": 100.0,  "rel_err": 0.0, "prov": ["y", "z"]},
+        {"op": "sub", "loc": "f.cpp:g:2", "cond": 100.0,  "rel_err": 0.0,
+         "prov_vars": ["y", "z"], "prov_consts": ["two"]},
     ]
     path = _tmp_journal(records)
     profile = parse(path, kernel_name="k", flag_threshold=1e8)
-    assert profile.per_variable["x"] == pytest.approx(5.0)
-    assert profile.per_variable["y"] == pytest.approx(100.0)   # max across two ops
-    assert profile.per_variable["z"] == pytest.approx(100.0)
+    assert profile.per_variable == {}
+    unions = {r.location: r.provenance_union for r in profile.per_op}
+    assert unions["f.cpp:g:1"] == {"x", "y"}          # flat-prov fallback
+    assert unions["f.cpp:g:2"] == {"y", "z"}          # prov_vars, consts excluded
 
 
 def test_per_line_keeps_worst():

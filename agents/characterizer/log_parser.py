@@ -2,10 +2,17 @@
 
 Tracked writes one JSON object per line.  Expected fields per record:
   op       : str   — operation name ("add", "sub", "mul", "opaque", ...)
-  loc      : str   — "file:fn:line" source location (may be absent → "")
+  at       : str   — "file:fn:line" source location (may be absent → "")
   cond     : float — condition number for this sample
   rel_err  : float — relative forward error for this sample
-  prov     : list[str] — tracked variable names involved
+  prov_vars: list[str] — source-variable roots (v0.3+; older journals used a
+             single flat ``prov``, still accepted as a fallback)
+
+RETIRED (IMPROVEMENT_PLAN 5.A.1): the legacy ``per_variable`` rollup.  It read
+only the pre-v0.3 ``prov`` key, so on every v0.3+ journal it was silently
+empty — and the reducer's ``variables{}`` map (per-source sensitivity from the
+forward-cone pass) is the signal to consume instead.  The profile field
+remains (always ``{}``) for serialized-profile compatibility.
 """
 
 from __future__ import annotations
@@ -47,7 +54,12 @@ def parse(
         loc = _normalize_loc(loc, work_dir_resolved)
         cond = float(rec.get("cond", 0.0))
         rel_err = float(rec.get("rel_err", 0.0))
-        prov = set(rec.get("prov", rec.get("provenance", [])))
+        # v0.3 split provenance into prov_vars/prov_consts; older journals
+        # used a single flat prov.  Source roots feed provenance_union.
+        if "prov_vars" in rec:
+            prov = set(rec.get("prov_vars") or [])
+        else:
+            prov = set(rec.get("prov", rec.get("provenance", [])) or [])
 
         key = (op, loc)
         if key not in aggregated:
@@ -81,14 +93,9 @@ def parse(
         if loc not in per_line or rec.max_cond > per_line[loc].max_cond:
             per_line[loc] = rec
 
-    # per_variable rollup: variable → max cond it appeared in.
-    # Sort keys for deterministic JSON: provenance is a set, so insertion order
-    # (and thus serialized key order) is otherwise hash-randomized per process.
+    # per_variable rollup: RETIRED (5.A.1) — always empty.  The reducer's
+    # variables{} map (forward-cone per-source sensitivity) supersedes it.
     per_variable: dict[str, float] = {}
-    for rec in op_records:
-        for var in rec.provenance_union:
-            per_variable[var] = max(per_variable.get(var, 0.0), rec.max_cond)
-    per_variable = dict(sorted(per_variable.items()))
 
     total = len(op_records)
     opaque_count = sum(1 for r in op_records if r.op == "opaque")
