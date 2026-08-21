@@ -48,9 +48,11 @@ seeds `prov_consts` (recorded for audit, never reported as an origin);
 provenance role — reach for it only when a scratch scalar genuinely doesn't
 warrant a name. See [docs/PROVENANCE.md](docs/PROVENANCE.md).
 
-Each journal record (schema **v0.3**) looks like:
+The journal (schema **v1**, normative spec: [docs/SCHEMA.md](docs/SCHEMA.md))
+starts with a header record and has one record per op:
 
 ```json
+{"schema":1,"library_version":"1.0.0","keys":["op","at","id","in","val","cond","rel_err","prov_vars","prov_consts"]}
 {"op":"sub","at":"main.cpp:main:10","id":"sub@main.cpp:10#1",
  "in":["a","b"],"val":1e-12,"cond":2e12,"rel_err":2.2e-4,
  "prov_vars":["a","b"],"prov_consts":[]}
@@ -59,7 +61,8 @@ Each journal record (schema **v0.3**) looks like:
 Every value carries a stable `id`; `in` lists the **ids of the direct
 operands** verbatim, so the journal is a walkable DAG. `cond` is the local
 condition number of the op; bits lost ≈ `log2(cond)`, decimal digits lost ≈
-`log10(cond)`.
+`log10(cond)`. Saturated records carry a `cap` cause, exact-cancellation ties
+carry `exact_tie`, and NaN/±Inf encode losslessly as `"nan"`/`"inf"`/`"-inf"`.
 
 ## Provenance and attribution
 
@@ -89,6 +92,30 @@ for (int s = 0; s < N; ++s) {
 Full design rationale, the id scheme, scope semantics, the graph model, and
 migration notes from v0.2 are in [docs/PROVENANCE.md](docs/PROVENANCE.md).
 
+## Install & consume
+
+The library is header-only C++17; there are three ways to consume it.
+
+**1. Install + `find_package`:**
+
+```bash
+cmake -B build -DTRACKED_BUILD_TESTS=OFF
+cmake --install build --prefix /your/prefix
+```
+
+```cmake
+find_package(tracked 1.0 CONFIG REQUIRED)
+target_link_libraries(your_target PRIVATE tracked::tracked)
+```
+
+**2. `add_subdirectory` / FetchContent:** the test suite (and its Catch2
+network fetch) is off by default when the project is not top-level
+(`TRACKED_BUILD_TESTS`), so embedding is offline-safe. Link `tracked::tracked`.
+
+**3. Vendored headers (git subtree / copy):** add `include/` to your include
+path. `include/tracked/version.hpp` is committed (not configure-generated), so
+version macros work without CMake.
+
 ## Build & test
 
 No external dependencies beyond a C++17 compiler and CMake (Catch2 is fetched
@@ -100,22 +127,29 @@ cmake --build build -j$(nproc)
 cd build && ctest --output-on-failure
 ```
 
+CI runs the suite on ubuntu + macos (`.github/workflows/ci.yml`).
+
 ## What's included
 
 - **`include/tracked/`** — the library:
   - `tracked.hpp` — `Tracked<T>`, `track()`, `constant()`, `literal()`, `scope`,
     `opaque()`, arithmetic.
-  - `ops.hpp` — `sqrt`, `exp`, `log`, `abs`, `sin`, `cos`, `atan2` with
+  - `ops.hpp` — `sqrt`, `exp`, `log`, `abs`, `sin`, `cos`, `atan2`, `log1p`,
+    `expm1`, `hypot`, `fma` with
     per-op condition numbers.
   - `complex.hpp` — `tracked::Complex<T>`, full complex math decomposed into
     real ops so each is visible in the journal.
-  - `journal.hpp` — the JSONL journal and graph-walk helpers
+  - `journal.hpp` — the JSONL journal (schema in [docs/SCHEMA.md](docs/SCHEMA.md)),
+    incremental `flush_and_clear` for chunked drivers
+    ([docs/STREAMING.md](docs/STREAMING.md)), and graph-walk helpers
     (`tracked::journal` namespace).
 - **`tests/tracked/`** — Catch2 calibration suite: each test drives a known
   numerical pathology and asserts `Tracked<T>` surfaces it.
 - **`examples/complex_log_micro/`** — optional Kokkos-based micro-driver
   demonstrating the **opaque-barrier** pattern for kernels that call framework
   math you can't see into. Not built by the top-level CMake; see its README.
+- **`viewer/`** — (placeholder) a zero-dependency single-file HTML viewer for
+  journal runs; see its README.
 - **`docs/`** — design records (`PLAN.md`, `PLAN-v1.1.md`, `PLAN-v0.3.md`,
   `PLAN-v0.4.md`), `PROVENANCE.md` (the provenance model, incl. literals), and
   `CONDITION_NUMBERS.md` (full derivations of every per-op condition number, the
@@ -142,7 +176,10 @@ cd build && ctest --output-on-failure
   `add`/`mul`/`sqrt`/etc. A complex-op view is recovered by grouping the
   journal by source location.
 
-## License / provenance
+## License
+
+MIT — see [LICENSE](LICENSE).
 
 The condition-number and error-propagation formulas are standard first-order
-numerical-analysis results. See `docs/` for the full design rationale.
+numerical-analysis results; `docs/CONDITION_NUMBERS.md` derives each one and
+cites the literature (Higham; Trefethen & Bau; Goldberg; Smith; Kahan).
