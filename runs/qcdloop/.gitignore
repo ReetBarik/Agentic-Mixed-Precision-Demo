@@ -20,3 +20,6 @@ journal_meta.json
 shards/
 report_*.json
 report_*.json.gz
+
+# Journals kept via run_chunked.py --keep-journals (multi-GB; never staged)
+journals_*/

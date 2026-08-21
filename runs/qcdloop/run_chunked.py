@@ -37,6 +37,8 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
+import shlex
 import shutil
 import subprocess
 import sys
@@ -54,9 +56,27 @@ LINE_PATCH = SRC / "ql_tracked_lines.patch"
 DRIVER_BIN = HERE / "build" / "boxGPU_tracked"
 
 # Module prelude for driver subprocesses (matches the build chain).  reduce is
-# pure Python and needs no module env.
-MODULE_PRELUDE = ("module use /soft/modulefiles && "
-                  "module load gcc/13.3.0 cmake/3.28.3")
+# pure Python and needs no module env.  Overridable via the same env vars as
+# agents/build_run/agent.py: ``PIPELINE_MODULE_LIST`` (colon-separated;
+# setting it to the empty string disables module loading entirely, for
+# non-cluster hosts where ``module`` isn't defined) and
+# ``PIPELINE_MODULE_USE_PATH``.
+DEFAULT_CLUSTER_MODULES = ["gcc/13.3.0", "cmake/3.28.3"]
+DEFAULT_MODULE_USE_PATH = "/soft/modulefiles"
+
+
+def _module_prelude() -> str:
+    """Resolve the module prelude, honoring env overrides ("" = no prelude)."""
+    raw = os.environ.get("PIPELINE_MODULE_LIST")
+    if raw is None:
+        modules = list(DEFAULT_CLUSTER_MODULES)
+    else:
+        modules = [m for m in raw.split(":") if m]
+    if not modules:
+        return ""
+    use_path = os.environ.get("PIPELINE_MODULE_USE_PATH", DEFAULT_MODULE_USE_PATH)
+    return (f"module use {shlex.quote(use_path)} && "
+            f"module load {' '.join(shlex.quote(m) for m in modules)}")
 
 # Rough per-sample journal size (instrumented, all 21 integrals) for the disk
 # estimate printed at startup; measured ~9.8 MB/sample at 256 and 1k.
@@ -74,7 +94,9 @@ def _git(*args) -> subprocess.CompletedProcess:
 def _run(cmd: list[str], **kw) -> subprocess.CompletedProcess:
     """Run under the module env (matches the build chain)."""
     inner = " ".join(cmd)
-    return subprocess.run(["bash", "-lc", f"{MODULE_PRELUDE} && {inner}"],
+    prelude = _module_prelude()
+    script = f"{prelude} && {inner}" if prelude else inner
+    return subprocess.run(["bash", "-lc", script],
                           capture_output=True, text=True, **kw)
 
 
@@ -88,7 +110,14 @@ def prepare_tree() -> None:
 
 
 def build() -> None:
-    r = _run(["cmake", "--build", str(HERE / 'build'), "-j"])
+    build_dir = HERE / "build"
+    if not (build_dir / "CMakeCache.txt").exists():
+        r = _run(["cmake", "-S", str(HERE), "-B", str(build_dir),
+                  f"-DCMAKE_PREFIX_PATH={Path.home() / 'kokkos-install'}"])
+        if r.returncode != 0:
+            raise RuntimeError(
+                f"configure failed:\n{r.stdout[-2000:]}\n{r.stderr[-2000:]}")
+    r = _run(["cmake", "--build", str(build_dir), "-j"])
     if r.returncode != 0:
         raise RuntimeError(f"build failed:\n{r.stdout[-2000:]}\n{r.stderr[-2000:]}")
 
@@ -106,8 +135,11 @@ def _process_chunk(task: dict) -> dict:
     try:
         cmd = [str(DRIVER_BIN), "--sample-count", str(count),
                "--sample-offset", str(offset)]
+        prelude = _module_prelude()
+        inner = " ".join(cmd)
+        script = f"{prelude} && {inner}" if prelude else inner
         r = subprocess.run(
-            ["bash", "-lc", f"{MODULE_PRELUDE} && {' '.join(cmd)}"],
+            ["bash", "-lc", script],
             cwd=str(tmp), capture_output=True, text=True,
         )
         journal = tmp / "journal.jsonl"
@@ -116,6 +148,14 @@ def _process_chunk(task: dict) -> dict:
         jsize = journal.stat().st_size
         shard = sr.reduce_journal(str(journal))
         sr._write_json(shard, shard_path)
+        if task.get("keep_dir"):
+            keep = Path(task["keep_dir"])
+            keep.mkdir(parents=True, exist_ok=True)
+            shutil.move(str(journal), str(keep / f"journal-{offset:08d}.jsonl"))
+            meta = tmp / "journal_meta.json"
+            if meta.exists():
+                shutil.move(str(meta),
+                            str(keep / f"journal_meta-{offset:08d}.json"))
         return {"offset": offset, "count": count, "ok": True, "jsize": jsize}
     except Exception as exc:  # noqa: BLE001 - surface any worker failure to main
         return {"offset": offset, "ok": False, "err": repr(exc)}
@@ -132,6 +172,11 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--out", default=str(HERE / "report_100k.json"))
     ap.add_argument("--shard-dir", default=str(HERE / "shards"))
     ap.add_argument("--keep-shards", action="store_true")
+    ap.add_argument("--keep-journals", metavar="DIR", default=None,
+                    help="move each chunk's journal.jsonl and journal_meta.json "
+                         "into DIR (as journal-<offset>.jsonl / "
+                         "journal_meta-<offset>.json) instead of deleting them; "
+                         "total disk ≈ total × 10 MB/sample")
     ap.add_argument("--no-prepare", action="store_true",
                     help="assume the tree is already patched+built")
     ap.add_argument("--resume", action="store_true",
@@ -159,9 +204,12 @@ def main(argv: list[str] | None = None) -> int:
         except Exception:  # noqa: BLE001
             return False
 
+    if args.keep_journals:
+        Path(args.keep_journals).mkdir(parents=True, exist_ok=True)
     all_tasks = [
         {"offset": off, "count": min(args.chunk, args.total - off),
-         "shard_path": str(shard_dir / f"shard_{off:08d}.json")}
+         "shard_path": str(shard_dir / f"shard_{off:08d}.json"),
+         "keep_dir": args.keep_journals}
         for off in offsets
     ]
     done_shard_paths: list[str] = []
