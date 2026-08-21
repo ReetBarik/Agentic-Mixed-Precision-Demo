@@ -4,7 +4,7 @@
 > as-built behavior. Every factual claim about the current code was verified against source
 > (file:line) and survived an adversarial review pass; design proposals are marked as such.
 > Companion: the Tracked librarization plan, which lives in its own repo:
-> [Tracked-Error-Propagation-Datatype `docs/TRACKED_LIBRARY_PLAN.md`](https://github.com/ReetBarik/Tracked-Error-Propagation-Datatype-Demo/blob/main/docs/TRACKED_LIBRARY_PLAN.md).
+> [Tracked-Error-Propagation-Datatype `docs/TRACKED_LIBRARY_PLAN.md`](https://github.com/ReetBarik/Tracked-Error-Propagation-Datatype/blob/main/docs/TRACKED_LIBRARY_PLAN.md).
 
 Seven objectives, then a dependency-ordered roadmap.
 
@@ -431,5 +431,5 @@ synthesis (with an independent correctness reference), validated by a second cod
 Shadow-precision execution and the WI4/WI5 per-variable unlock slot in as long-poles.
 
 **Parallel track**: the Tracked librarization (own repo) — see
-[`docs/TRACKED_LIBRARY_PLAN.md` in Tracked-Error-Propagation-Datatype](https://github.com/ReetBarik/Tracked-Error-Propagation-Datatype-Demo/blob/main/docs/TRACKED_LIBRARY_PLAN.md).
+[`docs/TRACKED_LIBRARY_PLAN.md` in Tracked-Error-Propagation-Datatype](https://github.com/ReetBarik/Tracked-Error-Propagation-Datatype/blob/main/docs/TRACKED_LIBRARY_PLAN.md).
 Objectives 5.D and 6 land there and flow back to AMP via subtree.

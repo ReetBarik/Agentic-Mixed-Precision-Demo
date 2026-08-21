@@ -219,9 +219,9 @@ Locked policy (cited by `agents/solver/`):
   use = override base URL + model.
 - `third_party/tracked/` is a git subtree (no submodule init) of the
   librarized Tracked repo; sync with
-  `git subtree pull --prefix=third_party/tracked https://github.com/ReetBarik/Tracked-Error-Propagation-Datatype-Demo.git main --squash`
-  (the repo is slated to be renamed `Tracked-Error-Propagation-Datatype`;
-  GitHub redirects keep this URL working after the rename). The Python
+  `git subtree pull --prefix=third_party/tracked https://github.com/ReetBarik/Tracked-Error-Propagation-Datatype.git main --squash`
+  (renamed from `...-Demo` on 2026-08-20; GitHub redirects keep the old URL
+  working). The Python
   analysis tools live in the subtree and are installed editable:
   `pip install -e third_party/tracked/tools` — `agents/shared/stability_reducer.py`
   and `agents/{integrator_base,tracked_integrator}` are thin wrappers over
