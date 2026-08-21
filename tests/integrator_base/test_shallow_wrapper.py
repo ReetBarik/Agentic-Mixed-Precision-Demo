@@ -424,11 +424,14 @@ def _module_prelude() -> str:
 
 
 def _compile(cpp_path: Path, out_path: Path) -> subprocess.CompletedProcess:
+    # Kokkos installs its libraries under lib64/ on most Linux distros but
+    # lib/ on macOS — probe rather than hardcode.
+    libdir = _KOKKOS / "lib64" if (_KOKKOS / "lib64").is_dir() else _KOKKOS / "lib"
     cmd = (
         f"{_module_prelude()}"
         f"g++ -std=c++20 -w "
         f"-I{_VENDORED} -I{_KOKKOS / 'include'} "
-        f"{cpp_path} -L{_KOKKOS / 'lib64'} -lkokkoscore -lkokkoscontainers -ldl "
+        f"{cpp_path} -L{libdir} -lkokkoscore -lkokkoscontainers -ldl "
         f"-o {out_path}")
     return subprocess.run(["bash", "-lc", cmd], capture_output=True, text=True,
                           timeout=300)
