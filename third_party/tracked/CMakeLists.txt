@@ -96,12 +96,18 @@ if(TRACKED_BUILD_TESTS)
       test_literals
       test_operand_ids
       test_schema_v1
+      test_scope_constexpr_context
       test_streaming
       test_new_ops)
     add_executable(${test_name} tests/tracked/${test_name}.cpp)
     target_link_libraries(${test_name} PRIVATE tracked::tracked Catch2::Catch2WithMain)
     catch_discover_tests(${test_name})
   endforeach()
+
+  # test_scope_constexpr_context reproduces consumer headers that instrument
+  # `constexpr` functions (qcdloop's kokkosMaths.h); scope must be a literal
+  # type there, which needs C++20 (TRACKED_CONSTEXPR20 in tracked.hpp).
+  target_compile_features(test_scope_constexpr_context PRIVATE cxx_std_20)
 
   # Parity-fixture driver (not a ctest test; run manually to regenerate the
   # journals under tests/parity/fixtures/ — see gen_fixtures.cpp for the
@@ -111,4 +117,18 @@ if(TRACKED_BUILD_TESTS)
   # Repo-relative __FILE__ so the committed fixtures are machine-independent.
   target_compile_options(gen_parity_fixtures PRIVATE
     "-fmacro-prefix-map=${CMAKE_CURRENT_SOURCE_DIR}/=")
+
+  # Viewer-fixture driver (examples/viewer_kernels): regenerates the committed
+  # v1 journals under viewer/fixtures/ (see viewer/fixtures/README.md) and is
+  # the viewer's per-sample drill-down rerun.  The ctest asserts the
+  # flush_and_clear chunking byte-equality contract (docs/STREAMING.md).
+  add_executable(gen_viewer_fixtures examples/viewer_kernels/gen_viewer_fixtures.cpp)
+  target_link_libraries(gen_viewer_fixtures PRIVATE tracked::tracked)
+  target_compile_options(gen_viewer_fixtures PRIVATE
+    "-fmacro-prefix-map=${CMAKE_CURRENT_SOURCE_DIR}/=")
+  add_test(NAME viewer_chunk_byte_equality
+    COMMAND ${CMAKE_COMMAND}
+      -DDRIVER=$<TARGET_FILE:gen_viewer_fixtures>
+      -DWORK_DIR=${CMAKE_CURRENT_BINARY_DIR}/viewer_chunk_test
+      -P ${CMAKE_CURRENT_SOURCE_DIR}/examples/viewer_kernels/chunk_equality_test.cmake)
 endif()
