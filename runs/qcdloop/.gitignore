@@ -18,6 +18,7 @@ journal_meta.json
 # Chunked-runner transient shards and consolidated reports (run_chunked.py):
 # regenerated locally from the committed driver + shim + patches.
 shards/
+shards_*/
 report_*.json
 report_*.json.gz
 
