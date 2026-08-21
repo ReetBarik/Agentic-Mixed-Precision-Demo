@@ -146,16 +146,23 @@ def _process_chunk(task: dict) -> dict:
         if r.returncode != 0 or not journal.exists():
             return {"offset": offset, "ok": False, "err": (r.stderr or "")[-1500:]}
         jsize = journal.stat().st_size
-        shard = sr.reduce_journal(str(journal))
-        sr._write_json(shard, shard_path)
         if task.get("keep_dir"):
+            # Move the journal out BEFORE reducing/writing the shard: if the
+            # move fails (e.g. ENOSPC on the keep volume) the chunk is marked
+            # failed with no shard written, so --resume re-runs it — a
+            # shard-with-no-kept-journal can never be left behind.  A re-run
+            # simply overwrites a partial destination file.
             keep = Path(task["keep_dir"])
             keep.mkdir(parents=True, exist_ok=True)
-            shutil.move(str(journal), str(keep / f"journal-{offset:08d}.jsonl"))
+            dest = keep / f"journal-{offset:08d}.jsonl"
+            shutil.move(str(journal), str(dest))
+            journal = dest
             meta = tmp / "journal_meta.json"
             if meta.exists():
                 shutil.move(str(meta),
                             str(keep / f"journal_meta-{offset:08d}.json"))
+        shard = sr.reduce_journal(str(journal))
+        sr._write_json(shard, shard_path)
         return {"offset": offset, "count": count, "ok": True, "jsize": jsize}
     except Exception as exc:  # noqa: BLE001 - surface any worker failure to main
         return {"offset": offset, "ok": False, "err": repr(exc)}
@@ -218,7 +225,15 @@ def main(argv: list[str] | None = None) -> int:
         tasks = []
         for t in all_tasks:
             sp = Path(t["shard_path"])
-            if sp.is_file() and _valid_shard(sp):
+            reusable = sp.is_file() and _valid_shard(sp)
+            if reusable and args.keep_journals:
+                # With --keep-journals a chunk is only "done" if its kept
+                # journal is present too — reusing a journal-less shard would
+                # silently leave a gap in the viewer feed while the merged
+                # report claims full coverage.
+                jp = Path(args.keep_journals) / f"journal-{t['offset']:08d}.jsonl"
+                reusable = jp.is_file()
+            if reusable:
                 done_shard_paths.append(t["shard_path"])
             else:
                 tasks.append(t)

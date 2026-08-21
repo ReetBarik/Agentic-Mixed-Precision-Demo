@@ -43,6 +43,17 @@ else()
     set(QCDLOOP_PATCH_SHA "unpatched")
 endif()
 
+# The SHAs above are baked in as compile definitions at configure time, and
+# builds may skip configure when a cache exists (run_chunked.py build()) —
+# without a configure dependency an edited shim/patch would recompile against
+# the new headers while journal_meta.json still reports the OLD hashes.
+set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS
+    ${CMAKE_SOURCE_DIR}/src/ql_tracked_interop.hpp)
+if(EXISTS ${CMAKE_SOURCE_DIR}/src/ql_tracked.patch)
+    set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS
+        ${CMAKE_SOURCE_DIR}/src/ql_tracked.patch)
+endif()
+
 # tracked_version: git describe of the repo (Tracked is vendored in-tree).
 execute_process(
     COMMAND git -C ${CMAKE_SOURCE_DIR} describe --tags --always --dirty
